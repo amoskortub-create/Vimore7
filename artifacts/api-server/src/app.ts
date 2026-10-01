@@ -29,6 +29,9 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// ViMore owns /api for its Next.js routes, so keep this starter service on its
+// dedicated artifact path while preserving the original health endpoint.
 app.use("/api", router);
+app.use("/__workspace-api", router);
 
 export default app;

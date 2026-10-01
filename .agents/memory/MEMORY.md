@@ -1,0 +1,3 @@
+- [Standalone server-module checks](standalone-server-tests.md) — use Node's React server condition when testing Next server-only modules with tsx.
+- [Vercel CLI availability](vercel-cli-firewall.md) — check whether the package firewall allows the Vercel CLI before relying on `vercel dev`.
+- [Vercel Services routing](vercel-services-routing.md) — services reject Next middleware and Edge output; keep request routing in Next rewrites or service routes.

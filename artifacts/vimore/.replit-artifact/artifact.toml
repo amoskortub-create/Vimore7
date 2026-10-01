@@ -1,0 +1,25 @@
+kind = "web"
+previewPath = "/"
+title = "ViMore"
+description = "ViMore is a social and creator platform with messaging, media sharing, and real-time audio and video calls."
+version = "1.0.0"
+id = "artifacts/vimore"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23778
+
+[services.development]
+run = "pnpm --filter @workspace/vimore run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/vimore", "run", "build" ]
+
+[services.production.run]
+args = [ "pnpm", "--filter", "@workspace/vimore", "run", "start" ]
+
+[services.production.run.env]
+PORT = "23778"
+NODE_ENV = "production"

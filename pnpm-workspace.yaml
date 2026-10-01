@@ -75,6 +75,10 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
+  # @capacitor/assets currently pins the legacy Capacitor CLI 5.7.8, which
+  # pulls tar 6.2.1. Keep the asset generator installable without allowing the
+  # vulnerable tar release through the package firewall.
+  "@capacitor/cli@5.7.8>tar": 7.5.22
   # replit uses linux-x64 only, we can exclude all other platforms
   "esbuild>@esbuild/darwin-arm64": "-"
   "esbuild>@esbuild/darwin-x64": "-"

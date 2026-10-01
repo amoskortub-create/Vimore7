@@ -53,6 +53,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { aiTranslatePostAction } from "@/app/actions/ai";
+import { CallLogCard, parseCallLogText } from "./call-log-card";
 
 interface LinkPreview {
   title: string;
@@ -78,6 +79,7 @@ interface ChatBubbleProps {
   time: string;
   status?: "sent" | "delivered" | "read";
   type?: "text" | "photo" | "video" | "link" | "voice" | "tag" | "workspace" | "post";
+  isGroupCall?: boolean;
   mediaUrl?: string;
   voiceDuration?: string;
   linkData?: LinkPreview;
@@ -115,7 +117,7 @@ interface ChatBubbleProps {
 }
 
 export function ChatBubble({ 
-  id, isMe, text, time, status, type = "text", mediaUrl, voiceDuration, linkData, reactions = [], taggedUser, isViewOnce, isViewed, isDownloaded, workspaceData, postId, sharedPostData, onReact, onViewOnceOpen, onMediaOpen, onDownload, onExternalLink, onDelete, onEdit, seenByAvatars = [], replyToId, replyToText, replyToSenderName, replyToType, onReply, onScrollToReply
+  id, isMe, text, time, status, type = "text", isGroupCall = false, mediaUrl, voiceDuration, linkData, reactions = [], taggedUser, isViewOnce, isViewed, isDownloaded, workspaceData, postId, sharedPostData, onReact, onViewOnceOpen, onMediaOpen, onDownload, onExternalLink, onDelete, onEdit, seenByAvatars = [], replyToId, replyToText, replyToSenderName, replyToType, onReply, onScrollToReply
 }: ChatBubbleProps) {
   const { triggerHaptic } = useMusic();
   const { setSelectedImageUrl, setSelectedVideoUrl, settings } = usePosts();
@@ -141,7 +143,8 @@ export function ChatBubble({
     if (typeof window !== 'undefined') setBrowserLang(window.navigator.language.split('-')[0]);
   }, []);
 
-  const showTranslateButton = !isMe && type === 'text' && !!text && isTextForeignToUser(text, browserLang);
+  const callLog = parseCallLogText(text);
+  const showTranslateButton = !isMe && type === 'text' && !!text && !callLog && isTextForeignToUser(text, browserLang);
 
   const handleTranslate = async () => {
     if (translatedText) { setTranslatedText(null); return; }
@@ -361,9 +364,11 @@ export function ChatBubble({
 
       <div className={cn(
           "relative max-w-[85%] sm:max-w-[70%] shadow-md overflow-hidden",
-          isMe 
-            ? "bg-primary text-white rounded-2xl rounded-tr-none" 
-            : "bg-white dark:bg-card text-foreground rounded-2xl rounded-tl-none border border-primary/5",
+          callLog
+            ? "overflow-visible rounded-none bg-transparent shadow-none"
+            : isMe
+              ? "bg-primary text-white rounded-2xl rounded-tr-none"
+              : "bg-white dark:bg-card text-foreground rounded-2xl rounded-tl-none border border-primary/5",
           (type === "photo" || type === "video" || type === "workspace") && "p-1 pb-0",
         )}>
           {isMe && (
@@ -380,7 +385,7 @@ export function ChatBubble({
                       <CornerUpLeft className="h-3.5 w-3.5" /> Reply
                     </DropdownMenuItem>
                   )}
-                  {type === 'text' && !!text && (
+                  {type === 'text' && !!text && !callLog && (
                     <DropdownMenuItem className="gap-2" onSelect={() => { setEditText(text); setIsEditing(true); }}>
                       <Pencil className="h-3.5 w-3.5" /> Edit Message
                     </DropdownMenuItem>
@@ -393,12 +398,13 @@ export function ChatBubble({
             </div>
           )}
 
-          <div className={cn(
+          {!callLog && <div className={cn(
             "absolute top-0 w-4 h-4 z-10",
             isMe 
               ? "-right-2 bg-primary [clip-path:polygon(0_0,0_100%,100%_0)]" 
               : "-left-2 bg-white dark:bg-card [clip-path:polygon(100%_0,100%_100%,0_0)]"
           )} />
+          }
 
           <div className="flex flex-col">
 
@@ -701,7 +707,13 @@ export function ChatBubble({
               </div>
             )}
 
-            {text && !(isViewOnce && !isMe) && (
+            {callLog && (
+              <div className="p-1">
+                <CallLogCard id={id} call={callLog} isMe={isMe} isGroupCall={isGroupCall} time={time} />
+              </div>
+            )}
+
+            {text && !callLog && !(isViewOnce && !isMe) && (
               <div className="px-3 sm:px-4 py-2 sm:py-3">
                 {isEditing ? (
                   <div className="space-y-2">
@@ -754,7 +766,7 @@ export function ChatBubble({
               </div>
             )}
 
-            <div className={cn(
+            {!callLog && <div className={cn(
               "flex items-center justify-end gap-1.5 px-3 pb-2",
               isMe ? "text-white/60" : "text-muted-foreground",
               (type === "photo" || type === "video") && !text && "absolute bottom-2 right-2 px-2 py-0.5 rounded-full bg-black/40 backdrop-blur-md text-white/80",
@@ -770,7 +782,7 @@ export function ChatBubble({
                   ))}
                 </div>
               )}
-            </div>
+            </div>}
           </div>
 
           {reactions.length > 0 && (

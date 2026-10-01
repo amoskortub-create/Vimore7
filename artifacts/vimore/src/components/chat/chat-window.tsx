@@ -668,6 +668,7 @@ export function ChatWindow({ contact, onBack }: ChatWindowProps) {
                   {...msg}
                   id={msg.$id}
                   isMe={msg.sender === "me"} 
+                  isGroupCall={isCluster}
                   status={settings.showReadReceipts ? msg.status : 'sent'}
                   seenByAvatars={seenByMap[msg.$id] || []}
                   onExternalLink={handleExternalLink}

@@ -170,23 +170,31 @@ function ControlButton({ children, label, onClick, active = false }: { children:
 export function CallExperience() {
   const calls = useCall();
   const { currentUser, connections = [], allUsers = [] } = usePosts();
-  const { incomingCall, outgoingCall, activeCall, isLoading, error } = calls;
+  const { incomingCall, outgoingCall, activeCall, pendingConnection, groupCalls, isLoading, error } = calls;
   const [showInvite, setShowInvite] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [search, setSearch] = useState("");
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const ringingKey = `${incomingCall?.$id || ""}:${outgoingCall?.$id || ""}`;
+  const groupIncomingCall = groupCalls.find((call) =>
+    call.groupId &&
+    call.callee_id === currentUser?.$id &&
+    (call.status === "dialing" || call.status === "ringing"),
+  ) || null;
+  const ringingCall = incomingCall || groupIncomingCall;
+  const ringingKey = activeCall || pendingConnection
+    ? ""
+    : `${ringingCall?.$id || ""}:${outgoingCall?.$id || ""}`;
   useEffect(() => {
-    if (!incomingCall && !outgoingCall) {
+    if (!ringingKey) {
       audioRef.current?.pause();
       audioRef.current = null;
       return;
     }
-    const audio = new Audio(incomingCall ? "/sounds/incoming-ring.mp3" : "/sounds/outgoing-ring.mp3");
+    const audio = new Audio("/sounds/ringtone.wav");
     audio.loop = true;
     audioRef.current = audio;
-    if (incomingCall || outgoingCall) void audio.play().catch(() => undefined);
+    void audio.play().catch(() => undefined);
     return () => {
       audio.pause();
       audio.currentTime = 0;
@@ -253,8 +261,33 @@ export function CallExperience() {
     );
   }
 
-  if (incomingCall) {
-    const peer = incomingCall.peer;
+  if (pendingConnection) {
+    return (
+      <div className="fixed inset-0 z-[120] flex items-center justify-center bg-[#171322]/90 p-4 text-white backdrop-blur-md">
+        <section className="w-full max-w-sm rounded-[2rem] border border-white/15 bg-[#211a2c] px-8 py-10 text-center shadow-2xl">
+          <div className="mx-auto mb-6 w-fit"><AvatarBlock peer={pendingConnection.peer} /></div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/50">
+            {pendingConnection.groupId ? "Group call" : `${pendingConnection.type} call`}
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight">{pendingConnection.peer.name}</h2>
+          <p role={error ? "alert" : undefined} className={cn("mt-3 text-sm", error ? "text-rose-300" : "text-white/60")}>
+            {isLoading ? "Connecting to the call…" : error || "The call is ready. Try connecting again."}
+          </p>
+          <div className="mt-8 grid grid-cols-2 gap-3">
+            <Button className="h-12 rounded-full" disabled={isLoading} onClick={() => void calls.retryConnection()}>
+              {isLoading ? "Connecting…" : "Try again"}
+            </Button>
+            <Button variant="destructive" className="h-12 rounded-full" disabled={isLoading} onClick={() => void calls.endCall()}>
+              <PhoneOff className="mr-2 h-4 w-4" /> End call
+            </Button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  if (ringingCall) {
+    const peer = ringingCall.peer;
     return (
       <>
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-[#171322]/80 p-4 backdrop-blur-md">
@@ -262,20 +295,26 @@ export function CallExperience() {
             <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#9d7be5] via-[#e6c1ff] to-[#9d7be5]" />
             <span className="mx-auto mb-6 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-[#dfc8ff]"><PhoneIncoming className="h-5 w-5" /></span>
             <div className="mx-auto mb-5 w-fit animate-pulse"><AvatarBlock peer={peer} /></div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/50">Incoming {incomingCall.type} call</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/50">
+              Incoming {ringingCall.type} call{ringingCall.groupId ? " · Group" : ""}
+            </p>
             <h2 className="mt-2 text-3xl font-semibold tracking-tight">{peer?.name || "ViMore caller"}</h2>
-            <p className="mt-2 text-sm text-white/55">{peer?.username ? `@${peer.username}` : "Calling you on ViMore"}</p>
+            <p className="mt-2 text-sm text-white/55">
+              {ringingCall.groupId ? "Join the conversation on ViMore" : peer?.username ? `@${peer.username}` : "Calling you on ViMore"}
+            </p>
             <div className="mt-8 grid grid-cols-2 gap-3">
-              <Button className="h-12 rounded-full bg-[#ef5c59] text-white hover:bg-[#df4f4c]" onClick={() => calls.rejectCall(incomingCall)}>
+              <Button className="h-12 rounded-full bg-[#ef5c59] text-white hover:bg-[#df4f4c]" onClick={() => void calls.rejectCall(ringingCall)}>
                 <PhoneOff className="mr-2 h-4 w-4" /> Decline
               </Button>
-              <Button className="h-12 rounded-full bg-emerald-500 text-white hover:bg-emerald-600" onClick={() => calls.acceptCall(incomingCall)}>
+              <Button className="h-12 rounded-full bg-emerald-500 text-white hover:bg-emerald-600" onClick={() => void (ringingCall.groupId ? calls.joinGroupCall(ringingCall) : calls.acceptCall(ringingCall))}>
                 <Phone className="mr-2 h-4 w-4" /> Answer
               </Button>
             </div>
-            <button type="button" onClick={() => setShowQuickReplies(true)} className="mt-5 text-sm font-medium text-white/70 underline decoration-white/25 underline-offset-4 hover:text-white">
-              Reply instead
-            </button>
+            {!ringingCall.groupId && (
+              <button type="button" onClick={() => setShowQuickReplies(true)} className="mt-5 text-sm font-medium text-white/70 underline decoration-white/25 underline-offset-4 hover:text-white">
+                Reply instead
+              </button>
+            )}
             {error && <p role="alert" className="mt-4 text-xs text-rose-300">{error}</p>}
           </section>
         </div>

@@ -57,6 +57,7 @@ interface CallContextValue {
   incomingCall: CallRecord | null;
   outgoingCall: CallRecord | null;
   activeCall: ActiveCall | null;
+  pendingConnection: CallRecord | null;
   groupCalls: CallRecord[];
   isLoading: boolean;
   error: string | null;
@@ -66,6 +67,7 @@ interface CallContextValue {
   rejectCall: (call: CallRecord) => Promise<void>;
   cancelCall: (call: CallRecord) => Promise<void>;
   endCall: () => Promise<void>;
+  retryConnection: () => Promise<void>;
   joinGroupCall: (call: CallRecord) => Promise<void>;
   inviteParticipant: (peer: CallPeer) => Promise<void>;
   sendQuickReply: (text: string) => Promise<void>;
@@ -104,6 +106,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [callDocuments, setCallDocuments] = useState<Record<string, CallDocument>>({});
   const callDocumentsRef = useRef(new Map<string, CallDocument>());
   const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
+  const [pendingConnection, setPendingConnection] = useState<CallRecord | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const joiningCallIds = useRef(new Set<string>());
@@ -242,7 +245,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (!doc || !userId || !["dialing", "ringing", "accepted"].includes(doc.status)) return;
     if (activeCall?.call.channel_id === doc.channel_id || joiningCallIds.current.has(doc.$id)) return;
 
+    const supplied = value as Partial<CallRecord>;
+    const call = {
+      ...toCallRecord(doc),
+      groupId: supplied.groupId || toCallRecord(doc).groupId,
+      groupName: supplied.groupName || toCallRecord(doc).groupName,
+    };
     joiningCallIds.current.add(doc.$id);
+    setPendingConnection(call);
     setIsLoading(true);
     setError(null);
     try {
@@ -250,14 +260,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
       if (typeof result.token !== "string" || typeof result.serverUrl !== "string") {
         throw new Error("The call service returned an incomplete connection response.");
       }
-      const supplied = value as Partial<CallRecord>;
-      const call = {
-        ...toCallRecord(doc),
-        groupId: supplied.groupId || toCallRecord(doc).groupId,
-        groupName: supplied.groupName || toCallRecord(doc).groupName,
-      };
       setActiveCall({ call, peer: call.peer, token: result.token, serverUrl: result.serverUrl });
+      setPendingConnection(null);
     } catch (requestError) {
+      setPendingConnection(call);
       showError(requestError, "Could not join call");
     } finally {
       joiningCallIds.current.delete(doc.$id);
@@ -270,6 +276,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       callDocumentsRef.current.clear();
       setCallDocuments({});
       setActiveCall(null);
+      setPendingConnection(null);
       return;
     }
 
@@ -306,15 +313,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
   }, [currentUser?.$id, upsertDocument]);
 
   useEffect(() => {
-    if (!currentUser?.$id || activeCall || isLoading) return;
+    if (!currentUser?.$id || activeCall || pendingConnection || isLoading) return;
     const now = Date.now();
     const resumable = callEntries.find((call) => {
-      if (call.groupId || call.status !== "accepted" || !call.started_at) return false;
+      if (call.status !== "accepted" || !call.started_at) return false;
       const age = now - Date.parse(call.started_at);
       return Number.isFinite(age) && age >= 0 && age < 3 * 60_000;
     });
     if (resumable) void connectToCall(resumable);
-  }, [activeCall, callEntries, connectToCall, currentUser?.$id, isLoading]);
+  }, [activeCall, callEntries, connectToCall, currentUser?.$id, isLoading, pendingConnection]);
 
   useEffect(() => {
     if (!activeCall) return;
@@ -324,6 +331,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setActiveCall(null);
     }
   }, [activeCall, callDocuments]);
+
+  useEffect(() => {
+    if (!pendingConnection) return;
+    const latest = callDocuments[pendingConnection.$id];
+    if (latest && ["rejected", "missed", "ended", "busy"].includes(latest.status)) {
+      setPendingConnection(null);
+    }
+  }, [callDocuments, pendingConnection]);
 
   const startCall = useCallback(async (peer: CallPeer, type: CallType) => {
     setError(null);
@@ -381,20 +396,26 @@ export function CallProvider({ children }: { children: ReactNode }) {
       if (action === "accept" && result.call) await connectToCall(result.call);
       if (action === "end" || action === "reject" || action === "cancel") {
         if (activeCall?.call.channel_id === call.channel_id) setActiveCall(null);
+        if (pendingConnection?.channel_id === call.channel_id) setPendingConnection(null);
       }
     } catch (requestError) {
       showError(requestError, action === "accept" ? "Could not answer call" : "Call action failed");
     } finally {
       setIsLoading(false);
     }
-  }, [activeCall?.call.channel_id, apiRequest, connectToCall, showError, upsertDocument]);
+  }, [activeCall?.call.channel_id, apiRequest, connectToCall, pendingConnection?.channel_id, showError, upsertDocument]);
 
   const acceptCall = useCallback((call: CallRecord) => setCallAction("accept", call), [setCallAction]);
   const rejectCall = useCallback((call: CallRecord) => setCallAction("reject", call), [setCallAction]);
   const cancelCall = useCallback((call: CallRecord) => setCallAction("cancel", call), [setCallAction]);
   const endCall = useCallback(async () => {
-    if (activeCall) await setCallAction("end", activeCall.call);
-  }, [activeCall, setCallAction]);
+    const call = activeCall?.call || pendingConnection;
+    if (call) await setCallAction("end", call);
+  }, [activeCall, pendingConnection, setCallAction]);
+
+  const retryConnection = useCallback(async () => {
+    if (pendingConnection) await connectToCall(pendingConnection);
+  }, [connectToCall, pendingConnection]);
 
   const joinGroupCall = useCallback(async (call: CallRecord) => {
     if (!call.groupId) return;
@@ -482,6 +503,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     incomingCall,
     outgoingCall,
     activeCall,
+    pendingConnection,
     groupCalls,
     isLoading,
     error,
@@ -491,6 +513,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     rejectCall,
     cancelCall,
     endCall,
+    retryConnection,
     joinGroupCall,
     inviteParticipant,
     sendQuickReply,
@@ -498,6 +521,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     incomingCall,
     outgoingCall,
     activeCall,
+    pendingConnection,
     groupCalls,
     isLoading,
     error,
@@ -507,6 +531,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     rejectCall,
     cancelCall,
     endCall,
+    retryConnection,
     joinGroupCall,
     inviteParticipant,
     sendQuickReply,

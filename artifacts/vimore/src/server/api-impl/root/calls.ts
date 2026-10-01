@@ -8,6 +8,8 @@ import { persistCallChatLogs } from './call-chat-log';
 export const maxDuration = 30;
 
 const CALLS = 'calls';
+const MTL_ACCOUNT_ID = 'MTL_63276';
+const MTL_TOKEN_ENDPOINT = 'https://mrtc.mediatechliberia.online/api/livekit/token';
 const ACTIVE_STATUSES = new Set(['dialing', 'ringing', 'accepted']);
 const PENDING_STATUSES = new Set(['dialing', 'ringing']);
 const CALL_RING_TIMEOUT_MS = 45_000;
@@ -356,10 +358,8 @@ async function createRtcToken(body: Record<string, unknown>, userId: string) {
   const callDocId = body.callDocId;
   if (!isId(callDocId)) return jsonError('A valid call is required.', 400);
 
-  const accountId = process.env.MTL_ACCOUNT_ID;
   const accountSecret = process.env.MTL_ACCOUNT_SECRET;
-  const gatewayUrl = process.env.MTL_GATEWAY_URL;
-  if (!accountId || !accountSecret || !gatewayUrl) {
+  if (!accountSecret) {
     console.error('[calls] RTC token gateway configuration is incomplete.');
     return jsonError('The call service is not configured yet.', 503);
   }
@@ -377,30 +377,19 @@ async function createRtcToken(body: Record<string, unknown>, userId: string) {
     return jsonError('You are not allowed to join this call yet.', 403);
   }
 
-  let userName = 'ViMore user';
-  try {
-    const profile = await db.getDocument(DATABASE_ID, 'users', userId);
-    userName = profile.name || userName;
-  } catch {
-    // Account identity has already been verified; a missing profile only affects the display name.
-  }
-
   let response: Response;
   try {
-    response = await fetch(gatewayUrl, {
+    response = await fetch(MTL_TOKEN_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-MTL-Account-ID': accountId,
-        'X-MTL-Account-Secret': accountSecret,
+        'x-account-id': MTL_ACCOUNT_ID,
+        'x-account-secret': accountSecret,
       },
       body: JSON.stringify({
-        accountId,
         roomName: call.channel_id,
         participantIdentity: userId,
-        participantName: userName,
         role: 'publisher',
-        type: call.type,
       }),
       signal: AbortSignal.timeout(12_000),
       cache: 'no-store',
@@ -411,7 +400,7 @@ async function createRtcToken(body: Record<string, unknown>, userId: string) {
   }
 
   const raw = await response.json().catch(() => null);
-  if (!response.ok || !raw || typeof raw !== 'object') {
+  if (!response.ok || !raw || typeof raw !== 'object' || (raw as any).success === false) {
     console.error('[calls] RTC token gateway returned status:', response.status);
     return jsonError('The call service could not issue a connection token.', 502);
   }

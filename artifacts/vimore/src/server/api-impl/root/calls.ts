@@ -533,7 +533,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     if (action === 'reject' && (!isCallee || !['dialing', 'ringing'].includes(String(call.status)))) {
       return jsonError('This call cannot be declined.', 409);
     }
-    if (action === 'cancel' && (!isCaller || !ACTIVE_STATUSES.has(String(call.status)))) {
+    if (action === 'cancel' && (!isCaller || !PENDING_STATUSES.has(String(call.status)))) {
       return jsonError('This call can no longer be cancelled.', 409);
     }
     if (action === 'end' && !ACTIVE_STATUSES.has(String(call.status))) {
@@ -551,6 +551,11 @@ export async function PATCH(req: NextRequest): Promise<Response> {
         call: updatedCalls.find((item: any) => item.$id === call.$id) || call,
         calls: updatedCalls,
       });
+    }
+
+    if (action === 'cancel') {
+      const updated = await markCallMissed(db, call);
+      return NextResponse.json({ call: updated });
     }
 
     const now = new Date();

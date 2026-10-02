@@ -100,6 +100,31 @@ async function responseBody(response: Response) {
   return body;
 }
 
+async function requestVideoCallMedia() {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+    throw new Error("Camera access is not available in this browser. Use a supported browser to place a video call.");
+  }
+
+  let stream: MediaStream | undefined;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+  } catch (error) {
+    const name = error instanceof Error ? error.name : "";
+    if (name === "NotAllowedError" || name === "PermissionDeniedError" || name === "SecurityError") {
+      throw new Error("Allow ViMore to use your camera and microphone, then try the video call again.");
+    }
+    if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+      throw new Error("A camera and microphone are required for video calls. You can start an audio call instead.");
+    }
+    if (name === "NotReadableError" || name === "TrackStartError") {
+      throw new Error("Your camera or microphone is in use by another app. Close it and try again.");
+    }
+    throw new Error("ViMore could not access your camera and microphone. Check your browser permissions and try again.");
+  } finally {
+    stream?.getTracks().forEach((track) => track.stop());
+  }
+}
+
 export function CallProvider({ children }: { children: ReactNode }) {
   const { currentUser, connections = [], allUsers = [], clusters = [], sendChatMessage } = usePosts();
   const { toast } = useToast();
@@ -344,6 +369,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setError(null);
     setIsLoading(true);
     try {
+      if (type === "video") await requestVideoCallMedia();
       const result = await apiRequest("POST", { operation: "start", calleeId: peer.$id, type });
       upsertDocument(result.call);
     } catch (requestError) {
@@ -362,6 +388,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setError(null);
     setIsLoading(true);
     try {
+      if (type === "video") await requestVideoCallMedia();
       const result = await apiRequest("POST", {
         operation: "group",
         groupId,
@@ -391,8 +418,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setError(null);
     setIsLoading(true);
     try {
+      if (action === "accept" && call.type === "video") await requestVideoCallMedia();
       const result = await apiRequest("PATCH", { action, callDocId: call.$id });
-      if (result.call) upsertDocument(result.call);
+      const updatedCalls = Array.isArray(result.calls) ? result.calls : result.call ? [result.call] : [];
+      updatedCalls.forEach(upsertDocument);
       if (action === "accept" && result.call) await connectToCall(result.call);
       if (action === "end" || action === "reject" || action === "cancel") {
         if (activeCall?.call.channel_id === call.channel_id) setActiveCall(null);
@@ -430,6 +459,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
       await connectToCall(call);
     }
   }, [connectToCall, currentUser?.$id, setCallAction]);
+
+  const handleExternalCallAction = useCallback(async (action: "accept" | "reject", callDocId: string) => {
+    try {
+      const document = await databases.getDocument(DATABASE_ID, COL.CALLS, callDocId);
+      const call = parseCallDocument(document);
+      if (!call) throw new Error("This call is no longer available.");
+      await setCallAction(action, toCallRecord(call));
+    } catch (actionError) {
+      showError(actionError, "Could not answer call");
+    }
+  }, [setCallAction, showError, toCallRecord]);
 
   const inviteParticipant = useCallback(async (peer: CallPeer) => {
     if (!activeCall) return;
@@ -469,12 +509,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       if (data?.type !== "CALL_ACTION" || typeof data.callDocId !== "string") return;
       const action = data.action === "accept" ? "accept" : data.action === "decline" || data.action === "reject" ? "reject" : null;
       if (!action) return;
-      void apiRequest("PATCH", { action, callDocId: data.callDocId })
-        .then((result) => {
-          if (result.call) upsertDocument(result.call);
-          if (action === "accept" && result.call) void connectToCall(result.call);
-        })
-        .catch((actionError) => showError(actionError, "Could not answer call"));
+      void handleExternalCallAction(action, data.callDocId);
     };
 
     navigator.serviceWorker?.addEventListener("message", handleServiceWorkerMessage);
@@ -482,12 +517,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const action = params.get("call_action");
     const callDocId = params.get("call_doc_id");
     if (callDocId && (action === "accept" || action === "decline")) {
-      void apiRequest("PATCH", { action: action === "accept" ? "accept" : "reject", callDocId })
-        .then((result) => {
-          if (result.call) upsertDocument(result.call);
-          if (action === "accept" && result.call) void connectToCall(result.call);
-        })
-        .catch((actionError) => showError(actionError, "Could not answer call"));
+      void handleExternalCallAction(action === "accept" ? "accept" : "reject", callDocId);
       params.delete("call_action");
       params.delete("call_doc_id");
       params.delete("call_type");
@@ -497,7 +527,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
 
     return () => navigator.serviceWorker?.removeEventListener("message", handleServiceWorkerMessage);
-  }, [apiRequest, connectToCall, showError, upsertDocument]);
+  }, [handleExternalCallAction]);
 
   const value = useMemo<CallContextValue>(() => ({
     incomingCall,

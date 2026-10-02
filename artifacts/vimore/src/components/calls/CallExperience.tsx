@@ -25,7 +25,6 @@ import {
   Plus,
   Search,
   Send,
-  Video,
   VideoOff,
   X,
 } from "lucide-react";
@@ -60,6 +59,8 @@ function LiveCallControls({
   peer,
   title,
   startedAt,
+  cameraError,
+  onCameraError,
   onEnd,
   onInvite,
 }: {
@@ -67,6 +68,8 @@ function LiveCallControls({
   peer: CallPeer;
   title: string;
   startedAt?: string;
+  cameraError: string | null;
+  onCameraError: (message: string | null) => void;
   onEnd: () => void;
   onInvite: () => void;
 }) {
@@ -75,6 +78,14 @@ function LiveCallControls({
   const participants = useParticipants();
   const [elapsed, setElapsed] = useState(0);
   const startedAtMs = useRef(startedAt ? Date.parse(startedAt) || Date.now() : Date.now());
+  const toggleCamera = useCallback(async () => {
+    try {
+      await localParticipant.setCameraEnabled(!isCameraEnabled);
+      onCameraError(null);
+    } catch {
+      onCameraError("ViMore could not access your camera. Allow camera access in your browser settings, then retry.");
+    }
+  }, [isCameraEnabled, localParticipant, onCameraError]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - startedAtMs.current) / 1000)), 1000);
@@ -112,6 +123,15 @@ function LiveCallControls({
         </div>
       </header>
 
+      {type === "video" && cameraError && (
+        <div role="alert" className="relative z-20 mx-4 mt-4 flex items-center justify-between gap-4 rounded-2xl border border-amber-200/30 bg-amber-950/80 px-4 py-3 text-sm text-amber-50">
+          <span>{cameraError}</span>
+          <button type="button" onClick={() => void toggleCamera()} className="shrink-0 rounded-full bg-white/15 px-3 py-1.5 text-xs font-semibold hover:bg-white/25">
+            Retry camera
+          </button>
+        </div>
+      )}
+
       <main className="relative z-[1] flex flex-1 flex-col items-center justify-center px-6 pb-10 text-center">
         {type === "audio" || remoteTracks.length === 0 ? (
           <>
@@ -120,13 +140,16 @@ function LiveCallControls({
               <span className="absolute bottom-2 right-2 h-4 w-4 rounded-full border-[3px] border-[#292138] bg-emerald-400" />
             </div>
             <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{peer.name}</h1>
-            <p className="mt-2 text-sm text-white/60">{type === "video" ? "Waiting for a camera to turn on" : "You’re together, just talking."}</p>
+            <p className="mt-2 text-sm text-white/60">
+              {type === "video"
+                ? participants.length > 1 ? "Connected. Waiting for their camera." : "Waiting for the other person to join…"
+                : "You’re together, just talking."}
+            </p>
           </>
-        ) : (
+        ) : null}
+        {type === "video" && localTrack && (
           <div className="absolute bottom-5 right-5 z-10 h-32 w-24 overflow-hidden rounded-2xl border border-white/20 bg-black/40 shadow-xl sm:bottom-8 sm:right-8 sm:h-44 sm:w-32">
-            {localTrack
-              ? <VideoTrack trackRef={localTrack} className="h-full w-full object-cover" />
-              : <div className="flex h-full items-center justify-center"><Video className="h-5 w-5 text-white/50" /><span className="sr-only">Your camera preview</span></div>}
+            <VideoTrack trackRef={localTrack} className="h-full w-full object-cover" />
           </div>
         )}
       </main>
@@ -136,7 +159,7 @@ function LiveCallControls({
           {isMicrophoneEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
         </ControlButton>
         {type === "video" && (
-          <ControlButton label={isCameraEnabled ? "Turn camera off" : "Turn camera on"} onClick={() => localParticipant.setCameraEnabled(!isCameraEnabled)} active={!isCameraEnabled}>
+          <ControlButton label={isCameraEnabled ? "Turn camera off" : "Turn camera on"} onClick={() => void toggleCamera()} active={!isCameraEnabled}>
             {isCameraEnabled ? <Camera className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
           </ControlButton>
         )}
@@ -174,6 +197,7 @@ export function CallExperience() {
   const [showInvite, setShowInvite] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [search, setSearch] = useState("");
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const groupIncomingCall = groupCalls.find((call) =>
@@ -182,9 +206,13 @@ export function CallExperience() {
     (call.status === "dialing" || call.status === "ringing"),
   ) || null;
   const ringingCall = incomingCall || groupIncomingCall;
-  const ringingKey = activeCall || pendingConnection
-    ? ""
-    : `${ringingCall?.$id || ""}:${outgoingCall?.$id || ""}`;
+  const shouldPlayRingtone = !activeCall && !pendingConnection && Boolean(ringingCall || outgoingCall);
+  const ringingKey = shouldPlayRingtone ? `${ringingCall?.$id || ""}:${outgoingCall?.$id || ""}` : "";
+
+  useEffect(() => {
+    setCameraError(null);
+  }, [activeCall?.call.$id]);
+
   useEffect(() => {
     if (!ringingKey) {
       audioRef.current?.pause();
@@ -243,6 +271,11 @@ export function CallExperience() {
             audio
             video={activeCall.call.type === "video"}
             onDisconnected={() => undefined}
+            onMediaDeviceFailure={(_failure, kind) => {
+              if (activeCall.call.type === "video" && (!kind || kind === "videoinput")) {
+                setCameraError("ViMore could not access your camera. Allow camera access in your browser settings, then retry.");
+              }
+            }}
             className="h-full w-full"
           >
             <RoomAudioRenderer />
@@ -251,6 +284,8 @@ export function CallExperience() {
               peer={activeCall.peer}
               title={activeCall.call.groupName || activeCall.peer.name}
               startedAt={activeCall.call.started_at}
+              cameraError={cameraError}
+              onCameraError={setCameraError}
               onEnd={endActiveCall}
               onInvite={() => setShowInvite(true)}
             />

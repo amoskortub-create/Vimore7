@@ -7,16 +7,6 @@ import { cn } from "@/lib/utils";
 
 const features = [
   {
-    emoji: "📞",
-    title: "Voice & Video Calls",
-    tag: "Communication",
-    tagColor: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300",
-    accent: "from-violet-500/10 to-violet-500/5",
-    border: "border-violet-200/60 dark:border-violet-800/30",
-    description:
-      "Crystal-clear, end-to-end encrypted audio and video calls — built natively into ViMore. No third-party apps, no friction. Just tap and connect with anyone in your network instantly, from anywhere in the world.",
-  },
-  {
     emoji: "📡",
     title: "Live Streaming",
     tag: "Broadcast",
@@ -45,16 +35,6 @@ const features = [
     border: "border-pink-200/60 dark:border-pink-800/30",
     description:
       "Bring your camera to life with augmented reality filters and effects. From subtle enhancements to wildly creative overlays — express yourself in ways that words and plain photos simply can't capture.",
-  },
-  {
-    emoji: "📊",
-    title: "Creator Analytics",
-    tag: "Insights",
-    tagColor: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300",
-    accent: "from-indigo-500/10 to-indigo-500/5",
-    border: "border-indigo-200/60 dark:border-indigo-800/30",
-    description:
-      "Deep, real-time insights into every post, reel, story, and interaction. Understand your audience demographics, peak engagement windows, follower growth trends, and content performance — all visualised in a beautiful dashboard built for creators.",
   },
   {
     emoji: "🤝",

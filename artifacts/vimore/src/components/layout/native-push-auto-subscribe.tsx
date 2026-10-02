@@ -10,8 +10,7 @@ export function NativePushAutoSubscribe() {
   const router = useRouter();
 
   useEffect(() => {
-    if (!currentUser?.$id) return;
-    registerNativePush(currentUser.$id, (url) => router.push(url)).catch(
+    registerNativePush(currentUser?.$id, (url) => router.push(url)).catch(
       (error) => {
         console.warn("[native-push] setup failed", error);
       },

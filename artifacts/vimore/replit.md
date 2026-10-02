@@ -13,6 +13,9 @@ ViMore is a social networking and creator platform featuring social feeds, music
 | `AGORA_APP_CERTIFICATE` | ✅ Yes | Agora RTC token signing certificate |
 | `VAPID_PRIVATE_KEY` | ✅ Yes | Web push private key — copy from `.env.local` (never print in full) |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | ✅ Yes | Web push public key — safe to expose |
+| `FIREBASE_PROJECT_ID` | ✅ For Android push | Firebase Admin project ID (`studio-1245266398-590b7`) |
+| `FIREBASE_CLIENT_EMAIL` | ✅ For Android push | Service-account email from Firebase Admin credentials |
+| `FIREBASE_PRIVATE_KEY` | ✅ For Android push | Service-account private key; store as a deployment secret |
 | `NEXT_PUBLIC_APPWRITE_ENDPOINT` | Optional | Defaults to `https://appwrite.mediatechliberia.online/v1` |
 | `NEXT_PUBLIC_APPWRITE_PROJECT_ID` | Optional | Defaults to `vimore123` |
 | `NEXT_PUBLIC_APPWRITE_DATABASE_ID` | Optional | Defaults to `vimoreprod` |
@@ -20,6 +23,8 @@ ViMore is a social networking and creator platform featuring social feeds, music
 | `NEXT_PUBLIC_AD_NETWORK_KEY` | Optional | Ad network publisher ID — defaults to built-in key |
 
 **Note:** The AI code reads `GOOGLE_GENERATIVE_AI_API_KEY` first, then falls back to `GEMINI_API_KEY`. Use `GOOGLE_GENERATIVE_AI_API_KEY` for both Replit and Vercel.
+
+**Push delivery:** Android FCM requires the three Firebase Admin service-account variables above in the server deployment in addition to `android/app/google-services.json`. Incoming calls use the high-priority `vimore_calls` notification channel; users can manage its ringtone and vibration in Android notification settings.
 
 **Cron/maintenance routes** (`/api/cron/cleanup`, `/api/cron/expiry-alerts`): `CRON_SECRET` auth was removed per user request. These routes now require a valid logged-in session to call, and are no longer scheduled via Vercel Cron (removed from `vercel.json`). They must be triggered manually (e.g. by an authenticated admin) or wired up to a different scheduling/auth mechanism if automatic runs are needed again.
 

@@ -4,6 +4,8 @@ import android.Manifest;
 import android.content.pm.PackageManager;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.media.AudioAttributes;
+import android.media.RingtoneManager;
 import android.os.Build;
 import android.webkit.PermissionRequest;
 import android.webkit.WebSettings;
@@ -23,11 +25,9 @@ public class MainActivity extends BridgeActivity {
 		super.onCreate(savedInstanceState);
 		createNotificationChannel();
 		if (getBridge() != null) {
-			// Always validate remote app assets with the network. The APK loads
-			// vimore.cfd, so LOAD_CACHE_ELSE_NETWORK can keep an old Next bundle
-			// (including old notification/message logic) after the web app updates.
-			getBridge().getWebView().getSettings().setCacheMode(WebSettings.LOAD_DEFAULT);
+			getBridge().getWebView().getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
 			getBridge().getWebView().getSettings().setDomStorageEnabled(true);
+			getBridge().getWebView().getSettings().setMediaPlaybackRequiresUserGesture(false);
 			getBridge().getWebView().setWebChromeClient(new ViMoreWebChromeClient(getBridge()));
 		}
 		requestMediaAndLocationPermissions();
@@ -41,8 +41,25 @@ public class MainActivity extends BridgeActivity {
 				NotificationManager.IMPORTANCE_DEFAULT
 			);
 			channel.setDescription("Messages, activity, and updates from ViMore");
+			NotificationChannel callsChannel = new NotificationChannel(
+				"vimore_calls",
+				"Incoming calls",
+				NotificationManager.IMPORTANCE_HIGH
+			);
+			callsChannel.setDescription("Incoming ViMore audio and video calls");
+			callsChannel.setSound(
+				RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
+				new AudioAttributes.Builder()
+					.setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+					.setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+					.build()
+			);
+			callsChannel.enableVibration(true);
 			NotificationManager manager = getSystemService(NotificationManager.class);
-			if (manager != null) manager.createNotificationChannel(channel);
+			if (manager != null) {
+				manager.createNotificationChannel(channel);
+				manager.createNotificationChannel(callsChannel);
+			}
 		}
 	}
 

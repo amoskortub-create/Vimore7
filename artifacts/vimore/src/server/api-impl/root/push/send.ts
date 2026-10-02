@@ -20,6 +20,7 @@ const VAPID_SUBJECT =
   process.env.VAPID_SUBJECT || "mailto:amoskortub@gmail.com";
 
 let vapidConfigured = false;
+let firebaseConfigWarningLogged = false;
 function ensureVapid() {
   if (vapidConfigured) return;
   try {
@@ -37,7 +38,15 @@ function getFirebaseMessaging() {
   const projectId = process.env.FIREBASE_PROJECT_ID;
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
-  if (!projectId || !clientEmail || !privateKey) return null;
+  if (!projectId || !clientEmail || !privateKey) {
+    if (!firebaseConfigWarningLogged) {
+      console.warn(
+        "[push/send] Firebase Admin credentials are not configured; native FCM delivery is unavailable.",
+      );
+      firebaseConfigWarningLogged = true;
+    }
+    return null;
+  }
 
   const app =
     getApps()[0] ||
@@ -167,14 +176,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!subs.length) {
-      return NextResponse.json({
-        ok: true,
-        sent: 0,
-        reason: "no_subscriptions",
-      });
-    }
-
     const json = JSON.stringify({
       title: payload.title || "ViMore",
       body: payload.body || "",
@@ -256,14 +257,21 @@ export async function POST(req: NextRequest) {
             },
             data: Object.fromEntries(
               Object.entries({
+                ...payload.data,
                 url: payload.url || "/notifications",
                 tag: payload.tag || "",
               }).filter(([, value]) => Boolean(value)),
-            ),
+            ).map(([key, value]) => [
+              key,
+              typeof value === "string" ? value : JSON.stringify(value),
+            ]),
             android: {
               priority: "high",
               notification: {
-                channelId: "vimore_default",
+                channelId:
+                  payload.data?.type === "INCOMING_CALL"
+                    ? "vimore_calls"
+                    : "vimore_default",
                 icon: "ic_launcher",
               },
             },
@@ -301,6 +309,7 @@ export async function POST(req: NextRequest) {
       sent,
       failed,
       total: subs.length,
+      reason: subs.length || nativeSent ? undefined : "no_subscriptions",
       nativeSent,
       nativeFailed,
     });

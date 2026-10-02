@@ -1,7 +1,6 @@
 /**
- * Fire-and-forget helper: triggers the server to deliver a Web Push
- * to every device a user has subscribed. Safe to call from anywhere
- * in the client; it never throws.
+ * Fire-and-forget helper: triggers Web Push and native FCM delivery to the
+ * target user's registered devices.
  */
 export interface FirePushOptions {
   userId?: string;
@@ -51,5 +50,11 @@ export function firePush(opts: FirePushOptions): void {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ userIds: targets, payload }),
     keepalive: true,
-  }).catch(() => {});
+  }).then((response) => {
+    if (!response.ok) {
+      console.error(`[push] delivery request failed (${response.status})`);
+    }
+  }).catch((error: unknown) => {
+    console.error('[push] delivery request failed:', error);
+  });
 }

@@ -298,17 +298,24 @@ export function CallExperience() {
 
   if (pendingConnection) {
     return (
-      <div className="fixed inset-0 z-[120] flex items-center justify-center bg-[#171322]/90 p-4 text-white backdrop-blur-md">
-        <section className="w-full max-w-sm rounded-[2rem] border border-white/15 bg-[#211a2c] px-8 py-10 text-center shadow-2xl">
-          <div className="mx-auto mb-6 w-fit"><AvatarBlock peer={pendingConnection.peer} /></div>
+      <div className="fixed inset-0 z-[120] flex min-h-[100dvh] items-center justify-center overflow-hidden bg-[#171322] p-4 text-white">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_34%,#55416f_0%,#292138_39%,#171322_76%)]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-[#100d17]/90" />
+        <section className="relative z-10 w-full max-w-sm px-6 py-10 text-center">
+          <div className="mx-auto mb-7 w-fit animate-pulse"><AvatarBlock peer={pendingConnection.peer} /></div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/50">
             {pendingConnection.groupId ? "Group call" : `${pendingConnection.type} call`}
           </p>
           <h2 className="mt-2 text-3xl font-semibold tracking-tight">{pendingConnection.peer.name}</h2>
-          <p role={error ? "alert" : undefined} className={cn("mt-3 text-sm", error ? "text-rose-300" : "text-white/60")}>
-            {isLoading ? "Connecting to the call…" : error || "The call is ready. Try connecting again."}
+          <p role={error ? "alert" : undefined} className={cn("mt-3 text-sm", error ? "text-rose-300" : "text-white/65")}>
+            {isLoading
+              ? "Connecting to the call…"
+              : error || "Waiting for the call connection. You can retry without ending the call."}
           </p>
-          <div className="mt-8 grid grid-cols-2 gap-3">
+          {!error && isLoading && (
+            <p className="mt-2 text-sm text-white/45">The call screen will open as soon as the connection is ready.</p>
+          )}
+          <div className="mt-9 grid grid-cols-2 gap-3">
             <Button className="h-12 rounded-full" disabled={isLoading} onClick={() => void calls.retryConnection()}>
               {isLoading ? "Connecting…" : "Try again"}
             </Button>

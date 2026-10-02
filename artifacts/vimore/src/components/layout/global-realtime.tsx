@@ -31,13 +31,13 @@ function playAdminSound(type: 'withdrawal' | 'highTicket' | 'payment') {
 
 export function GlobalRealtimeListener() {
   const pathname = usePathname();
-  const onPostPage = isPostActivePage(pathname);
+  const onPostPage = pathname !== null && isPostActivePage(pathname);
   const { tier } = useNetwork();
   // On Lite networks, skip ambient post / comment streams to save bytes + battery.
   const ambientRealtimeEnabled = tier !== 'lite';
 
   const {
-    currentUser, selectedChatId, refreshAdminData,
+    currentUser, selectedChatId, refreshAdminData, appendRealtimePost,
     followingUserIds, applyPostCountUpdate, addStreamedComment, activeCommentPostId,
     addIncomingMessage, applyRemotePostEdit, refreshSocialGraph, applyReadReceipt, applyClusterMemberReceipt,
     updateConnectionPresence, connections, clusters,
@@ -229,7 +229,7 @@ export function GlobalRealtimeListener() {
 
   // ─── Post interaction counts (likes / comments / shares) ─────────────────
   useEffect(() => {
-    if (!currentUser?.$id || !onPostPage || !ambientRealtimeEnabled) return;
+    if (!currentUser?.$id || !onPostPage) return;
 
     const unsubscribe = client.subscribe(
       `databases.${DATABASE_ID}.collections.${COL.POSTS}.documents`,
@@ -243,7 +243,7 @@ export function GlobalRealtimeListener() {
         const isCreate = events.some(e => e.endsWith('.create'));
         const isUpdate = events.some(e => e.endsWith('.update'));
 
-        if (isUpdate) {
+        if (isUpdate && ambientRealtimeEnabled) {
           const update: { likes?: number; unlikes?: number; comments?: number; shares?: number } = {};
           if (typeof payload.likes_count === 'number')    update.likes    = payload.likes_count;
           if (typeof payload.unlikes_count === 'number')  update.unlikes  = payload.unlikes_count;
@@ -265,6 +265,7 @@ export function GlobalRealtimeListener() {
             if (followingUserIdsRef.current.has(authorId)) {
               incrementNewPosts();
               incrementPulse('HOME');
+              appendRealtimePost(payload).catch(() => {});
             }
           }
           // AI moderation — fire-and-forget, no await, never blocks the UI
@@ -287,7 +288,7 @@ export function GlobalRealtimeListener() {
     );
 
     return () => { unsubscribe(); };
-  }, [currentUser?.$id, onPostPage, ambientRealtimeEnabled, applyPostCountUpdate, applyRemotePostEdit, incrementNewPosts, incrementPulse]);
+  }, [currentUser?.$id, onPostPage, ambientRealtimeEnabled, appendRealtimePost, applyPostCountUpdate, applyRemotePostEdit, incrementNewPosts, incrementPulse]);
 
   // ─── Real-time comment streaming ─────────────────────────────────────────
   useEffect(() => {

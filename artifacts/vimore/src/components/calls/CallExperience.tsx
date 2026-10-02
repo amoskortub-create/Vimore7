@@ -273,7 +273,7 @@ export function CallExperience() {
             onDisconnected={() => undefined}
             onMediaDeviceFailure={(_failure, kind) => {
               if (activeCall.call.type === "video" && (!kind || kind === "videoinput")) {
-                setCameraError("ViMore could not access your camera. Allow camera access in your browser settings, then retry.");
+                setCameraError("ViMore can’t access your camera. Allow Camera for this site in your browser and device settings, close other apps using it, then tap Retry camera.");
               }
             }}
             className="h-full w-full"

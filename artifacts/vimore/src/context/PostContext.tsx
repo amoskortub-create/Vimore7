@@ -137,6 +137,7 @@ export interface Post {
   isLocked?: boolean;
   unlockPrice?: number;
   isBoosted?: boolean;
+  isFeedAppend?: boolean;
   boostTargetViews?: number;
   boostCurrentViews?: number;
   boostExpiry?: number;
@@ -226,6 +227,7 @@ interface PostContextType {
   hasMoreFeed: boolean;
   isFeedLoading: boolean;
   loadMoreFeed: () => Promise<void>;
+  appendRealtimePost: (document: any) => Promise<void>;
   activeComments: PostComment[];
   isLoading: boolean;
   initError: string | null;
@@ -599,6 +601,8 @@ function getChatMessagePreview(message: Partial<ChatMessage> & { type?: string }
   return '';
 }
 
+const FEED_PAGE_SIZE = 30;
+
 export function PostProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
   const router = useRouter();
@@ -611,6 +615,8 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const feedPhaseRef = useRef<'connections' | 'global'>('connections');
   const feedConnCursorRef = useRef<string | null>(null);
   const feedGlobalCursorRef = useRef<string | null>(null);
+  const feedHasLoadedRef = useRef(false);
+  const pendingRealtimePostsRef = useRef(new Map<string, Post>());
   const [activeComments, setActiveComments] = useState<PostComment[]>([]);
   const [isLoading, setIsLoadingState] = useState(true);
   const [initError] = useState<string | null>(null);
@@ -710,15 +716,15 @@ export function PostProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadFeed = useCallback(async () => {
+    const PAGE = FEED_PAGE_SIZE;
+    feedHasLoadedRef.current = false;
     feedPhaseRef.current = 'connections';
     feedConnCursorRef.current = null;
     feedGlobalCursorRef.current = null;
     feedCursorRef.current = null;
     setHasMoreFeed(true);
     try {
-      const PAGE = 15;
       const connIds = [...followingUserIdsRef.current].slice(0, 100);
-
       let connDocs: any[] = [];
 
       // Phase 1: fetch connection posts first
@@ -747,10 +753,20 @@ export function PostProvider({ children }: { children: ReactNode }) {
             Query.orderDesc('$createdAt'),
             Query.limit(PAGE),
           ]);
-          const existingIds = new Set(connDocs.map((d: any) => d.$id));
-          globalDocs = r.documents.filter((d: any) => !existingIds.has(d.$id));
-          if (r.documents.length > 0) feedGlobalCursorRef.current = r.documents[r.documents.length - 1].$id;
-          setHasMoreFeed(r.documents.length === PAGE);
+          const existingIds = new Set(connDocs.map((doc: any) => doc.$id));
+          let lastScannedIndex = -1;
+          for (let index = 0; index < r.documents.length && connDocs.length + globalDocs.length < PAGE; index++) {
+            const doc = r.documents[index];
+            lastScannedIndex = index;
+            if (!existingIds.has(doc.$id)) {
+              existingIds.add(doc.$id);
+              globalDocs.push(doc);
+            }
+          }
+          if (lastScannedIndex >= 0) {
+            feedGlobalCursorRef.current = r.documents[lastScannedIndex].$id;
+          }
+          setHasMoreFeed(r.documents.length === PAGE || lastScannedIndex < r.documents.length - 1);
         } catch {
           setHasMoreFeed(false);
         }
@@ -759,12 +775,33 @@ export function PostProvider({ children }: { children: ReactNode }) {
       }
 
       const mapped = await withAuthors([...connDocs, ...globalDocs]);
-      setPostsState(mapped);
-      offlineCache.savePosts(mapped);
+      const loadedIds = new Set(mapped.map(post => post.$id));
+      const nextPosts = [...mapped];
+      for (const post of pendingRealtimePostsRef.current.values()) {
+        if (!loadedIds.has(post.$id)) {
+          loadedIds.add(post.$id);
+          nextPosts.push(post);
+        }
+      }
+      pendingRealtimePostsRef.current.clear();
+      feedHasLoadedRef.current = true;
+      setPostsState(nextPosts);
+      offlineCache.savePosts(nextPosts);
     } catch (err) {
       logAppwriteError('loadFeed', err);
       const cachedPosts = offlineCache.getPosts() as any[];
-      if (cachedPosts.length > 0) setPostsState(cachedPosts);
+      const loadedIds = new Set(cachedPosts.map((post: any) => post.$id));
+      const nextPosts = [...cachedPosts];
+      for (const post of pendingRealtimePostsRef.current.values()) {
+        if (!loadedIds.has(post.$id)) {
+          loadedIds.add(post.$id);
+          nextPosts.push(post);
+        }
+      }
+      pendingRealtimePostsRef.current.clear();
+      if (nextPosts.length > 0) setPostsState(nextPosts);
+    } finally {
+      feedHasLoadedRef.current = true;
     }
   }, [withAuthors]);
 
@@ -772,7 +809,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
     if (isFeedLoading) return;
     setIsFeedLoading(true);
     try {
-      const PAGE = 15;
+      const PAGE = FEED_PAGE_SIZE;
       const connIds = [...followingUserIdsRef.current].slice(0, 100);
 
       if (feedPhaseRef.current === 'connections' && connIds.length > 0 && feedConnCursorRef.current) {
@@ -788,7 +825,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
           feedPhaseRef.current = 'global';
           setHasMoreFeed(true); // global phase still has content
         }
-        const mapped = await withAuthors(r.documents);
+        const mapped = (await withAuthors(r.documents)).map(post => ({ ...post, isFeedAppend: true }));
         setPostsState(prev => {
           const existingIds = new Set(prev.map(p => p.$id));
           return [...prev, ...mapped.filter(p => !existingIds.has(p.$id))];
@@ -800,7 +837,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
         const r = await databases.listDocuments(DATABASE_ID, COL.POSTS, queries);
         if (r.documents.length > 0) feedGlobalCursorRef.current = r.documents[r.documents.length - 1].$id;
         setHasMoreFeed(r.documents.length === PAGE);
-        const mapped = await withAuthors(r.documents);
+        const mapped = (await withAuthors(r.documents)).map(post => ({ ...post, isFeedAppend: true }));
         setPostsState(prev => {
           const existingIds = new Set(prev.map(p => p.$id));
           return [...prev, ...mapped.filter(p => !existingIds.has(p.$id))];
@@ -812,6 +849,26 @@ export function PostProvider({ children }: { children: ReactNode }) {
       setIsFeedLoading(false);
     }
   }, [isFeedLoading, withAuthors]);
+
+  const appendRealtimePost = useCallback(async (document: any) => {
+    if (!document?.$id || typeof document.user_id !== 'string') return;
+
+    const [mappedPost] = await withAuthors([document]);
+    if (!mappedPost) return;
+    const post = { ...mappedPost, isFeedAppend: true };
+
+    if (!feedHasLoadedRef.current) {
+      pendingRealtimePostsRef.current.set(post.$id, post);
+      return;
+    }
+
+    setPostsState(previous => {
+      if (previous.some(existing => existing.$id === post.$id)) return previous;
+      const next = [...previous, post];
+      offlineCache.savePosts(next);
+      return next;
+    });
+  }, [withAuthors]);
 
   const loadSocialGraph = useCallback(async (userId: string) => {
     try {
@@ -4046,7 +4103,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const clearStreamedComments = useCallback(() => setStreamedComments([]), []);
 
   const value: PostContextType = {
-    currentUser, isAuthenticated: !!currentUser, posts, hasMoreFeed, isFeedLoading, loadMoreFeed, activeComments, isLoading, initError, isOffline,
+    currentUser, isAuthenticated: !!currentUser, posts, hasMoreFeed, isFeedLoading, loadMoreFeed, appendRealtimePost, activeComments, isLoading, initError, isOffline,
     likedPostIds, unlikedPostIds, savedPostIds, unlockedPostIds, seenPostIds, viewedPostIds,
     followingUsernames, followingUserIds, followerUsernames, friendUsernames, sentRequestUsernames,
     receivedRequestUsernames, acceptedStrangerUsernames,

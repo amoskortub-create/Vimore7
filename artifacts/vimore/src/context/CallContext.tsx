@@ -102,7 +102,10 @@ async function responseBody(response: Response) {
 
 async function requestVideoCallMedia() {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-    throw new Error("Camera access is not available in this browser. Use a supported browser to place a video call.");
+    const secureContext = typeof window !== "undefined" && window.isSecureContext;
+    throw new Error(secureContext
+      ? "This browser does not support camera access. Update your browser or use a supported browser to place a video call."
+      : "Camera and microphone access requires a secure HTTPS connection. Open ViMore over HTTPS, then allow camera and microphone access.");
   }
 
   let stream: MediaStream | undefined;
@@ -110,16 +113,25 @@ async function requestVideoCallMedia() {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
   } catch (error) {
     const name = error instanceof Error ? error.name : "";
-    if (name === "NotAllowedError" || name === "PermissionDeniedError" || name === "SecurityError") {
-      throw new Error("Allow ViMore to use your camera and microphone, then try the video call again.");
+    if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+      throw new Error("Camera or microphone access was blocked. Allow both when your browser asks. If you previously blocked access, change ViMore’s site permissions to Allow and try again.");
+    }
+    if (name === "SecurityError") {
+      throw new Error("Your browser is blocking camera access for this page. Open ViMore over HTTPS and enable camera and microphone permissions in your browser settings.");
     }
     if (name === "NotFoundError" || name === "DevicesNotFoundError") {
-      throw new Error("A camera and microphone are required for video calls. You can start an audio call instead.");
+      throw new Error("No camera or microphone was found. Connect or enable both devices, or start an audio call instead.");
     }
     if (name === "NotReadableError" || name === "TrackStartError") {
-      throw new Error("Your camera or microphone is in use by another app. Close it and try again.");
+      throw new Error("Your camera or microphone is busy or in use by another app or browser tab. Close anything using it and try the video call again.");
     }
-    throw new Error("ViMore could not access your camera and microphone. Check your browser permissions and try again.");
+    if (name === "OverconstrainedError") {
+      throw new Error("Your camera does not support the required video settings. Try another camera or device.");
+    }
+    if (name === "AbortError") {
+      throw new Error("Your browser could not start the camera or microphone. Check the device connection and try again.");
+    }
+    throw new Error("ViMore could not access your camera and microphone. Check browser and device permissions, then try the video call again.");
   } finally {
     stream?.getTracks().forEach((track) => track.stop());
   }

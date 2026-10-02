@@ -16,7 +16,7 @@ import { usePosts } from "@/context/PostContext";
 import { useMusic } from "@/context/MusicContext";
 import { useTranslation } from "@/context/LanguageContext";
 import { cn } from "@/lib/utils";
-import { Rocket, Loader2, Mail, ChevronUp, WifiOff, CheckCircle2, Zap, Play, Music2, Sparkles, Store } from "lucide-react";
+import { Rocket, Loader2, Mail, ChevronDown, WifiOff, CheckCircle2, Zap, Play, Music2, Sparkles, Store } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { account } from "@/lib/appwrite";
 import { Button } from "@/components/ui/button";
@@ -246,7 +246,7 @@ function EmailVerificationGate({ email }: { email?: string }) {
 }
 
 const FEED_CACHE_KEY = 'vimore_feed_cache_v1';
-const MAX_CACHED_POSTS = 15;
+const MAX_CACHED_POSTS = 30;
 
 export default function Home() {
   const router = useRouter();
@@ -266,10 +266,30 @@ export default function Home() {
 
   const loadTriggerRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
-  const feedTopRef = useRef<HTMLDivElement | null>(null);
   const weights = useRef<Record<string, number>>({});
   const sessionSeen = useRef<Set<string>>(new Set());
   const isLoadingMoreRef = useRef(false);
+  const feedInsertionPositionsRef = useRef<{
+    userId: string;
+    storePos: number;
+    suggestPos: number;
+    musicPos: number;
+  } | null>(null);
+  const feedRelationsRef = useRef<{
+    userId: string;
+    following: Set<string>;
+    friends: Set<string>;
+  }>({ userId: '', following: new Set(), friends: new Set() });
+
+  // Keep the current page's relationship ranking stable while a friend request updates
+  // shared social state; newly fetched feed data will use the latest snapshot after reload.
+  if (!isLoading && currentUser && feedRelationsRef.current.userId !== currentUser.$id) {
+    feedRelationsRef.current = {
+      userId: currentUser.$id,
+      following: new Set(followingUsernames),
+      friends: new Set(friendUsernames),
+    };
+  }
 
   const isPlayerActive = currentTrack && !isExpanded;
 
@@ -305,19 +325,20 @@ export default function Home() {
   }, [posts, isOffline]);
 
   const shuffledBoostedRegular = useMemo(() => {
-    const boosted = posts.filter(p => p.isBoosted && p.type !== 'reel');
+    const boosted = posts.filter(p => p.isBoosted && p.type !== 'reel' && !p.isFeedAppend);
     return [...boosted].sort(() => Math.random() - 0.5);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [posts.length]);
 
   const shuffledBoostedReels = useMemo(() => {
-    const boosted = posts.filter(p => p.isBoosted && p.type === 'reel');
+    const boosted = posts.filter(p => p.isBoosted && p.type === 'reel' && !p.isFeedAppend);
     return [...boosted].sort(() => Math.random() - 0.5);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [posts.length]);
 
   const organicSorted = useMemo(() => {
-    const regular = posts.filter(p => !p.isBoosted);
+    const regular = posts.filter(p => !p.isBoosted && !p.isFeedAppend);
+    const appendedPosts = posts.filter(p => p.isFeedAppend);
     regular.forEach(p => { if (!(p.$id in weights.current)) weights.current[p.$id] = Math.random(); });
 
     const freshPosts = regular.filter(p => p.time === 'Just now');
@@ -328,7 +349,7 @@ export default function Home() {
     // Unseen posts from users the current user follows OR is friends with
     const followingFriendUnseen = regular.filter(p =>
       !freshIds.has(p.$id) &&
-      (followingUsernames.has(p.user.username) || friendUsernames.has(p.user.username) || p.user.username === currentUser?.username) &&
+      (feedRelationsRef.current.following.has(p.user.username) || feedRelationsRef.current.friends.has(p.user.username) || p.user.username === currentUser?.username) &&
       !sessionSeen.current.has(p.$id)
     );
     const followingFriendIds = new Set(followingFriendUnseen.map(p => p.$id));
@@ -346,8 +367,8 @@ export default function Home() {
       sessionSeen.current.has(p.$id)
     );
 
-    return [...freshPosts, ...stableSort(followingFriendUnseen), ...stableSort(publicUnseen), ...stableSort(seenNodes)];
-  }, [posts, followingUsernames, friendUsernames, currentUser]);
+    return [...freshPosts, ...stableSort(followingFriendUnseen), ...stableSort(publicUnseen), ...stableSort(seenNodes), ...appendedPosts];
+  }, [posts, currentUser?.$id, currentUser?.username, isLoading]);
 
   const shuffledFeedCampaigns = useMemo(() => {
     const active = campaigns.filter((c: any) => c.is_active && c.placement === 'feed');
@@ -368,12 +389,19 @@ export default function Home() {
     let musicStripInserted = false;
     let storeStripInserted = false;
 
-    // Pre-pick random insertion positions for suggestion cards so they feel natural
-    const totalLen = Math.max(organicSorted.length, 9);
-    const third = Math.floor(totalLen / 3);
-    const storePos = 3 + Math.floor(Math.random() * Math.max(1, third - 3));
-    const suggestPos = third + Math.floor(Math.random() * Math.max(1, third));
-    const musicPos = third * 2 + Math.floor(Math.random() * Math.max(1, third));
+    // Keep insertions in fixed positions so feed updates do not move existing cards.
+    const userId = currentUser?.$id || '';
+    if (!feedInsertionPositionsRef.current || feedInsertionPositionsRef.current.userId !== userId) {
+      const totalLen = Math.max(organicSorted.length, 30);
+      const third = Math.floor(totalLen / 3);
+      feedInsertionPositionsRef.current = {
+        userId,
+        storePos: 3 + Math.floor(Math.random() * Math.max(1, third - 3)),
+        suggestPos: third + Math.floor(Math.random() * Math.max(1, third)),
+        musicPos: third * 2 + Math.floor(Math.random() * Math.max(1, third)),
+      };
+    }
+    const { storePos, suggestPos, musicPos } = feedInsertionPositionsRef.current;
 
     for (let i = 0; i < organicSorted.length; i++) {
       const item = organicSorted[i];
@@ -423,9 +451,9 @@ export default function Home() {
     result.push({ type: 'load-trigger', id: 'load-trigger-end' });
 
     return result;
-  }, [organicSorted, posts, shuffledFeedCampaigns, shuffledBoostedRegular, shuffledBoostedReels]);
+  }, [organicSorted, posts, shuffledFeedCampaigns, shuffledBoostedRegular, shuffledBoostedReels, currentUser?.$id]);
 
-  // Observe the load-trigger element (fires when user reaches the 14th post)
+  // Preload the next batch when the end sentinel is close to the viewport.
   useEffect(() => {
     const el = loadTriggerRef.current;
     if (!el) return;
@@ -490,7 +518,6 @@ export default function Home() {
         </aside>
 
         <main className="flex flex-col gap-4 w-full max-w-[680px] mx-auto">
-          <div ref={feedTopRef} />
           <Stories onOpenCreate={() => setIsStoryModalOpen(true)} />
 
           {uploadProgress !== null && (
@@ -512,10 +539,10 @@ export default function Home() {
                 className="pointer-events-auto flex items-center gap-2 bg-primary text-white text-[11px] font-black uppercase tracking-[0.15em] px-5 py-2.5 rounded-full shadow-xl shadow-primary/30 animate-badge-pop hover:scale-105 active:scale-95 transition-transform"
                 onClick={() => {
                   clearNewPosts();
-                  feedTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
                 }}
               >
-                <ChevronUp className="h-3.5 w-3.5" />
+                <ChevronDown className="h-3.5 w-3.5" />
                 {newFollowingPostsCount} New {newFollowingPostsCount === 1 ? 'Post' : 'Posts'}
               </button>
             </div>

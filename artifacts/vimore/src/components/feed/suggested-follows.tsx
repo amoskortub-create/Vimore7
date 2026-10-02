@@ -16,7 +16,7 @@ import { getAdaptivePreview } from "@/lib/adaptive-media";
 import { databases, Query, COL, DATABASE_ID, BUCKET, getFileUrl, avatarFallback } from "@/lib/appwrite";
 
 export function SuggestedFollows() {
-  const { connections, posts, isFriend, isRequestSent, isRequestReceived, sendFriendRequest, cancelFriendRequest, isFollowing, currentUser, settings } = usePosts();
+  const { connections, posts, isFriend, isRequestSent, isRequestReceived, sendFriendRequest, cancelFriendRequest, currentUser, settings } = usePosts();
   const { triggerHaptic } = useMusic();
   const { t } = useTranslation();
   const { tier } = useNetwork();
@@ -36,7 +36,6 @@ export function SuggestedFollows() {
         post.boostExpiry &&
         post.boostExpiry > now &&
         !isFriend(post.user.username) &&
-        !isRequestSent(post.user.username) &&
         !isRequestReceived(post.user.username) &&
         post.user.username !== currentUser?.username &&
         !seenBoostedUsernames.has(post.user.username)
@@ -46,11 +45,10 @@ export function SuggestedFollows() {
       }
     }
 
-    // Connection suggestions (not yet friends, no pending request either direction)
+    // Keep sent requests visible so the same card can switch to its Sent state.
     const connectionSuggestions = connections
       .filter(c =>
         !isFriend(c.username) &&
-        !isRequestSent(c.username) &&
         !isRequestReceived(c.username) &&
         c.username !== currentUser?.username
       )
@@ -74,7 +72,6 @@ export function SuggestedFollows() {
       .filter(u =>
         !existingAll.has(u.username) &&
         !isFriend(u.username) &&
-        !isRequestSent(u.username) &&
         !isRequestReceived(u.username)
       )
       .map(u => ({ ...u, isBoosted: false }));
@@ -82,7 +79,7 @@ export function SuggestedFollows() {
     const all = [...combined, ...extras];
     all.sort((a, b) => rankUser(b) - rankUser(a));
     return all.slice(0, 10);
-  }, [connections, posts, isFriend, isRequestSent, isRequestReceived, isFollowing, currentUser, fallbackUsers]);
+  }, [connections, posts, isFriend, isRequestSent, isRequestReceived, currentUser, fallbackUsers]);
 
   // Fetch fallback users from DB when we don't have enough connection-based suggestions
   useEffect(() => {

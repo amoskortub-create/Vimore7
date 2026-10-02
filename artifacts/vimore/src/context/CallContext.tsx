@@ -95,46 +95,18 @@ async function responseBody(response: Response) {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = typeof body?.error === "string" ? body.error : "The call request failed.";
-    throw new Error(message);
+    const error = new Error(message) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
   }
   return body;
 }
 
-async function requestVideoCallMedia() {
-  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-    const secureContext = typeof window !== "undefined" && window.isSecureContext;
-    throw new Error(secureContext
-      ? "This browser does not support camera access. Update your browser or use a supported browser to place a video call."
-      : "Camera and microphone access requires a secure HTTPS connection. Open ViMore over HTTPS, then allow camera and microphone access.");
-  }
-
-  let stream: MediaStream | undefined;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-  } catch (error) {
-    const name = error instanceof Error ? error.name : "";
-    if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-      throw new Error("Camera or microphone access was blocked. Allow both when your browser asks. If you previously blocked access, change ViMore’s site permissions to Allow and try again.");
-    }
-    if (name === "SecurityError") {
-      throw new Error("Your browser is blocking camera access for this page. Open ViMore over HTTPS and enable camera and microphone permissions in your browser settings.");
-    }
-    if (name === "NotFoundError" || name === "DevicesNotFoundError") {
-      throw new Error("No camera or microphone was found. Connect or enable both devices, or start an audio call instead.");
-    }
-    if (name === "NotReadableError" || name === "TrackStartError") {
-      throw new Error("Your camera or microphone is busy or in use by another app or browser tab. Close anything using it and try the video call again.");
-    }
-    if (name === "OverconstrainedError") {
-      throw new Error("Your camera does not support the required video settings. Try another camera or device.");
-    }
-    if (name === "AbortError") {
-      throw new Error("Your browser could not start the camera or microphone. Check the device connection and try again.");
-    }
-    throw new Error("ViMore could not access your camera and microphone. Check browser and device permissions, then try the video call again.");
-  } finally {
-    stream?.getTracks().forEach((track) => track.stop());
-  }
+function isTransientConnectionError(error: unknown) {
+  if (error instanceof TypeError) return true;
+  if (!(error instanceof Error)) return false;
+  const status = (error as Error & { status?: number }).status;
+  return status === 408 || status === 429 || (typeof status === "number" && status >= 500);
 }
 
 export function CallProvider({ children }: { children: ReactNode }) {
@@ -293,12 +265,23 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     setError(null);
     try {
-      const result = await apiRequest("POST", { operation: "token", callDocId: doc.$id });
-      if (typeof result.token !== "string" || typeof result.serverUrl !== "string") {
-        throw new Error("The call service returned an incomplete connection response.");
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const result = await apiRequest("POST", { operation: "token", callDocId: doc.$id });
+          if (typeof result.token !== "string" || typeof result.serverUrl !== "string") {
+            throw new Error("The call service returned an incomplete connection response.");
+          }
+          setActiveCall({ call, peer: call.peer, token: result.token, serverUrl: result.serverUrl });
+          setPendingConnection(null);
+          return;
+        } catch (requestError) {
+          lastError = requestError;
+          if (!isTransientConnectionError(requestError) || attempt === 2) throw requestError;
+          await new Promise<void>((resolve) => setTimeout(resolve, 750 * (attempt + 1)));
+        }
       }
-      setActiveCall({ call, peer: call.peer, token: result.token, serverUrl: result.serverUrl });
-      setPendingConnection(null);
+      throw lastError;
     } catch (requestError) {
       setPendingConnection(call);
       showError(requestError, "Could not join call");
@@ -381,7 +364,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setError(null);
     setIsLoading(true);
     try {
-      if (type === "video") await requestVideoCallMedia();
       const result = await apiRequest("POST", { operation: "start", calleeId: peer.$id, type });
       upsertDocument(result.call);
     } catch (requestError) {
@@ -400,7 +382,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setError(null);
     setIsLoading(true);
     try {
-      if (type === "video") await requestVideoCallMedia();
       const result = await apiRequest("POST", {
         operation: "group",
         groupId,
@@ -430,7 +411,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setError(null);
     setIsLoading(true);
     try {
-      if (action === "accept" && call.type === "video") await requestVideoCallMedia();
       const result = await apiRequest("PATCH", { action, callDocId: call.$id });
       const updatedCalls = Array.isArray(result.calls) ? result.calls : result.call ? [result.call] : [];
       updatedCalls.forEach(upsertDocument);

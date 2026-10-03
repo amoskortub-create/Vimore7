@@ -56,6 +56,8 @@ captures/
 # Uncomment the following lines if you do not want to check your keystore files in.
 #*.jks
 #*.keystore
+signing.properties
+vimore-upload-key.jks
 app/release.keystore
 app/release-signing.env
 

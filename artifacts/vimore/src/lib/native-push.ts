@@ -68,10 +68,16 @@ export async function registerNativePush(
 
   const permission = await PushNotifications.checkPermissions();
   const requested =
-    permission.receive === "prompt"
+    permission.receive === "prompt" ||
+    permission.receive === "prompt-with-rationale"
       ? await PushNotifications.requestPermissions()
       : permission;
-  if (requested.receive !== "granted") return;
+  if (requested.receive !== "granted") {
+    console.warn(
+      `[native-push] notification permission is ${requested.receive}; enable notifications in Android settings`,
+    );
+    return;
+  }
 
   await PushNotifications.register();
   await saveLatestToken();

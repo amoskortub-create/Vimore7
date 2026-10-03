@@ -1,6 +1,20 @@
 apply plugin: 'com.android.application'
 apply plugin: 'com.google.gms.google-services'
 
+def signingProperties = new Properties()
+def signingPropertiesFile = rootProject.file('signing.properties')
+if (signingPropertiesFile.isFile()) {
+    signingPropertiesFile.withInputStream { signingProperties.load(it) }
+}
+
+def signingValue = { String environmentName, String propertyName ->
+    System.getenv(environmentName) ?: signingProperties.getProperty(propertyName)
+}
+def signingStorePath = signingProperties.getProperty('storeFile') ?: 'app/release.keystore'
+def signingStorePassword = signingValue('KEYSTORE_PASSWORD', 'storePassword')
+def signingKeyAlias = signingValue('KEY_ALIAS', 'keyAlias')
+def signingKeyPassword = signingValue('KEY_PASSWORD', 'keyPassword')
+
 android {
     namespace "cfd.mediatech.vimore"
     compileSdk rootProject.ext.compileSdkVersion
@@ -20,10 +34,10 @@ android {
     
     signingConfigs {
         release {
-            storeFile file('release.keystore')
-            storePassword System.getenv("KEYSTORE_PASSWORD")
-            keyAlias System.getenv("KEY_ALIAS")
-            keyPassword System.getenv("KEY_PASSWORD")
+            storeFile rootProject.file(signingStorePath)
+            storePassword signingStorePassword
+            keyAlias signingKeyAlias
+            keyPassword signingKeyPassword
         }
     }
     
@@ -43,11 +57,15 @@ def releaseBuildRequested = gradle.startParameter.taskNames.any { taskName ->
 
 if (releaseBuildRequested) {
     def missingSigningConfig = []
-    if (!file('release.keystore').isFile()) {
-        missingSigningConfig.add('android/app/release.keystore')
+    if (!rootProject.file(signingStorePath).isFile()) {
+        missingSigningConfig.add("android/${signingStorePath}")
     }
-    ['KEYSTORE_PASSWORD', 'KEY_ALIAS', 'KEY_PASSWORD'].each { variable ->
-        if (!System.getenv(variable)) {
+    [
+        'KEYSTORE_PASSWORD': signingStorePassword,
+        'KEY_ALIAS': signingKeyAlias,
+        'KEY_PASSWORD': signingKeyPassword
+    ].each { variable, value ->
+        if (!value) {
             missingSigningConfig.add(variable)
         }
     }

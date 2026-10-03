@@ -10,11 +10,19 @@ export function NativePushAutoSubscribe() {
   const router = useRouter();
 
   useEffect(() => {
-    registerNativePush(currentUser?.$id, (url) => router.push(url)).catch(
-      (error) => {
-        console.warn("[native-push] setup failed", error);
-      },
-    );
+    if (!currentUser?.$id) return;
+
+    const register = () => {
+      registerNativePush(currentUser.$id, (url) => router.push(url)).catch(
+        (error) => {
+          console.warn("[native-push] setup failed", error);
+        },
+      );
+    };
+
+    register();
+    window.addEventListener("online", register);
+    return () => window.removeEventListener("online", register);
   }, [currentUser?.$id, router]);
 
   return null;

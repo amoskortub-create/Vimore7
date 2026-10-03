@@ -1,29 +1,25 @@
 #!/bin/bash
+set -euo pipefail
 
-# Generate keystore for signing
-KEYSTORE_PASSWORD="${1:-VimoreApp2024}"
-KEY_ALIAS="${2:-release}"
-KEY_PASSWORD="${3:-VimoreApp2024}"
+: "${KEYSTORE_PASSWORD:?Set KEYSTORE_PASSWORD in your environment before running this script}"
+: "${KEY_ALIAS:?Set KEY_ALIAS in your environment before running this script}"
+: "${KEY_PASSWORD:?Set KEY_PASSWORD in your environment before running this script}"
 
-cd android/app
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+KEYSTORE_PATH="$SCRIPT_DIR/android/app/release.keystore"
 
-# Generate keystore
-keytool -genkey -v -keystore release.keystore \
+if [[ -e "$KEYSTORE_PATH" ]]; then
+  echo "Refusing to overwrite existing keystore: $KEYSTORE_PATH" >&2
+  exit 1
+fi
+
+keytool -genkeypair -v -keystore "$KEYSTORE_PATH" \
   -keyalg RSA -keysize 2048 -validity 10000 \
   -alias "$KEY_ALIAS" \
   -dname "CN=VimoreApp, OU=Development, O=VimoreApp, L=Cairo, ST=Cairo, C=EG" \
-  -storepass "$KEYSTORE_PASSWORD" \
-  -keypass "$KEY_PASSWORD"
+  -storepass:env KEYSTORE_PASSWORD \
+  -keypass:env KEY_PASSWORD
 
-# Verify keystore
-keytool -list -v -keystore release.keystore -storepass "$KEYSTORE_PASSWORD"
+keytool -list -keystore "$KEYSTORE_PATH" -storepass:env KEYSTORE_PASSWORD
 
-# Encode to base64 for GitHub secrets
-echo "Base64 encoded keystore (add to GitHub secrets as RELEASE_KEYSTORE_BASE64):"
-base64 -i release.keystore
-
-echo ""
-echo "Store these values:"
-echo "KEYSTORE_PASSWORD: $KEYSTORE_PASSWORD"
-echo "KEY_ALIAS: $KEY_ALIAS"
-echo "KEY_PASSWORD: $KEY_PASSWORD"
+echo "Release keystore generated at $KEYSTORE_PATH. Back it up securely and never commit it."

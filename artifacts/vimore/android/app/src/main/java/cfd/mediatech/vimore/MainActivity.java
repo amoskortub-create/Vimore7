@@ -36,13 +36,20 @@ public class MainActivity extends BridgeActivity {
 	private void createNotificationChannel() {
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 			NotificationChannel channel = new NotificationChannel(
-				"vimore_default",
+				"vimore_default_v2",
 				"ViMore notifications",
 				NotificationManager.IMPORTANCE_DEFAULT
 			);
 			channel.setDescription("Messages, activity, and updates from ViMore");
+			channel.setSound(
+				RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
+				new AudioAttributes.Builder()
+					.setUsage(AudioAttributes.USAGE_NOTIFICATION)
+					.setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+					.build()
+			);
 			NotificationChannel callsChannel = new NotificationChannel(
-				"vimore_calls",
+				"vimore_calls_v2",
 				"Incoming calls",
 				NotificationManager.IMPORTANCE_HIGH
 			);

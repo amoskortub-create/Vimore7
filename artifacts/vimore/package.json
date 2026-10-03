@@ -7,7 +7,7 @@
     "prebuild": "node scripts/bump-sw-version.js",
     "build": "NODE_ENV=production next build",
     "android:prepare-assets": "node scripts/prepare-android-assets.mjs",
-    "android:build": "pnpm run build && pnpm exec cap sync android && pnpm run android:prepare-assets && cd android && ./gradlew clean assembleDebug assembleRelease bundleRelease",
+    "android:build": "pnpm exec next build && pnpm exec cap sync android && pnpm run android:prepare-assets && cd android && ./gradlew clean assembleDebug assembleRelease bundleRelease",
     "start": "next start -p ${PORT:-5000} -H 0.0.0.0",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",

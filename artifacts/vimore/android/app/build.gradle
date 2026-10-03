@@ -21,20 +21,40 @@ android {
     signingConfigs {
         release {
             storeFile file('release.keystore')
-            storePassword System.getenv("KEYSTORE_PASSWORD") ?: ""
-            keyAlias System.getenv("KEY_ALIAS") ?: "release"
-            keyPassword System.getenv("KEY_PASSWORD") ?: ""
+            storePassword System.getenv("KEYSTORE_PASSWORD")
+            keyAlias System.getenv("KEY_ALIAS")
+            keyPassword System.getenv("KEY_PASSWORD")
         }
     }
     
     buildTypes {
         release {
-            if (file('release.keystore').exists() && System.getenv('KEYSTORE_PASSWORD') && System.getenv('KEY_PASSWORD')) {
-                signingConfig signingConfigs.release
-            }
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+    }
+}
+
+def releaseBuildRequested = gradle.startParameter.taskNames.any { taskName ->
+    def normalizedTaskName = taskName.toLowerCase()
+    normalizedTaskName.contains('release') || normalizedTaskName in ['assemble', 'build']
+}
+
+if (releaseBuildRequested) {
+    def missingSigningConfig = []
+    if (!file('release.keystore').isFile()) {
+        missingSigningConfig.add('android/app/release.keystore')
+    }
+    ['KEYSTORE_PASSWORD', 'KEY_ALIAS', 'KEY_PASSWORD'].each { variable ->
+        if (!System.getenv(variable)) {
+            missingSigningConfig.add(variable)
+        }
+    }
+    if (!missingSigningConfig.isEmpty()) {
+        throw new GradleException(
+            "Cannot build a signed Android release. Missing: ${missingSigningConfig.join(', ')}"
+        )
     }
 }
 

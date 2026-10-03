@@ -260,19 +260,22 @@ export async function POST(req: NextRequest) {
                 ...payload.data,
                 url: payload.url || "/notifications",
                 tag: payload.tag || "",
-              }).filter(([, value]) => Boolean(value)),
-            ).map(([key, value]) => [
-              key,
-              typeof value === "string" ? value : JSON.stringify(value),
-            ]),
+              })
+                .filter(([, value]) => Boolean(value))
+                .map(([key, value]) => [
+                  key,
+                  typeof value === "string" ? value : JSON.stringify(value),
+                ]),
+            ),
             android: {
               priority: "high",
               notification: {
                 channelId:
                   payload.data?.type === "INCOMING_CALL"
-                    ? "vimore_calls"
-                    : "vimore_default",
+                    ? "vimore_calls_v2"
+                    : "vimore_default_v2",
                 icon: "ic_launcher",
+                sound: "default",
               },
             },
           });

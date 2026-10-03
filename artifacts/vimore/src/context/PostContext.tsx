@@ -15,6 +15,7 @@ import { authFetch } from '@/lib/auth-fetch';
 import { offlineCache } from '@/lib/offline-cache';
 import { firePush } from '@/lib/push-fire';
 import { CREDIT_PRICES } from '@/lib/credit-pricing';
+import { composeFeedBatch } from '@/lib/feed-composition';
 
 const PRESENCE_TTL_MS = 90_000;
 
@@ -611,12 +612,13 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const [posts, setPostsState] = useState<Post[]>([]);
   const [hasMoreFeed, setHasMoreFeed] = useState(true);
   const [isFeedLoading, setIsFeedLoading] = useState(false);
-  const feedCursorRef = useRef<string | null>(null);
-  const feedPhaseRef = useRef<'connections' | 'global'>('connections');
   const feedConnCursorRef = useRef<string | null>(null);
   const feedGlobalCursorRef = useRef<string | null>(null);
   const feedHasLoadedRef = useRef(false);
   const pendingRealtimePostsRef = useRef(new Map<string, Post>());
+  const feedCandidatesRef = useRef<Post[]>([]);
+  const feedBatchRef = useRef(0);
+  const friendsOfFriendsIdsRef = useRef<{ userId: string; ids: Set<string> }>({ userId: '', ids: new Set() });
   const [activeComments, setActiveComments] = useState<PostComment[]>([]);
   const [isLoading, setIsLoadingState] = useState(true);
   const [initError] = useState<string | null>(null);
@@ -650,6 +652,8 @@ export function PostProvider({ children }: { children: ReactNode }) {
       return stored ? new Set<string>(JSON.parse(stored)) : new Set<string>();
     } catch { return new Set<string>(); }
   });
+  const viewedPostIdsRef = useRef(viewedPostIds);
+  useEffect(() => { viewedPostIdsRef.current = viewedPostIds; }, [viewedPostIds]);
   const [savedPostIds, setSavedPostIdsState] = useState<Set<string>>(new Set());
   const [unlockedPostIds, setUnlockedPostIdsState] = useState<Set<string>>(new Set());
   const [seenPostIds, setSeenPostIdsState] = useState<Set<string>>(new Set());
@@ -715,68 +719,97 @@ export function PostProvider({ children }: { children: ReactNode }) {
     return docs.map((doc: any) => mapDocToPost(doc, authorsMap[doc.user_id]));
   }, []);
 
-  const loadFeed = useCallback(async () => {
-    const PAGE = FEED_PAGE_SIZE;
+  const getFriendsOfFriendsIds = useCallback(async (userId: string) => {
+    if (friendsOfFriendsIdsRef.current.userId === userId) return friendsOfFriendsIdsRef.current.ids;
+    try {
+      const [sent, received] = await Promise.all([
+        databases.listDocuments(DATABASE_ID, COL.FRIEND_REQUESTS, [
+          Query.equal('from_user_id', userId), Query.equal('status', 'ACCEPTED'), Query.limit(500),
+        ]),
+        databases.listDocuments(DATABASE_ID, COL.FRIEND_REQUESTS, [
+          Query.equal('to_user_id', userId), Query.equal('status', 'ACCEPTED'), Query.limit(500),
+        ]),
+      ]);
+      const friendIds = new Set<string>();
+      sent.documents.forEach((request: any) => request.to_user_id && friendIds.add(request.to_user_id));
+      received.documents.forEach((request: any) => request.from_user_id && friendIds.add(request.from_user_id));
+      const friendIdList = [...friendIds].filter(id => id !== userId);
+      const fofIds = new Set<string>();
+      if (friendIdList.length > 0) {
+        const follows = await databases.listDocuments(DATABASE_ID, COL.FOLLOWS, [
+          Query.equal('follower_id', friendIdList), Query.limit(500),
+        ]);
+        follows.documents.forEach((follow: any) => {
+          if (follow.following_id && follow.following_id !== userId && !followingUserIdsRef.current.has(follow.following_id)) {
+            fofIds.add(follow.following_id);
+          }
+        });
+      }
+      friendsOfFriendsIdsRef.current = { userId, ids: fofIds };
+      return fofIds;
+    } catch {
+      return new Set<string>();
+    }
+  }, []);
+
+  const getFeedFollowingIds = useCallback(async (userId: string) => {
+    try {
+      const follows = await databases.listDocuments(DATABASE_ID, COL.FOLLOWS, [
+        Query.equal('follower_id', userId), Query.limit(500),
+      ]);
+      const ids = new Set<string>(follows.documents.map((follow: any) => follow.following_id).filter(Boolean));
+      followingUserIdsRef.current = ids;
+      setFollowingUserIdsState(ids);
+      return ids;
+    } catch {
+      return followingUserIdsRef.current;
+    }
+  }, []);
+
+  const loadFeed = useCallback(async (userIdOverride?: string) => {
+    const PAGE = 100;
     feedHasLoadedRef.current = false;
-    feedPhaseRef.current = 'connections';
     feedConnCursorRef.current = null;
     feedGlobalCursorRef.current = null;
-    feedCursorRef.current = null;
+    feedCandidatesRef.current = [];
+    feedBatchRef.current = 0;
     setHasMoreFeed(true);
     try {
-      const connIds = [...followingUserIdsRef.current].slice(0, 100);
-      let connDocs: any[] = [];
-
-      // Phase 1: fetch connection posts first
-      if (connIds.length > 0) {
-        try {
-          const r = await databases.listDocuments(DATABASE_ID, COL.POSTS, [
-            Query.equal('user_id', connIds),
-            Query.orderDesc('$createdAt'),
-            Query.limit(PAGE),
-          ]);
-          connDocs = r.documents;
-          if (connDocs.length > 0) feedConnCursorRef.current = connDocs[connDocs.length - 1].$id;
-          if (connDocs.length < PAGE) feedPhaseRef.current = 'global';
-        } catch {
-          feedPhaseRef.current = 'global';
-        }
-      } else {
-        feedPhaseRef.current = 'global';
-      }
-
-      // Phase 2 fill: connections didn't fill the page — top up from global
-      let globalDocs: any[] = [];
-      if (feedPhaseRef.current === 'global') {
-        try {
-          const r = await databases.listDocuments(DATABASE_ID, COL.POSTS, [
-            Query.orderDesc('$createdAt'),
-            Query.limit(PAGE),
-          ]);
-          const existingIds = new Set(connDocs.map((doc: any) => doc.$id));
-          let lastScannedIndex = -1;
-          for (let index = 0; index < r.documents.length && connDocs.length + globalDocs.length < PAGE; index++) {
-            const doc = r.documents[index];
-            lastScannedIndex = index;
-            if (!existingIds.has(doc.$id)) {
-              existingIds.add(doc.$id);
-              globalDocs.push(doc);
-            }
-          }
-          if (lastScannedIndex >= 0) {
-            feedGlobalCursorRef.current = r.documents[lastScannedIndex].$id;
-          }
-          setHasMoreFeed(r.documents.length === PAGE || lastScannedIndex < r.documents.length - 1);
-        } catch {
-          setHasMoreFeed(false);
-        }
-      } else {
-        setHasMoreFeed(true);
-      }
-
-      const mapped = await withAuthors([...connDocs, ...globalDocs]);
-      const loadedIds = new Set(mapped.map(post => post.$id));
-      const nextPosts = [...mapped];
+      const userId = userIdOverride || currentUser?.$id || '';
+      const follows = userId ? await getFeedFollowingIds(userId) : followingUserIdsRef.current;
+      const followedIds = [...follows].slice(0, 100);
+      const fofIds = userId ? await getFriendsOfFriendsIds(userId) : new Set<string>();
+      const [followingResult, globalResult] = await Promise.allSettled([
+        followedIds.length > 0
+          ? databases.listDocuments(DATABASE_ID, COL.POSTS, [
+            Query.equal('user_id', followedIds), Query.orderDesc('$createdAt'), Query.limit(PAGE),
+          ])
+          : Promise.resolve({ documents: [] as any[] }),
+        databases.listDocuments(DATABASE_ID, COL.POSTS, [Query.orderDesc('$createdAt'), Query.limit(PAGE)]),
+      ]);
+      const followedDocs = followingResult.status === 'fulfilled' ? followingResult.value.documents : [];
+      const globalDocs = globalResult.status === 'fulfilled' ? globalResult.value.documents : [];
+      if (followedDocs.length > 0) feedConnCursorRef.current = followedDocs[followedDocs.length - 1].$id;
+      if (globalDocs.length > 0) feedGlobalCursorRef.current = globalDocs[globalDocs.length - 1].$id;
+      const mapped = await withAuthors([...followedDocs, ...globalDocs]);
+      const existingIds = new Set<string>();
+      feedCandidatesRef.current = mapped.filter(post => {
+        if (existingIds.has(post.$id)) return false;
+        existingIds.add(post.$id);
+        return true;
+      });
+      const composition = composeFeedBatch({
+        candidates: feedCandidatesRef.current,
+        followingIds: new Set(followedIds),
+        friendsOfFriendsIds: fofIds,
+        viewedIds: viewedPostIdsRef.current,
+        userId,
+        batch: feedBatchRef.current++,
+        size: FEED_PAGE_SIZE,
+      });
+      feedCandidatesRef.current = composition.remaining;
+      const nextPosts: Post[] = composition.posts.map(post => ({ ...post, isFeedAppend: true }));
+      const loadedIds = new Set(nextPosts.map(post => post.$id));
       for (const post of pendingRealtimePostsRef.current.values()) {
         if (!loadedIds.has(post.$id)) {
           loadedIds.add(post.$id);
@@ -785,6 +818,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       }
       pendingRealtimePostsRef.current.clear();
       feedHasLoadedRef.current = true;
+      setHasMoreFeed(globalDocs.length === PAGE || followedDocs.length === PAGE || feedCandidatesRef.current.length > 0);
       setPostsState(nextPosts);
       offlineCache.savePosts(nextPosts);
     } catch (err) {
@@ -803,52 +837,64 @@ export function PostProvider({ children }: { children: ReactNode }) {
     } finally {
       feedHasLoadedRef.current = true;
     }
-  }, [withAuthors]);
+  }, [currentUser?.$id, getFeedFollowingIds, getFriendsOfFriendsIds, withAuthors]);
 
   const loadMoreFeed = useCallback(async () => {
     if (isFeedLoading) return;
     setIsFeedLoading(true);
     try {
-      const PAGE = FEED_PAGE_SIZE;
-      const connIds = [...followingUserIdsRef.current].slice(0, 100);
-
-      if (feedPhaseRef.current === 'connections' && connIds.length > 0 && feedConnCursorRef.current) {
-        // Fetch next batch of connection posts
-        const r = await databases.listDocuments(DATABASE_ID, COL.POSTS, [
-          Query.equal('user_id', connIds),
-          Query.orderDesc('$createdAt'),
-          Query.cursorAfter(feedConnCursorRef.current),
-          Query.limit(PAGE),
-        ]);
-        if (r.documents.length > 0) feedConnCursorRef.current = r.documents[r.documents.length - 1].$id;
-        if (r.documents.length < PAGE) {
-          feedPhaseRef.current = 'global';
-          setHasMoreFeed(true); // global phase still has content
-        }
-        const mapped = (await withAuthors(r.documents)).map(post => ({ ...post, isFeedAppend: true }));
-        setPostsState(prev => {
-          const existingIds = new Set(prev.map(p => p.$id));
-          return [...prev, ...mapped.filter(p => !existingIds.has(p.$id))];
-        });
-      } else {
-        // Global phase: cursor-paginate through all posts; dedup removes already-shown ones
-        const queries: any[] = [Query.orderDesc('$createdAt'), Query.limit(PAGE)];
-        if (feedGlobalCursorRef.current) queries.push(Query.cursorAfter(feedGlobalCursorRef.current));
-        const r = await databases.listDocuments(DATABASE_ID, COL.POSTS, queries);
-        if (r.documents.length > 0) feedGlobalCursorRef.current = r.documents[r.documents.length - 1].$id;
-        setHasMoreFeed(r.documents.length === PAGE);
-        const mapped = (await withAuthors(r.documents)).map(post => ({ ...post, isFeedAppend: true }));
-        setPostsState(prev => {
-          const existingIds = new Set(prev.map(p => p.$id));
-          return [...prev, ...mapped.filter(p => !existingIds.has(p.$id))];
-        });
-      }
+      const PAGE = 100;
+      const followedIds = [...followingUserIdsRef.current].slice(0, 100);
+      const userId = currentUser?.$id || '';
+      const fofIds = userId ? await getFriendsOfFriendsIds(userId) : new Set<string>();
+      const followingQueries: any[] = followedIds.length > 0
+        ? [Query.equal('user_id', followedIds), Query.orderDesc('$createdAt'), Query.limit(PAGE)]
+        : [];
+      if (feedConnCursorRef.current) followingQueries.push(Query.cursorAfter(feedConnCursorRef.current));
+      const globalQueries: any[] = [Query.orderDesc('$createdAt'), Query.limit(PAGE)];
+      if (feedGlobalCursorRef.current) globalQueries.push(Query.cursorAfter(feedGlobalCursorRef.current));
+      const [followingResult, globalResult] = await Promise.allSettled([
+        followedIds.length > 0
+          ? databases.listDocuments(DATABASE_ID, COL.POSTS, followingQueries)
+          : Promise.resolve({ documents: [] as any[] }),
+        databases.listDocuments(DATABASE_ID, COL.POSTS, globalQueries),
+      ]);
+      const followedDocs = followingResult.status === 'fulfilled' ? followingResult.value.documents : [];
+      const globalDocs = globalResult.status === 'fulfilled' ? globalResult.value.documents : [];
+      if (followedDocs.length > 0) feedConnCursorRef.current = followedDocs[followedDocs.length - 1].$id;
+      if (globalDocs.length > 0) feedGlobalCursorRef.current = globalDocs[globalDocs.length - 1].$id;
+      const mapped = await withAuthors([...followedDocs, ...globalDocs]);
+      const existingIds = new Set([
+        ...posts.map(post => post.$id),
+        ...feedCandidatesRef.current.map(post => post.$id),
+      ]);
+      feedCandidatesRef.current.push(...mapped.filter(post => {
+        if (existingIds.has(post.$id)) return false;
+        existingIds.add(post.$id);
+        return true;
+      }));
+      const composition = composeFeedBatch({
+        candidates: feedCandidatesRef.current,
+        followingIds: new Set(followedIds),
+        friendsOfFriendsIds: fofIds,
+        viewedIds: viewedPostIdsRef.current,
+        userId,
+        batch: feedBatchRef.current++,
+        size: FEED_PAGE_SIZE,
+      });
+      feedCandidatesRef.current = composition.remaining;
+      const newPosts = composition.posts.map(post => ({ ...post, isFeedAppend: true }));
+      setPostsState(previous => {
+        const loadedIds = new Set(previous.map(post => post.$id));
+        return [...previous, ...newPosts.filter(post => !loadedIds.has(post.$id))];
+      });
+      setHasMoreFeed(globalDocs.length === PAGE || followedDocs.length === PAGE || feedCandidatesRef.current.length > 0);
     } catch (err) {
       logAppwriteError('loadMoreFeed', err);
     } finally {
       setIsFeedLoading(false);
     }
-  }, [isFeedLoading, withAuthors]);
+  }, [currentUser?.$id, getFriendsOfFriendsIds, isFeedLoading, posts, withAuthors]);
 
   const appendRealtimePost = useCallback(async (document: any) => {
     if (!document?.$id || typeof document.user_id !== 'string') return;
@@ -1695,7 +1741,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       }
 
       await Promise.allSettled([
-        loadFeed(),
+        loadFeed(authUser.$id),
         loadSocialGraph(authUser.$id),
         loadConnections(authUser.$id, profileDoc.username || ''),
         loadStories(),
@@ -1972,7 +2018,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       }
 
       await Promise.allSettled([
-        loadFeed(),
+        loadFeed(authUser.$id),
         loadSocialGraph(authUser.$id),
         loadConnections(authUser.$id, profileDoc.username || ''),
         loadStories(),
@@ -2109,7 +2155,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       }
 
       await Promise.allSettled([
-        loadFeed(),
+        loadFeed(authUser.$id),
         loadSocialGraph(authUser.$id),
         loadConnections(authUser.$id, username),
         loadStories(),

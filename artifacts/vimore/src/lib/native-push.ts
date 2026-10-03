@@ -6,6 +6,7 @@ let currentUserId: string | undefined;
 let latestToken: Token | undefined;
 let lastSavedTokenKey: string | undefined;
 let onOpenHandler: ((url: string) => void) | undefined;
+let registrationInProgress: Promise<void> | undefined;
 
 export function isNativePushAvailable(): boolean {
   return Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
@@ -38,7 +39,7 @@ export async function registerNativePush(
   userId: string | undefined,
   onOpen?: (url: string) => void,
 ): Promise<void> {
-  if (!isNativePushAvailable()) return;
+  if (!userId || !isNativePushAvailable()) return;
   currentUserId = userId;
   onOpenHandler = onOpen;
 
@@ -66,38 +67,34 @@ export async function registerNativePush(
     );
   }
 
-  const permission = await PushNotifications.checkPermissions();
-  if (permission.receive !== "prompt") {
+  if (registrationInProgress) {
+    await registrationInProgress;
+    return;
+  }
+
+  registrationInProgress = (async () => {
+    let permission = await PushNotifications.checkPermissions();
     if (permission.receive === "granted") {
       await PushNotifications.register();
       await saveLatestToken();
+      return;
     }
-    return;
-  }
 
-  const promptKey = "vimore_native_push_prompted";
-  if (typeof window !== "undefined" && window.localStorage.getItem(promptKey) === "1") {
-    return;
-  }
-
-  const TEN_MINUTES_MS = 10 * 60 * 1000;
-  setTimeout(() => {
-    void (async () => {
-      try {
-        const requested = await PushNotifications.requestPermissions();
-        if (requested.receive === "granted") {
-          await PushNotifications.register();
-          await saveLatestToken();
-        }
-        if (typeof window !== "undefined") {
-          window.localStorage.setItem(promptKey, "1");
-        }
-      } catch (error) {
-        console.warn("[native-push] delayed permission request failed", error);
-        if (typeof window !== "undefined") {
-          window.localStorage.setItem(promptKey, "1");
-        }
+    if (
+      permission.receive === "prompt" ||
+      permission.receive === "prompt-with-rationale"
+    ) {
+      permission = await PushNotifications.requestPermissions();
+      if (permission.receive === "granted") {
+        await PushNotifications.register();
+        await saveLatestToken();
       }
-    })();
-  }, TEN_MINUTES_MS);
+    }
+  })();
+
+  try {
+    await registrationInProgress;
+  } finally {
+    registrationInProgress = undefined;
+  }
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { usePosts } from '@/context/PostContext';
 import { databases, DATABASE_ID, COL, ID, Query } from '@/lib/appwrite';
 import { firePush } from '@/lib/push-fire';
@@ -73,31 +74,25 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const [hasPushPermission, setHasPushPermission] = useState(false);
   const [unreadMessageCount, setUnreadMessageCount] = useState(0);
   const { settings, triggerHaptic, currentUser, selectedChatId } = usePosts();
-  const TEN_MINUTES_MS = 10 * 60 * 1000;
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (!currentUser?.$id || Capacitor.isNativePlatform() || typeof window === 'undefined' || !('Notification' in window)) return;
 
-    const promptKey = 'vimore_notification_prompted';
-    if (localStorage.getItem(promptKey) === '1') return;
     if (Notification.permission !== 'default') {
-      localStorage.setItem(promptKey, '1');
       setHasPushPermission(Notification.permission === 'granted');
       return;
     }
 
-    const timer = setTimeout(async () => {
-      try {
-        const permission = await Notification.requestPermission();
-        setHasPushPermission(permission === 'granted');
-      } catch {
-        setHasPushPermission(false);
-      } finally {
-        localStorage.setItem(promptKey, '1');
-      }
-    }, TEN_MINUTES_MS);
+    let cancelled = false;
+    Notification.requestPermission()
+      .then((permission) => {
+        if (!cancelled) setHasPushPermission(permission === 'granted');
+      })
+      .catch(() => {
+        if (!cancelled) setHasPushPermission(false);
+      });
 
-    return () => clearTimeout(timer);
+    return () => { cancelled = true; };
   }, [currentUser?.$id]);
 
   // Tracks IDs currently being deleted so polls don't re-add them

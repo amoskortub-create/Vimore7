@@ -20,7 +20,7 @@ android {
     
     signingConfigs {
         release {
-            storeFile file('release.keystore')
+            storeFile file('newkeystore.jks')
             storePassword System.getenv("KEYSTORE_PASSWORD")
             keyAlias System.getenv("KEY_ALIAS")
             keyPassword System.getenv("KEY_PASSWORD")
@@ -43,8 +43,8 @@ def releaseBuildRequested = gradle.startParameter.taskNames.any { taskName ->
 
 if (releaseBuildRequested) {
     def missingSigningConfig = []
-    if (!file('release.keystore').isFile()) {
-        missingSigningConfig.add('android/app/release.keystore')
+    if (!file('newkeystore.jks').isFile()) {
+        missingSigningConfig.add('android/app/newkeystore.jks')
     }
     ['KEYSTORE_PASSWORD', 'KEY_ALIAS', 'KEY_PASSWORD'].each { variable ->
         if (!System.getenv(variable)) {

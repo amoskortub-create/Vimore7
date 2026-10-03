@@ -127,8 +127,8 @@ export function MusicPlayer() {
   const stats = trackStats[currentTrack.id] || { likes: currentTrack.likes || 0, unlikes: currentTrack.unlikes || 0 };
 
   /* ── MINI PLAYER ────────────────────────────────────────────── */
-  const isChatPage = pathname.startsWith('/chat/');
-  const isMusicPage = pathname.startsWith('/music');
+  const isChatPage = pathname?.startsWith('/chat/') ?? false;
+  const isMusicPage = pathname?.startsWith('/music') ?? false;
   const miniPlayerBottom = isMusicPage ? 'bottom-[148px]' : 'bottom-[76px]';
 
   if (!isExpanded) {

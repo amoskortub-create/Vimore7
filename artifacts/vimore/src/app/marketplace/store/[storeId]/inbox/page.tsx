@@ -371,7 +371,7 @@ function ChatPanel({
 
 // ─── Main inbox page ──────────────────────────────────────────────────────────
 export default function StoreInboxPage() {
-  const { storeId } = useParams<{ storeId: string }>();
+  const storeId = useParams<{ storeId: string }>()?.storeId ?? '';
   const router = useRouter();
   const { currentUser, isLoading } = usePosts();
 
@@ -383,6 +383,10 @@ export default function StoreInboxPage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
+    if (!storeId) {
+      setStoreLoading(false);
+      return;
+    }
     let cancelled = false;
     getStore(storeId).then(s => { if (!cancelled) { setStore(s); setStoreLoading(false); } });
     return () => { cancelled = true; };

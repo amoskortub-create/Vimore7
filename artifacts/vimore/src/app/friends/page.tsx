@@ -93,7 +93,7 @@ function FriendsPageContent() {
   const isPlayerActive = currentTrack && !isExpanded;
 
   useEffect(() => {
-    const tabParam = searchParams.get('tab') as HubTab;
+    const tabParam = searchParams?.get('tab') as HubTab | null | undefined;
     if (tabParam && ["add", "confirm", "friends", "pending"].includes(tabParam)) {
       setActiveTab(tabParam);
     }

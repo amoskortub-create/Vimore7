@@ -18,11 +18,11 @@ export default function OAuthAuthorizePage() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const client_id = searchParams.get("client_id") || "";
-  const redirect_uri = searchParams.get("redirect_uri") || "";
-  const scope = searchParams.get("scope") || "profile";
-  const state = searchParams.get("state") || "";
-  const response_type = searchParams.get("response_type") || "";
+  const client_id = searchParams?.get("client_id") || "";
+  const redirect_uri = searchParams?.get("redirect_uri") || "";
+  const scope = searchParams?.get("scope") || "profile";
+  const state = searchParams?.get("state") || "";
+  const response_type = searchParams?.get("response_type") || "";
 
   const [status, setStatus] = useState<"loading" | "ready" | "error" | "submitting">("loading");
   const [errorMsg, setErrorMsg] = useState("");

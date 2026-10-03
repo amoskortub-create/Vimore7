@@ -18,7 +18,7 @@ import { BoostDialog } from "@/components/marketplace/BoostDialog";
 import { ArrowLeft, MapPin, Trash2, Flag, Loader2, Calendar, CheckCircle2, RotateCcw, Rocket, Sparkles, ShieldAlert } from "lucide-react";
 
 export default function ProductDetailPage() {
-  const { productId } = useParams<{ productId: string }>();
+  const productId = useParams<{ productId: string }>()?.productId ?? '';
   const router = useRouter();
   const { currentUser, allUsers } = usePosts();
   const { toast } = useToast();
@@ -29,6 +29,10 @@ export default function ProductDetailPage() {
   const [activeImg, setActiveImg] = useState(0);
 
   useEffect(() => {
+    if (!productId) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
       const p = await getProduct(productId);

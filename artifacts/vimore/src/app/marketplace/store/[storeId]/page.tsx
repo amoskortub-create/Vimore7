@@ -66,7 +66,7 @@ function StoreProductCard({ product }: { product: ProductDoc }) {
 }
 
 export default function StorefrontPage() {
-  const { storeId } = useParams<{ storeId: string }>();
+  const storeId = useParams<{ storeId: string }>()?.storeId ?? '';
   const searchParams = useSearchParams();
   const { currentUser } = usePosts();
 
@@ -83,6 +83,10 @@ export default function StorefrontPage() {
   }, []);
 
   useEffect(() => {
+    if (!storeId) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
       const storeData = await getStore(storeId);
@@ -99,7 +103,7 @@ export default function StorefrontPage() {
   }, [storeId]);
 
   useEffect(() => {
-    if (!loading && searchParams.get("addProduct") === "true") {
+    if (!loading && searchParams?.get("addProduct") === "true") {
       setAddProductOpen(true);
     }
   }, [loading, searchParams]);

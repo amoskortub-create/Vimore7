@@ -26,8 +26,8 @@ function RecoveryContent() {
   const { resetPassword, triggerHaptic } = usePosts();
   const { toast } = useToast();
 
-  const userId = searchParams.get("userId");
-  const secret = searchParams.get("secret");
+  const userId = searchParams?.get("userId");
+  const secret = searchParams?.get("secret");
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");

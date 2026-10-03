@@ -158,7 +158,7 @@ function MusicPageContent() {
   const isPlayerActive = currentTrack && !isExpanded;
 
   useEffect(() => {
-    const tab = searchParams.get("tab");
+    const tab = searchParams?.get("tab");
     if (tab && ["discover", "chart", "upload", "library"].includes(tab)) setActiveTab(tab);
   }, [searchParams]);
 

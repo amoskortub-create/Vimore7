@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { usePosts } from '@/context/PostContext';
 import { databases, DATABASE_ID, COL, ID, Query } from '@/lib/appwrite';
-import { firePush } from '@/lib/push-fire';
+import { createNotificationDocument } from '@/lib/notification-write';
 import { authFetch } from '@/lib/auth-fetch';
 
 export type SignalType = 'SOCIAL' | 'SONIC' | 'POST' | 'SYSTEM';
@@ -170,7 +170,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       if (signal.actionHref) notifData.action_href = signal.actionHref;
       if (signal.actionLabel) notifData.action_label = signal.actionLabel;
       if (signal.avatar) notifData.avatar = signal.avatar;
-      databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), notifData)
+      createNotificationDocument(notifData)
         .then((doc) => {
           // Replace the temporary optimistic ID with the persisted Appwrite ID.
           // Without this, marking the optimistic item read cannot update the
@@ -184,25 +184,6 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           console.error('addSignal DB write failed:', err);
         });
 
-      // Deliver a Web Push to the recipient for ALL notification types
-      // (SOCIAL, SONIC, POST, SYSTEM, ADMIN, etc.) — works in background too.
-      if (targetUserId !== currentUser?.$id) {
-        firePush({
-          userId: targetUserId,
-          title: signal.title || 'ViMore',
-          body: signal.content || '',
-          url: signal.actionHref || '/notifications',
-          icon: signal.avatar || '/icons/icon-192.png',
-          image: signal.image,
-          tag: `vimore-${signal.type.toLowerCase()}`,
-          data: {
-            type: signal.type,
-            postId: signal.postId,
-            trackId: signal.trackId,
-            targetUsername: signal.targetUsername,
-          },
-        });
-      }
     }
   }, [triggerSound, triggerHaptic, currentUser]);
 

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { usePosts } from "@/context/PostContext";
 import { databases, DATABASE_ID, COL } from "@/lib/appwrite";
+import { createNotificationDocument } from "@/lib/notification-write";
 import { Query, ID } from "appwrite";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -86,7 +87,7 @@ export default function AdminShieldPage() {
 
       if (report.user_id) {
         try {
-          await databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
+          await createNotificationDocument({
             user_id: report.user_id,
             type: "MODERATION",
             title: "Content removed",

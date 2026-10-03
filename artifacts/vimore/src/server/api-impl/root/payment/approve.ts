@@ -3,6 +3,7 @@ import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
 import { getSessionUser } from '@/lib/session';
 import { rateLimit } from '@/lib/rate-limit';
 import { ID } from 'node-appwrite';
+import { sendNativeNotification } from '@/server/native-push';
 
 export const maxDuration = 30;
 
@@ -125,6 +126,12 @@ export async function POST(req: NextRequest) {
         message: `Your purchase of ${reqDoc.package_name || reqDoc.message || 'currency'} has been approved. Your balance has been updated.`,
         is_read: false,
       });
+      await sendNativeNotification(
+        userId,
+        'Payment Approved',
+        `Your purchase of ${reqDoc.package_name || reqDoc.message || 'currency'} has been approved. Your balance has been updated.`,
+        'SYSTEM',
+      );
     } catch (err: any) {
       console.error('[payment/approve] notification failed:', err?.message || err);
       warnings.push('notification was not created');

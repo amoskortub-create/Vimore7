@@ -1,5 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/cron/missed-calls",
+      "schedule": "* * * * *"
+    }
+  ],
   "env": {
     "NEXT_PUBLIC_APPWRITE_ENDPOINT": "https://appwrite.mediatechliberia.online/v1",
     "NEXT_PUBLIC_APPWRITE_PROJECT_ID": "vimore123",

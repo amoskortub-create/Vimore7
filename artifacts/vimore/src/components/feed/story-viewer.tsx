@@ -10,6 +10,7 @@ import { usePosts, StorySegment } from "@/context/PostContext";
 import { useNetwork } from "@/context/NetworkContext";
 import { getAdaptivePreview } from "@/lib/adaptive-media";
 import { databases, DATABASE_ID, COL, ID } from "@/lib/appwrite";
+import { createNotificationDocument } from "@/lib/notification-write";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
 import {
@@ -231,7 +232,7 @@ export function StoryViewer() {
     }, 2000);
     // Notify story owner of the reaction (skip if viewing own story)
     if (activeStory && currentUser && activeStory.user.$id !== currentUser.$id) {
-      databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
+      createNotificationDocument({
         user_id: activeStory.user.$id,
         from_user_id: currentUser.$id,
         from_user_name: currentUser.name || currentUser.username,

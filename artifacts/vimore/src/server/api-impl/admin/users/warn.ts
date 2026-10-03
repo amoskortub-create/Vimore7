@@ -3,6 +3,7 @@ import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
 import { getSessionUser } from '@/lib/session';
 import { rateLimit, sanitizeIp } from '@/lib/rate-limit';
 import { ID } from 'node-appwrite';
+import { sendNativeNotification } from '@/server/native-push';
 
 export const maxDuration = 30;
 
@@ -71,6 +72,11 @@ export async function POST(req: NextRequest) {
       message: String(message),
       is_read: false,
     });
+    await sendNativeNotification(
+      userId,
+      severity === 'FINAL' ? 'Final Warning' : 'Account Warning',
+      String(message),
+    );
 
     return NextResponse.json({ ok: true, warning_count: newCount });
   } catch (err: any) {

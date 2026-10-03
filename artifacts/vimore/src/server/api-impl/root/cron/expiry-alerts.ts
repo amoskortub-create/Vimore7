@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Query, ID } from 'node-appwrite';
 import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
 import { getSessionUser } from '@/lib/session';
+import { sendNativeNotification } from '@/server/native-push';
 
 const COL = {
   POSTS: 'posts',
@@ -62,6 +63,7 @@ async function sendNotification(
     action_href: actionHref,
     action_label: 'Renew Now',
   });
+  await sendNativeNotification(userId, title, content, ALERT_TYPE, actionHref);
 }
 
 function hoursLeft(expiry: number): number {

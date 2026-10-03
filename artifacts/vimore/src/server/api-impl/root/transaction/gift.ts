@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit';
 import { ID } from 'node-appwrite';
 import { logSecurityEvent, extractRequestMeta } from '@/lib/security-logger';
 import { calculatePlatformFee, PLATFORM_FEE_PERCENT } from '@/lib/transaction-fee';
+import { sendNativeNotification } from '@/server/native-push';
 
 export const maxDuration = 30;
 
@@ -142,6 +143,13 @@ export async function POST(req: NextRequest) {
           content: `@${senderDoc.username || 'Someone'} sent you ${creatorShare} Credits`,
           message: `@${senderDoc.username || 'Someone'} sent you ${creatorShare} Credits`,
           is_read: false,
+        }).then(async () => {
+          await sendNativeNotification(
+            recipientId,
+            'You received a gift!',
+            `@${senderDoc.username || 'Someone'} sent you ${creatorShare} Credits`,
+            'GIFT',
+          );
         }),
       ]);
     } catch (err) {

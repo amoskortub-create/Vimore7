@@ -10,6 +10,7 @@ import * as AuthCreateProfile from '@/server/api-impl/root/auth/create-profile';
 import * as AdvertiseSubmit from '@/server/api-impl/root/advertise/submit';
 import * as CronCleanup from '@/server/api-impl/root/cron/cleanup';
 import * as CronExpiryAlerts from '@/server/api-impl/root/cron/expiry-alerts';
+import * as CronMissedCalls from '@/server/api-impl/root/cron/missed-calls';
 import * as Calls from '@/server/api-impl/root/calls';
 import * as File from '@/server/api-impl/root/file';
 import * as FriendsAction from '@/server/api-impl/root/friends/action';
@@ -38,6 +39,7 @@ import * as PushSend from '@/server/api-impl/root/push/send';
 import * as PushSubscribe from '@/server/api-impl/root/push/subscribe';
 import * as PushUnsubscribe from '@/server/api-impl/root/push/unsubscribe';
 import * as NativePushSubscribe from '@/server/api-impl/root/push/native-subscribe';
+import * as PushMessage from '@/server/api-impl/root/push/message';
 import * as TransactionGift from '@/server/api-impl/root/transaction/gift';
 import * as TransactionLockPost from '@/server/api-impl/root/transaction/lock-post';
 import * as TransactionSubscribe from '@/server/api-impl/root/transaction/subscribe';
@@ -74,6 +76,7 @@ const ROUTES: Record<string, Handler> = {
   'advertise/submit': AdvertiseSubmit,
   'cron/cleanup': CronCleanup,
   'cron/expiry-alerts': CronExpiryAlerts,
+  'cron/missed-calls': CronMissedCalls,
   'calls': Calls,
   'friends/action': FriendsAction,
   'debug/adminwrite': DebugAdminWrite,
@@ -101,6 +104,7 @@ const ROUTES: Record<string, Handler> = {
   'push/subscribe': PushSubscribe,
   'push/unsubscribe': PushUnsubscribe,
   'push/native-subscribe': NativePushSubscribe,
+  'push/message': PushMessage,
   'transaction/gift': TransactionGift,
   'transaction/lock-post': TransactionLockPost,
   'transaction/subscribe': TransactionSubscribe,

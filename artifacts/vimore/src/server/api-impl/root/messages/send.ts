@@ -3,6 +3,7 @@ import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
 import { getSessionUser } from '@/lib/session';
 import { rateLimit } from '@/lib/rate-limit';
 import { ID } from 'node-appwrite';
+import { sendPushToUsers } from '@/server/native-push';
 
 export const maxDuration = 20;
 
@@ -88,6 +89,20 @@ export async function POST(req: NextRequest) {
     if (typeof voiceDuration === 'string' && voiceDuration) messageData.voice_duration = voiceDuration;
 
     const created = await db.createDocument(DATABASE_ID, MESSAGES_COLLECTION, ID.unique(), messageData as any);
+    await sendPushToUsers([receiverId], {
+      title: senderName || "New message",
+      body:
+        typeof text === "string" && text.trim()
+          ? text.trim().slice(0, 120)
+          : "Sent you a voice message",
+      url: `/messages?chat=${encodeURIComponent(clusterId)}`,
+      tag: `vimore-message-${created.$id}`,
+      data: {
+        type: "MESSAGE",
+        clusterId,
+        senderId: session.userId,
+      },
+    });
 
     return NextResponse.json({ ok: true, messageId: created.$id, createdAt: created.$createdAt });
   } catch (err: any) {

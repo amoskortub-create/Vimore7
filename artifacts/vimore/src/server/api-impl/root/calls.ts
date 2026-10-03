@@ -4,6 +4,7 @@ import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
 import { getSessionUser } from '@/lib/session';
 import { rateLimit, sanitizeIp } from '@/lib/rate-limit';
 import { persistCallChatLogs } from './call-chat-log';
+import { sendPushToUsers } from '@/server/native-push';
 
 export const maxDuration = 30;
 
@@ -62,6 +63,15 @@ function groupCallSessionAnchor(calls: any[]) {
 }
 
 async function markCallMissed(db: ReturnType<typeof getAdminDatabases>, call: any, now = new Date()) {
+  let current: any;
+  try {
+    current = await db.getDocument(DATABASE_ID, CALLS, call.$id);
+  } catch (error) {
+    console.error('[calls] could not recheck expired call:', error);
+    return call;
+  }
+  if (!isCallExpired(current, now.getTime())) return current;
+
   const updated = await db.updateDocument(DATABASE_ID, CALLS, call.$id, {
     status: 'missed',
     ended_at: now.toISOString(),
@@ -69,6 +79,13 @@ async function markCallMissed(db: ReturnType<typeof getAdminDatabases>, call: an
   });
   await persistCallChatLogs(db, updated, 'missed', {
     eventKey: `call:${call.$id}:missed`,
+  });
+  await sendPushToUsers([updated.callee_id], {
+    title: 'Missed call',
+    body: `You missed an incoming ${updated.type || 'audio'} call.`,
+    url: '/messages',
+    tag: `vimore-missed-call-${updated.$id}`,
+    data: { type: 'MISSED_CALL', callDocId: updated.$id },
   });
   return updated;
 }
@@ -93,6 +110,17 @@ async function markExpiredGroupCallsMissed(
       duration: 0,
     }));
   }
+
+  await sendPushToUsers(
+    [...new Set(updated.map((item: any) => item.callee_id).filter((id: string) => id !== call.caller_id))],
+    {
+      title: 'Missed group call',
+      body: 'You missed a group call.',
+      url: '/messages',
+      tag: `vimore-missed-call-${call.channel_id}`,
+      data: { type: 'MISSED_CALL', callDocId: call.$id },
+    },
+  );
 
   const hostSession = room.documents.find((item) => item.caller_id === item.callee_id);
   await persistCallChatLogs(db, hostSession || updated[0], 'missed', {
@@ -164,6 +192,44 @@ async function activeCallsForUser(db: ReturnType<typeof getAdminDatabases>, user
   return currentCalls;
 }
 
+export async function expireMissedCalls() {
+  const db = getAdminDatabases();
+  const cutoff = new Date(Date.now() - CALL_RING_TIMEOUT_MS).toISOString();
+  const expired = new Map<string, any>();
+
+  for (const status of PENDING_STATUSES) {
+    let cursor: string | undefined;
+    do {
+      const queries = [
+        Query.equal('status', status),
+        Query.lessThan('$createdAt', cutoff),
+        Query.limit(100),
+      ];
+      if (cursor) queries.push(Query.cursorAfter(cursor));
+      const result = await db.listDocuments(DATABASE_ID, CALLS, queries);
+      result.documents.forEach((call: any) => expired.set(call.$id, call));
+      cursor =
+        result.documents.length === 100
+          ? result.documents[result.documents.length - 1].$id
+          : undefined;
+    } while (cursor);
+  }
+
+  let missed = 0;
+  const handledRooms = new Set<string>();
+  for (const call of expired.values()) {
+    if (String(call.channel_id || '').startsWith('group_call_')) {
+      if (handledRooms.has(call.channel_id)) continue;
+      handledRooms.add(call.channel_id);
+      missed += (await markExpiredGroupCallsMissed(db, call)).length;
+    } else {
+      const updated = await markCallMissed(db, call);
+      if (updated.status === 'missed') missed += 1;
+    }
+  }
+  return { checked: expired.size, missed };
+}
+
 async function createDirectCall(body: Record<string, unknown>, userId: string) {
   const calleeId = body.calleeId;
   if (!isId(calleeId) || calleeId === userId || !isCallType(body.type)) {
@@ -200,6 +266,21 @@ async function createDirectCall(body: Record<string, unknown>, userId: string) {
     },
     getPermissions([userId, calleeId])
   );
+
+  let caller: any;
+  try {
+    caller = await db.getDocument(DATABASE_ID, 'users', userId);
+  } catch (error) {
+    console.warn('[calls] caller profile lookup failed for notification:', error);
+  }
+  await sendPushToUsers([calleeId], {
+    title: `Incoming ${body.type} call`,
+    body: `${caller?.name || caller?.username || 'Someone'} is calling you.`,
+    url: '/messages',
+    tag: `vimore-call-${call.$id}`,
+    data: { type: 'INCOMING_CALL', callDocId: call.$id, callType: body.type as string },
+    call: true,
+  });
 
   return NextResponse.json({ call, callee: { $id: callee.$id, name: callee.name || 'ViMore user' } }, { status: 201 });
 }
@@ -298,6 +379,14 @@ async function createGroupCall(body: Record<string, unknown>, userId: string) {
       getPermissions([userId, calleeId])
     ));
   }
+  await sendPushToUsers(callees, {
+    title: `Incoming group ${body.type} call`,
+    body: `You are invited to a call in ${group.name || 'your group'}.`,
+    url: '/messages',
+    tag: `vimore-call-group-${groupId}`,
+    data: { type: 'INCOMING_CALL', groupId, callType: body.type as string },
+    call: true,
+  });
   return NextResponse.json({ calls, call: hostSession }, { status: 201 });
 }
 
@@ -351,6 +440,20 @@ async function inviteToCall(body: Record<string, unknown>, userId: string) {
     },
     getPermissions([userId, calleeId])
   );
+  let inviter: any;
+  try {
+    inviter = await db.getDocument(DATABASE_ID, 'users', userId);
+  } catch (error) {
+    console.warn('[calls] inviter profile lookup failed for notification:', error);
+  }
+  await sendPushToUsers([calleeId], {
+    title: `Incoming ${body.type} call`,
+    body: `${inviter?.name || inviter?.username || 'Someone'} invited you to a call.`,
+    url: '/messages',
+    tag: `vimore-call-${call.$id}`,
+    data: { type: 'INCOMING_CALL', callDocId: call.$id, callType: body.type as string },
+    call: true,
+  });
   return NextResponse.json({ call, invitee: { $id: invitee.$id, name: invitee.name || 'ViMore user' } }, { status: 201 });
 }
 
@@ -543,7 +646,14 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     }
 
     if (action === 'cancel') {
-      const updated = await markCallMissed(db, call);
+      const updated = await db.updateDocument(DATABASE_ID, CALLS, call.$id, {
+        status: 'missed',
+        ended_at: new Date().toISOString(),
+        duration: 0,
+      });
+      await persistCallChatLogs(db, updated, 'missed', {
+        eventKey: `call:${call.$id}:missed`,
+      });
       return NextResponse.json({ call: updated });
     }
 
@@ -583,6 +693,18 @@ export async function PATCH(req: NextRequest): Promise<Response> {
             await persistCallChatLogs(db, missedCall, 'missed', {
               eventKey: `call:${participantCall.$id}:missed`,
             });
+          }
+          if (!groupRoom && pendingRoomCalls.length) {
+            await sendPushToUsers(
+              pendingRoomCalls.map((item) => item.callee_id).filter((id: string) => id !== call.caller_id),
+              {
+                title: 'Missed call',
+                body: `You missed an incoming ${call.type || 'audio'} call.`,
+                url: '/messages',
+                tag: `vimore-missed-call-${call.channel_id}`,
+                data: { type: 'MISSED_CALL', callDocId: call.$id },
+              },
+            );
           }
         } else {
           updated.push(await db.updateDocument(DATABASE_ID, CALLS, participantCall.$id, {

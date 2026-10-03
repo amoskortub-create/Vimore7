@@ -16,6 +16,7 @@ ViMore is a social networking and creator platform featuring social feeds, music
 | `FIREBASE_PROJECT_ID` | ✅ For Android push | Firebase Admin project ID (`studio-1245266398-590b7`) |
 | `FIREBASE_CLIENT_EMAIL` | ✅ For Android push | Service-account email from Firebase Admin credentials |
 | `FIREBASE_PRIVATE_KEY` | ✅ For Android push | Service-account private key; store as a deployment secret |
+| `CRON_SECRET` | ✅ For missed-call pushes | Random secret used to authenticate Vercel's scheduled missed-call processor |
 | `NEXT_PUBLIC_APPWRITE_ENDPOINT` | Optional | Defaults to `https://appwrite.mediatechliberia.online/v1` |
 | `NEXT_PUBLIC_APPWRITE_PROJECT_ID` | Optional | Defaults to `vimore123` |
 | `NEXT_PUBLIC_APPWRITE_DATABASE_ID` | Optional | Defaults to `vimoreprod` |
@@ -24,11 +25,11 @@ ViMore is a social networking and creator platform featuring social feeds, music
 
 **Note:** The AI code reads `GOOGLE_GENERATIVE_AI_API_KEY` first, then falls back to `GEMINI_API_KEY`. Use `GOOGLE_GENERATIVE_AI_API_KEY` for both Replit and Vercel.
 
-**Push delivery:** Android FCM requires the three Firebase Admin service-account variables above in the server deployment in addition to `android/app/google-services.json`, and users must grant notification permission in the app. Incoming calls and call invitations use the high-priority `vimore_calls_v2` channel with the Android ringtone sound and vibration. Missed calls, new messages, and other app notifications use the `vimore_default_v2` channel with the Android notification sound. Users can manage or mute either channel in Android notification settings. The in-app call screen also plays `/sounds/ringtone.wav` while it is open and an incoming or outgoing call is ringing; background FCM notifications use the system channel sound and are not a persistent, full-screen phone-call alert.
+**Push delivery:** Android FCM requires the three Firebase Admin service-account variables above in the server deployment in addition to `android/app/google-services.json`, and users must grant notification permission in the app. New unread messages and notifications are delivered when created. Incoming and invited calls use the high-priority `vimore_calls_v2` ringtone channel; missed calls, messages, and other notifications use `vimore_default_v2` with the notification sound. The native Firebase messaging service also posts notifications when the app process is stopped. Users can manage or mute either Android channel in system settings.
 
 **Android release signing:** Release APKs and AABs use the upload key stored locally at `android/vimore-upload-key.jks`; its alias and passwords are stored in the git-ignored `android/signing.properties`. Build with `cd android && ./gradlew assembleRelease bundleRelease`. Keep secure backups of both files for future Play uploads. Never commit the keystore or signing properties. For Google Play App Signing, this is the upload key; Google manages the app-signing key.
 
-**Cron/maintenance routes** (`/api/cron/cleanup`, `/api/cron/expiry-alerts`): `CRON_SECRET` auth was removed per user request. These routes now require a valid logged-in session to call, and are no longer scheduled via Vercel Cron (removed from `vercel.json`). They must be triggered manually (e.g. by an authenticated admin) or wired up to a different scheduling/auth mechanism if automatic runs are needed again.
+**Missed-call processing:** Vercel runs `/api/cron/missed-calls` every minute. Configure `CRON_SECRET` as a Vercel secret; calls unanswered for 45 seconds are marked missed and pushed even if the caller's app is closed. Other maintenance endpoints still require a signed-in admin session.
 
 **Commands:**
 - `npm run dev`: Starts the application locally on port 5000.
@@ -89,7 +90,7 @@ ViMore is a social networking and creator platform featuring social feeds, music
 - **Appwrite Schema Sync**: Manual Appwrite setup for `Marketplace_Images` bucket and `Products` collection is required. Ensure all collection attributes and indexes match the code's expectations.
 - **`user_id` Audit**: All `createDocument` calls for new collections must include `user_id` for proper data ownership and access control.
 - **Vercel Deployment**: Requires `APPWRITE_API_KEY`, `GROQ_API_KEY`, `AGORA_APP_CERTIFICATE`, and `VAPID_PRIVATE_KEY` as environment variables. See table above for full list.
-- **Cron routes now session-only**: `CRON_SECRET` was removed (per user request) from `/api/cron/cleanup` and `/api/cron/expiry-alerts`. They're no longer scheduled by Vercel Cron and require a logged-in session to invoke.
+- **Cron routes**: `/api/cron/missed-calls` is protected by `CRON_SECRET` and scheduled each minute; `/api/cron/cleanup` and `/api/cron/expiry-alerts` remain session-protected admin routes.
 - **Ad Network Key**: Configured via `NEXT_PUBLIC_AD_NETWORK_KEY` env var. If not set, falls back to the default publisher key in `banner-ad-node.tsx`.
 - **Real-time Indexes**: The `messages` collection requires a `receiver_id` attribute index for unread message count queries to function correctly.
 - **Call Button Visibility**: Call buttons in `chat-window.tsx` are only visible for accepted 1-1 DMs and are disabled if a call is already active.

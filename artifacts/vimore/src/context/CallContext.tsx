@@ -15,7 +15,6 @@ import { client, COL, DATABASE_ID, databases } from "@/lib/appwrite";
 import { authFetch } from "@/lib/auth-fetch";
 import { useToast } from "@/hooks/use-toast";
 import { usePosts, type User } from "@/context/PostContext";
-import { firePush } from "@/lib/push-fire";
 
 export type CallStatus = "dialing" | "ringing" | "accepted" | "rejected" | "missed" | "ended" | "busy";
 export type CallType = "audio" | "video";
@@ -233,20 +232,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
             .then((result) => {
               const updated = Array.isArray(result.calls) ? result.calls : [result.call];
               updated.filter(Boolean).forEach(upsertDocument);
-              const missedUserIds = updated
-                .filter((item: CallDocument) => item?.status === "missed")
-                .map((item: CallDocument) => item.callee_id)
-                .filter((userId: string) => userId !== callerId);
-              if (missedUserIds.length) {
-                firePush({
-                  userIds: missedUserIds,
-                  title: "Missed call",
-                  body: `${currentUser?.name || currentUser?.username || "Someone"} tried to call you.`,
-                  url: "/messages",
-                  tag: `vimore-missed-call-${call.channel_id}`,
-                  data: { type: "MISSED_CALL", callDocId: call.$id },
-                });
-              }
             })
             .catch(() => {
               // The callee may answer at the timeout boundary; the server resolves that race.
@@ -381,15 +366,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
     try {
       const result = await apiRequest("POST", { operation: "start", calleeId: peer.$id, type });
       upsertDocument(result.call);
-      firePush({
-        userId: peer.$id,
-        title: `Incoming ${type} call`,
-        body: `${currentUser?.name || currentUser?.username || "Someone"} is calling you.`,
-        url: "/messages",
-        tag: `vimore-call-${result.call.$id}`,
-        requireInteraction: true,
-        data: { type: "INCOMING_CALL", callDocId: result.call.$id, callType: type },
-      });
     } catch (requestError) {
       showError(requestError, "Could not start call");
     } finally {
@@ -414,20 +390,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
       });
       const docs = Array.isArray(result.calls) ? result.calls : [result.call];
       docs.forEach(upsertDocument);
-      const invitedUserIds = docs
-        .filter((call: CallDocument) => call?.callee_id && call.callee_id !== currentUser?.$id)
-        .map((call: CallDocument) => call.callee_id);
-      if (invitedUserIds.length) {
-        firePush({
-          userIds: invitedUserIds,
-          title: `Incoming group ${type} call`,
-          body: `${currentUser?.name || currentUser?.username || "Someone"} started a call in ${groupName}.`,
-          url: "/messages",
-          tag: `vimore-call-group-${groupId}`,
-          requireInteraction: true,
-          data: { type: "INCOMING_CALL", groupId, callType: type },
-        });
-      }
       const first = parseCallDocument(result.call || docs[0]);
       if (first) {
         const record = {
@@ -513,19 +475,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
         type: activeCall.call.type,
       });
       upsertDocument(result.call);
-      firePush({
-        userId: peer.$id,
-        title: `Incoming ${activeCall.call.type} call`,
-        body: `${currentUser?.name || currentUser?.username || "Someone"} invited you to a call.`,
-        url: "/messages",
-        tag: `vimore-call-${result.call.$id}`,
-        requireInteraction: true,
-        data: {
-          type: "INCOMING_CALL",
-          callDocId: result.call.$id,
-          callType: activeCall.call.type,
-        },
-      });
       toast({ title: "Invitation sent", description: `${peer.name} was invited to the call.` });
     } catch (requestError) {
       showError(requestError, "Could not invite participant");

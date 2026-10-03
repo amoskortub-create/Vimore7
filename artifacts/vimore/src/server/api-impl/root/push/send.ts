@@ -274,6 +274,7 @@ export async function POST(req: NextRequest) {
                   payload.data?.type === "INCOMING_CALL"
                     ? "vimore_calls_v2"
                     : "vimore_default_v2",
+                tag: payload.tag,
                 icon: "ic_launcher",
                 sound: "default",
               },

@@ -4,6 +4,7 @@ import { getSessionUser } from '@/lib/session';
 import { rateLimit, sanitizeIp } from '@/lib/rate-limit';
 import { ID } from 'node-appwrite';
 import { logSecurityEvent, extractRequestMeta } from '@/lib/security-logger';
+import { sendNativeNotification } from '@/server/native-push';
 
 export const maxDuration = 30;
 
@@ -75,6 +76,11 @@ export async function POST(req: NextRequest) {
         message: 'Your creator verification has been approved by our team. You are now a verified creator on ViMore!',
         is_read: false,
       });
+      await sendNativeNotification(
+        userId,
+        'Verification Approved',
+        'Your creator verification has been approved by our team. You are now a verified creator on ViMore!',
+      );
     } catch { /* non-fatal */ }
 
     void logSecurityEvent({ ...meta, event_type: 'ADMIN_VERIFY_APPROVE', severity: 'INFO', actor_id: session.userId, actor_role: session.role ?? '', target_id: userId, result: 'success', details: `Verification record ${recordId} approved` });

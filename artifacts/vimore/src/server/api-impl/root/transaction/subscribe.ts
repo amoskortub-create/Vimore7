@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit';
 import { ID, Query } from 'node-appwrite';
 import { logSecurityEvent, extractRequestMeta } from '@/lib/security-logger';
 import { calculatePlatformFee, PLATFORM_FEE_PERCENT } from '@/lib/transaction-fee';
+import { sendNativeNotification } from '@/server/native-push';
 
 export const maxDuration = 30;
 
@@ -153,6 +154,13 @@ export async function POST(req: NextRequest) {
           content: `@${subscriberDoc.username || 'Someone'} subscribed to you.`,
           message: `@${subscriberDoc.username || 'Someone'} subscribed to you.`,
           is_read: false,
+        }).then(async () => {
+          await sendNativeNotification(
+            creatorId,
+            'New Subscriber!',
+            `@${subscriberDoc.username || 'Someone'} subscribed to you.`,
+            'SUBSCRIPTION',
+          );
         }),
       ]);
     } catch (err) {

@@ -3,6 +3,7 @@ import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
 import { getSessionUser } from '@/lib/session';
 import { rateLimit } from '@/lib/rate-limit';
 import { ID, Query } from 'node-appwrite';
+import { sendNativeNotification } from '@/server/native-push';
 
 export const maxDuration = 20;
 
@@ -116,7 +117,19 @@ export async function POST(req: NextRequest) {
     };
 
     const notify = async (payload: Record<string, any>) => {
-      await db.createDocument(DATABASE_ID, NOTIFICATIONS, ID.unique(), payload).catch(() => {});
+      try {
+        await db.createDocument(DATABASE_ID, NOTIFICATIONS, ID.unique(), payload);
+        if (payload.user_id && payload.user_id !== payload.from_user_id) {
+          await sendNativeNotification(
+            payload.user_id,
+            payload.title || 'ViMore',
+            payload.content || payload.message || '',
+            payload.type || 'SOCIAL',
+          );
+        }
+      } catch (error) {
+        console.error('[friends/action] notification delivery failed:', error);
+      }
     };
 
     const meName = me.name || me.username;

@@ -3,6 +3,7 @@ import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
 import { getSessionUser } from '@/lib/session';
 import { rateLimit, sanitizeIp } from '@/lib/rate-limit';
 import { ID } from 'node-appwrite';
+import { sendNativeNotification } from '@/server/native-push';
 import { logSecurityEvent, extractRequestMeta } from '@/lib/security-logger';
 
 export const maxDuration = 30;
@@ -87,6 +88,7 @@ export async function POST(req: NextRequest) {
         content: String(message),
         is_read: false,
       });
+      await sendNativeNotification(userId, 'Account Suspended', String(message));
     }
 
     void logSecurityEvent({ ...meta, event_type: 'ADMIN_SUSPEND', severity: 'WARN', actor_id: session.userId, actor_role: session.role ?? '', target_id: userId, result: 'success', details: `${parsedDays} day(s). Reason: ${reason}. Until: ${suspendedUntil}` });

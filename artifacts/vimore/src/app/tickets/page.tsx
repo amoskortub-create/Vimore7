@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { databases, DATABASE_ID, COL, ID, Query } from "@/lib/appwrite";
+import { createNotificationDocument } from "@/lib/notification-write";
 import { usePosts } from "@/context/PostContext";
 import { useNotifications } from "@/context/NotificationContext";
 import { useToast } from "@/hooks/use-toast";
@@ -229,7 +230,7 @@ export default function TicketsPage() {
         const buyerName = currentUser.display_name || currentUser.name || currentUser.username || 'Someone';
         const eventDay = formatEventDate(selectedEvent.event_date);
         const eventTime = `${formatEventTime(selectedEvent.start_time)} - ${formatEventTime(selectedEvent.end_time)}`;
-        await databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
+        await createNotificationDocument({
           user_id: selectedRecipient.$id, from_user_id: currentUser.$id, from_user_name: buyerName,
           from_user_avatar: currentUser.avatar || '', type: 'SYSTEM', title: '🎟️ You Got a Ticket!',
           content: `${buyerName} bought you a Ticket for ${selectedEvent.title} that will be on ${eventDay} Time ${eventTime}. Don't Miss it!`,

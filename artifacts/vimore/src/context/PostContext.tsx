@@ -13,7 +13,7 @@ import { BUCKET_STORIES, storage } from '@/lib/appwrite';
 import { formatErrorDescription, logAppwriteError } from '@/lib/appwrite-error';
 import { authFetch } from '@/lib/auth-fetch';
 import { offlineCache } from '@/lib/offline-cache';
-import { firePush } from '@/lib/push-fire';
+import { createNotificationDocument } from '@/lib/notification-write';
 import { CREDIT_PRICES } from '@/lib/credit-pricing';
 import { composeFeedBatch } from '@/lib/feed-composition';
 
@@ -2140,7 +2140,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
                 follower_username: username,
                 following_username: referrerDoc.username,
               }),
-              databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
+              createNotificationDocument({
                 user_id: referrerDoc.$id,
                 type: 'SYSTEM',
                 title: 'Referral Bonus!',
@@ -2424,7 +2424,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
     }
     const results = await Promise.allSettled(
       targets.map(uid =>
-        databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
+        createNotificationDocument({
           user_id: uid,
           type: 'SYSTEM',
           title: opts.title,
@@ -2544,7 +2544,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       ]).then(res => {
         res.documents.forEach(follow => {
           if (follow.follower_id && follow.follower_id !== currentUser.$id) {
-            databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
+            createNotificationDocument({
               user_id: follow.follower_id,
               from_user_id: currentUser.$id,
               from_user_name: currentUser.name || currentUser.username,
@@ -2564,7 +2564,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       if (taggedUserIds.length > 0) {
         taggedUserIds.forEach(uid => {
           if (uid !== currentUser.$id) {
-            databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
+            createNotificationDocument({
               user_id: uid,
               from_user_id: currentUser.$id,
               from_user_name: currentUser.name || currentUser.username,
@@ -2717,7 +2717,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       if (!wasLiked) {
         const likedPost = posts.find(p => p.$id === id);
         if (likedPost && likedPost.user.$id !== currentUser.$id) {
-          databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
+          createNotificationDocument({
             user_id: likedPost.user.$id,
             from_user_id: currentUser.$id,
             from_user_name: currentUser.name || currentUser.username,
@@ -2853,7 +2853,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
         applyPostCountUpdate(postId, { comments: nextComments });
       }
       if (commentedPost && commentedPost.user.$id !== currentUser.$id) {
-        databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
+        createNotificationDocument({
           user_id: commentedPost.user.$id,
           from_user_id: currentUser.$id,
           from_user_name: currentUser.name || currentUser.username,
@@ -3180,45 +3180,28 @@ export function PostProvider({ children }: { children: ReactNode }) {
           throw new Error(data?.error || 'Could not deliver your voice message.');
         }
       } else {
-        await databases.createDocument(DATABASE_ID, isClusterMsg ? COL.GROUP_MESSAGES : COL.MESSAGES, ID.unique(), docData);
+        const collection = isClusterMsg ? COL.GROUP_MESSAGES : COL.MESSAGES;
+        const createdMessage = await databases.createDocument(
+          DATABASE_ID,
+          collection,
+          ID.unique(),
+          docData,
+        );
+        const pushResponse = await authFetch("/api/push/message", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messageId: createdMessage.$id,
+            collection,
+          }),
+        });
+        if (!pushResponse.ok) {
+          console.error(
+            `[push] message notification request failed (${pushResponse.status})`,
+          );
+        }
       }
 
-      // Deliver a Web Push to the recipient(s) for the new chat message
-      try {
-        const recipientIds: string[] = [];
-        if (isClusterMsg) {
-          const cluster = clusters.find(cl => cl.$id === recipientId);
-          (cluster?.members || [])
-            .map((m: any) => m.$id || m.userId || m.id)
-            .filter(Boolean)
-            .filter((id: string) => id !== currentUser.$id)
-            .forEach((id: string) => recipientIds.push(id));
-        } else if (docData.receiver_id) {
-          recipientIds.push(docData.receiver_id);
-        }
-        if (recipientIds.length) {
-          recipientIds.forEach((rid) => {
-            firePush({
-              userId: rid,
-              title: currentUser.name || currentUser.username || 'New message',
-              body: preview,
-              url: `/messages?chat=${encodeURIComponent(recipientId)}`,
-              icon: currentUser.avatar || '/icons/icon-192.png',
-              tag: `vimore-chat-${clusterId}`,
-              data: {
-                type: 'MESSAGE',
-                clusterId,
-                senderId: currentUser.$id,
-                recipientId: rid,
-              },
-              actions: [
-                { action: 'reply', type: 'text', title: 'Reply', placeholder: 'Type a message…' },
-                { action: 'mark-read', title: 'Mark as read' },
-              ],
-            });
-          });
-        }
-      } catch { /* push is best-effort */ }
     } catch (err: any) {
       setChatMessages(prev => ({
         ...prev,
@@ -3272,7 +3255,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
     });
     // Notify the recipient about the message request
     try {
-      await databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
+      await createNotificationDocument({
         user_id: targetUserId,
         from_user_id: currentUser.$id,
         from_user_name: currentUser.name || currentUser.username,
@@ -3735,7 +3718,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
         is_read: false,
       };
       if (proofImageUrl) notifData.image = proofImageUrl;
-      await databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), notifData);
+      await createNotificationDocument(notifData);
       // If REJECTED, refund the balance
       if (status === 'REJECTED') {
         const currency: string = wdDoc.currency || 'GOLD';
@@ -3974,7 +3957,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
         ]).catch(() => ({ documents: [] }));
 
         if (alreadyNotified.documents.length <= 1) {
-          databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
+          createNotificationDocument({
             user_id: viewedStory.user.$id,
             from_user_id: currentUser.$id,
             from_user_name: currentUser.name || currentUser.username,
@@ -4029,7 +4012,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
   const replyToTicket = async (ticketUserId: string, ticketId: string, reply: string) => {
     if (!currentUser || !reply.trim()) return;
-    await databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
+    await createNotificationDocument({
       user_id: ticketUserId,
       type: 'SYSTEM',
       message: reply.trim(),

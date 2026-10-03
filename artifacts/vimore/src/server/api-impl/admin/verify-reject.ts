@@ -4,6 +4,7 @@ import { getSessionUser } from '@/lib/session';
 import { rateLimit, sanitizeIp } from '@/lib/rate-limit';
 import { ID } from 'node-appwrite';
 import { logSecurityEvent, extractRequestMeta } from '@/lib/security-logger';
+import { sendNativeNotification } from '@/server/native-push';
 
 export const maxDuration = 30;
 
@@ -84,6 +85,11 @@ export async function POST(req: NextRequest) {
         message: `Your verification request was not approved. Reason: ${reason || 'Does not meet verification requirements'}. Your fee has been refunded.`,
         is_read: false,
       });
+      await sendNativeNotification(
+        userId,
+        'Verification Not Approved',
+        `Your verification request was not approved. Reason: ${reason || 'Does not meet verification requirements'}. Your fee has been refunded.`,
+      );
     } catch { /* non-fatal */ }
 
     void logSecurityEvent({ ...meta, event_type: 'ADMIN_VERIFY_REJECT', severity: 'INFO', actor_id: session.userId, actor_role: session.role ?? '', target_id: userId, result: 'success', details: `Verification record ${recordId} rejected. Reason: ${reason || 'Does not meet requirements'}. Fee refunded: ${amount} ${currency}` });

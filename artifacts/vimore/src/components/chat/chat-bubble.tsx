@@ -125,10 +125,10 @@ export function ChatBubble({
   const [isPlayingVideo, setIsPlayingVideo] = useState(false);
   const [isPlayingVoice, setIsPlayingVoice] = useState(false);
   const [voiceElapsed, setVoiceElapsed] = useState(0);
-  const [voiceAccepted, setVoiceAccepted] = useState(false);
+  const [voiceMediaDuration, setVoiceMediaDuration] = useState(0);
+  const [voicePlaybackError, setVoicePlaybackError] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const voiceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(text || '');
@@ -165,34 +165,74 @@ export function ChatBubble({
 
   const isRead = status === "read";
 
-  const stopVoice = () => {
-    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
-    if (voiceTimerRef.current) clearInterval(voiceTimerRef.current);
+  useEffect(() => {
+    if (!mediaUrl) return;
+
     setIsPlayingVoice(false);
     setVoiceElapsed(0);
-  };
+    setVoiceMediaDuration(0);
+    setVoicePlaybackError(false);
 
-  const playVoice = () => {
-    if (!mediaUrl) return;
+    const audio = new Audio(mediaUrl);
+    audio.preload = "metadata";
+    audioRef.current = audio;
+
+    const updateDuration = () => {
+      if (Number.isFinite(audio.duration)) setVoiceMediaDuration(audio.duration);
+    };
+    const updateElapsed = () => setVoiceElapsed(audio.currentTime);
+    const handlePlay = () => {
+      setIsPlayingVoice(true);
+      setVoicePlaybackError(false);
+    };
+    const handlePause = () => setIsPlayingVoice(false);
+    const handleEnded = () => {
+      setIsPlayingVoice(false);
+      setVoiceElapsed(0);
+    };
+    const handleError = () => {
+      setIsPlayingVoice(false);
+      setVoicePlaybackError(true);
+    };
+
+    audio.addEventListener("loadedmetadata", updateDuration);
+    audio.addEventListener("durationchange", updateDuration);
+    audio.addEventListener("timeupdate", updateElapsed);
+    audio.addEventListener("play", handlePlay);
+    audio.addEventListener("pause", handlePause);
+    audio.addEventListener("ended", handleEnded);
+    audio.addEventListener("error", handleError);
+
+    return () => {
+      audio.pause();
+      audio.removeEventListener("loadedmetadata", updateDuration);
+      audio.removeEventListener("durationchange", updateDuration);
+      audio.removeEventListener("timeupdate", updateElapsed);
+      audio.removeEventListener("play", handlePlay);
+      audio.removeEventListener("pause", handlePause);
+      audio.removeEventListener("ended", handleEnded);
+      audio.removeEventListener("error", handleError);
+      audioRef.current = null;
+    };
+  }, [mediaUrl]);
+
+  const playVoice = async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
     triggerHaptic(10);
-    setVoiceAccepted(true);
+    setVoicePlaybackError(false);
 
-    if (isPlayingVoice) { stopVoice(); return; }
-
-    if (!audioRef.current) {
-      audioRef.current = new Audio(mediaUrl);
-      audioRef.current.onended = () => { stopVoice(); };
-      audioRef.current.onerror = () => { stopVoice(); };
+    if (!audio.paused) {
+      audio.pause();
+      return;
     }
 
-    audioRef.current.currentTime = 0;
-    audioRef.current.play().catch(() => { stopVoice(); });
-    setIsPlayingVoice(true);
-    setVoiceElapsed(0);
-    if (voiceTimerRef.current) clearInterval(voiceTimerRef.current);
-    voiceTimerRef.current = setInterval(() => {
-      if (audioRef.current) setVoiceElapsed(audioRef.current.currentTime);
-    }, 100);
+    if (audio.ended) audio.currentTime = 0;
+    try {
+      await audio.play();
+    } catch {
+      setVoicePlaybackError(true);
+    }
   };
 
   const formatVoiceTime = (s: number) => {
@@ -207,13 +247,11 @@ export function ChatBubble({
     return (m || 0) * 60 + (s || 0);
   };
 
-  const voiceTotalSecs = parseDurationSecs(voiceDuration);
+  const voiceTotalSecs = voiceMediaDuration || parseDurationSecs(voiceDuration);
   const voiceProgress = voiceTotalSecs > 0 ? Math.min((voiceElapsed / voiceTotalSecs) * 100, 100) : 0;
 
   useEffect(() => {
     return () => {
-      if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
-      if (voiceTimerRef.current) clearInterval(voiceTimerRef.current);
       if (typeof document !== 'undefined') document.body.style.pointerEvents = 'auto';
     };
   }, []);
@@ -434,66 +472,85 @@ export function ChatBubble({
             )}
 
             {type === "voice" && !(isViewOnce && !isMe) && (
-              <div className={cn(
-                "flex items-center gap-3 px-4 py-3 min-w-[220px] max-w-[280px]",
-              )}>
+              <div className="flex min-w-[250px] max-w-[300px] items-center gap-3 px-3.5 py-3">
                 <button
                   onClick={playVoice}
+                  aria-label={isPlayingVoice ? "Pause voice message" : "Play voice message"}
                   className={cn(
-                    "h-10 w-10 rounded-full flex items-center justify-center shrink-0 transition-all active:scale-90",
+                    "flex h-11 w-11 shrink-0 items-center justify-center rounded-full shadow-sm transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
                     isMe
-                      ? "bg-white/20 hover:bg-white/30 text-white"
-                      : "bg-primary/10 hover:bg-primary/20 text-primary"
+                      ? "bg-white text-primary hover:bg-white/90 focus-visible:ring-white focus-visible:ring-offset-primary"
+                      : "bg-primary text-primary-foreground hover:bg-primary/90 focus-visible:ring-primary focus-visible:ring-offset-background"
                   )}
                 >
                   {isPlayingVoice
                     ? <Pause className="h-4 w-4 fill-current" />
-                    : <Play className="h-4 w-4 fill-current ml-0.5" />
+                    : <Play className="ml-0.5 h-4 w-4 fill-current" />
                   }
                 </button>
 
-                <div className="flex-1 flex flex-col gap-1.5 min-w-0">
-                  <div className={cn(
-                    "relative h-1.5 rounded-full overflow-hidden",
-                    isMe ? "bg-white/20" : "bg-primary/15"
-                  )}>
-                    <div
-                      className={cn("h-full rounded-full transition-all duration-100", isMe ? "bg-white/80" : "bg-primary")}
-                      style={{ width: `${voiceAccepted ? voiceProgress : 0}%` }}
-                    />
-                    {!voiceAccepted && (
-                      <div className="absolute inset-0 flex gap-0.5 items-center px-0.5">
-                        {Array.from({ length: 18 }).map((_, i) => (
-                          <div
-                            key={i}
-                            className={cn("flex-1 rounded-full", isMe ? "bg-white/30" : "bg-primary/25")}
-                            style={{ height: `${30 + Math.sin(i * 0.8) * 50 + (i % 3) * 15}%` }}
-                          />
-                        ))}
-                      </div>
-                    )}
-                    {voiceAccepted && isPlayingVoice && (
-                      <div className="absolute inset-0 flex gap-0.5 items-center px-0.5 opacity-30">
-                        {Array.from({ length: 18 }).map((_, i) => (
-                          <div
-                            key={i}
-                            className={cn("flex-1 rounded-full", isMe ? "bg-white" : "bg-primary")}
-                            style={{ height: `${30 + Math.sin(i * 0.8) * 50 + (i % 3) * 15}%` }}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                   <div className="flex items-center justify-between">
-                    <span className={cn("text-[10px] font-black uppercase tracking-widest", isMe ? "text-white/60" : "text-muted-foreground")}>
-                      {isPlayingVoice ? formatVoiceTime(voiceElapsed) : (voiceDuration || '0:00')}
+                    <span className={cn(
+                      "text-[9px] font-bold uppercase tracking-[0.16em]",
+                      isMe ? "text-white/65" : "text-muted-foreground"
+                    )}>
+                      Voice message
                     </span>
-                    {!voiceAccepted && !isMe && (
-                      <span className={cn("text-[9px] font-black uppercase tracking-widest", "text-primary/60")}>
-                        Tap to play
-                      </span>
-                    )}
+                    <MicIcon className={cn("h-3 w-3", isMe ? "text-white/65" : "text-primary/70")} />
                   </div>
+
+                  <div className="group/wave relative flex h-8 items-center gap-[3px]" aria-label="Voice message playback position">
+                    {Array.from({ length: 28 }).map((_, i) => {
+                      const played = i / 28 <= voiceProgress / 100;
+                      return (
+                        <span
+                          key={i}
+                          aria-hidden="true"
+                          className={cn(
+                            "flex-1 rounded-full transition-colors duration-150",
+                            played
+                              ? isMe ? "bg-white" : "bg-primary"
+                              : isMe ? "bg-white/35" : "bg-primary/25"
+                          )}
+                          style={{ height: `${24 + Math.abs(Math.sin(i * 0.71)) * 62 + (i % 4) * 3}%` }}
+                        />
+                      );
+                    })}
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(voiceTotalSecs, 1)}
+                      step={0.1}
+                      value={Math.min(voiceElapsed, Math.max(voiceTotalSecs, 1))}
+                      aria-label="Seek voice message"
+                      className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0 focus-visible:opacity-20"
+                      onTouchStart={(event) => event.stopPropagation()}
+                      onTouchMove={(event) => event.stopPropagation()}
+                      onTouchEnd={(event) => event.stopPropagation()}
+                      onChange={(event) => {
+                        const audio = audioRef.current;
+                        if (!audio) return;
+                        audio.currentTime = Number(event.currentTarget.value);
+                        setVoiceElapsed(audio.currentTime);
+                      }}
+                    />
+                    <div className="pointer-events-none absolute inset-0 rounded-md ring-primary/40 group-focus-within/wave:ring-2" />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <span className={cn("text-[10px] font-semibold tabular-nums", isMe ? "text-white/75" : "text-muted-foreground")}>
+                      {isPlayingVoice || voiceElapsed > 0 ? formatVoiceTime(voiceElapsed) : (voiceDuration || formatVoiceTime(voiceTotalSecs))}
+                    </span>
+                    <span className={cn("text-[10px] tabular-nums", isMe ? "text-white/55" : "text-muted-foreground/75")}>
+                      {formatVoiceTime(voiceTotalSecs)}
+                    </span>
+                  </div>
+                  {voicePlaybackError && (
+                    <span role="status" className={cn("text-[10px]", isMe ? "text-white/80" : "text-destructive")}>
+                      Could not play this voice message.
+                    </span>
+                  )}
                 </div>
               </div>
             )}

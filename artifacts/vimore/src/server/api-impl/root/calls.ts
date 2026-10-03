@@ -47,6 +47,14 @@ function isCallExpired(call: any, nowMs = Date.now()) {
   return Number.isFinite(createdAt) && nowMs - createdAt >= CALL_RING_TIMEOUT_MS;
 }
 
+function hasJoinedGroupParticipant(calls: any[]) {
+  return calls.some((item) =>
+    String(item.channel_id || '').startsWith('group_call_') &&
+    item.caller_id !== item.callee_id &&
+    item.status === 'accepted',
+  );
+}
+
 function earliestCallCreatedAt(calls: any[]) {
   const createdCalls = calls
     .filter((item) => typeof item.$createdAt === 'string' && Number.isFinite(Date.parse(item.$createdAt)))
@@ -82,6 +90,7 @@ async function markExpiredGroupCallsMissed(
     Query.equal('channel_id', call.channel_id),
     Query.limit(100),
   ]);
+  if (hasJoinedGroupParticipant(room.documents)) return [];
   const expiredCalls = room.documents.filter((item) => isCallExpired(item, now.getTime()));
   if (!expiredCalls.length) return [];
 
@@ -509,12 +518,20 @@ export async function PATCH(req: NextRequest): Promise<Response> {
       return jsonError('Only the invited participant can accept this call.', 409);
     }
     if (action === 'accept' && isCallExpired(call)) {
-      if (String(call.channel_id || '').startsWith('group_call_')) {
-        await markExpiredGroupCallsMissed(db, call);
-      } else {
-        await markCallMissed(db, call);
+      const isGroupCall = String(call.channel_id || '').startsWith('group_call_');
+      let groupHasJoinedParticipant = false;
+      if (isGroupCall) {
+        const room = await db.listDocuments(DATABASE_ID, CALLS, [
+          Query.equal('channel_id', call.channel_id),
+          Query.limit(100),
+        ]);
+        groupHasJoinedParticipant = hasJoinedGroupParticipant(room.documents);
       }
-      return jsonError('This call timed out and was recorded as missed.', 409);
+      if (!groupHasJoinedParticipant) {
+        if (isGroupCall) await markExpiredGroupCallsMissed(db, call);
+        else await markCallMissed(db, call);
+        return jsonError('This call timed out and was recorded as missed.', 409);
+      }
     }
     if (action === 'accept' && (!isCallee || !['dialing', 'ringing'].includes(String(call.status)))) {
       return jsonError('This call cannot be accepted.', 409);
@@ -570,6 +587,12 @@ export async function PATCH(req: NextRequest): Promise<Response> {
       const pendingRoomCalls = activeRoomCalls.filter((participantCall) =>
         PENDING_STATUSES.has(String(participantCall.status)),
       );
+      const joinedGroupParticipants = groupRoom
+        ? activeRoomCalls.filter((participantCall) =>
+            participantCall.caller_id !== participantCall.callee_id &&
+            participantCall.status === 'accepted',
+          )
+        : [];
       const updated = [];
       for (const participantCall of activeRoomCalls) {
         if (PENDING_STATUSES.has(String(participantCall.status))) {
@@ -592,7 +615,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
           }));
         }
       }
-      if (groupRoom && pendingRoomCalls.length) {
+      if (groupRoom && pendingRoomCalls.length && !joinedGroupParticipants.length) {
         const hostSession = sameRoom.documents.find((item) => item.caller_id === item.callee_id);
         await persistCallChatLogs(db, hostSession || pendingRoomCalls[0], 'missed', {
           eventKey: `group:${call.channel_id}:${groupCallSessionAnchor(sameRoom.documents)}:missed`,
@@ -610,7 +633,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
       const eventKey = call.channel_id.startsWith('group_call_')
         ? `group:${call.channel_id}:${earliestCallStart(activeRoomCalls) || call.$createdAt || call.$id}:completed`
         : `direct-room:${call.channel_id}:completed`;
-      if (acceptedRoomCalls.length) {
+      if (groupRoom ? joinedGroupParticipants.length > 0 : acceptedRoomCalls.length > 0) {
         await persistCallChatLogs(db, call, 'completed', {
           eventKey,
           duration,

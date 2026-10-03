@@ -8,7 +8,7 @@
  * - Push notifications and badge control unchanged
  */
 
-const SW_VERSION = 'v1791055897265';
+const SW_VERSION = 'v1791058020046';
 const APP_SHELL_CACHE = `vimore-shell-${SW_VERSION}`;
 const PAGE_CACHE      = `vimore-pages-${SW_VERSION}`;
 const MEDIA_CACHE     = `vimore-media-${SW_VERSION}`;

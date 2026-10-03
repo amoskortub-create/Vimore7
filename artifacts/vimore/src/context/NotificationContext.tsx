@@ -73,6 +73,32 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const [hasPushPermission, setHasPushPermission] = useState(false);
   const [unreadMessageCount, setUnreadMessageCount] = useState(0);
   const { settings, triggerHaptic, currentUser, selectedChatId } = usePosts();
+  const TEN_MINUTES_MS = 10 * 60 * 1000;
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+
+    const promptKey = 'vimore_notification_prompted';
+    if (localStorage.getItem(promptKey) === '1') return;
+    if (Notification.permission !== 'default') {
+      localStorage.setItem(promptKey, '1');
+      setHasPushPermission(Notification.permission === 'granted');
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const permission = await Notification.requestPermission();
+        setHasPushPermission(permission === 'granted');
+      } catch {
+        setHasPushPermission(false);
+      } finally {
+        localStorage.setItem(promptKey, '1');
+      }
+    }, TEN_MINUTES_MS);
+
+    return () => clearTimeout(timer);
+  }, [currentUser?.$id]);
 
   // Tracks IDs currently being deleted so polls don't re-add them
   const pendingDeletions = React.useRef<Set<string>>(new Set());

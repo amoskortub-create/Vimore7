@@ -1,12 +1,15 @@
 package cfd.mediatech.vimore;
 
 import android.Manifest;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.media.AudioAttributes;
 import android.media.RingtoneManager;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.webkit.PermissionRequest;
 import android.webkit.WebSettings;
 
@@ -18,6 +21,10 @@ import com.getcapacitor.BridgeWebChromeClient;
 public class MainActivity extends BridgeActivity {
 	private static final int PERMISSIONS_REQUEST_CODE = 100;
 	private static final int WEB_PERMISSION_REQUEST_CODE = 101;
+	private static final int NOTIFICATION_PERMISSION_REQUEST_CODE = 102;
+	private static final long TEN_MINUTES_MS = 10 * 60 * 1000L;
+	private static final String PREFS_NAME = "vimore_prefs";
+	private static final String KEY_NOTIFICATION_PROMPTED = "notification_prompted";
 	private PermissionRequest pendingWebPermissionRequest;
 
 	@Override
@@ -31,6 +38,7 @@ public class MainActivity extends BridgeActivity {
 			getBridge().getWebView().setWebChromeClient(new ViMoreWebChromeClient(getBridge()));
 		}
 		requestMediaAndLocationPermissions();
+		scheduleNotificationPermissionPrompt();
 	}
 
 	private void createNotificationChannel() {
@@ -95,6 +103,29 @@ public class MainActivity extends BridgeActivity {
 		}
 	}
 
+	private void scheduleNotificationPermissionPrompt() {
+		if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+			return;
+		}
+		SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+		if (prefs.getBoolean(KEY_NOTIFICATION_PROMPTED, false)) {
+			return;
+		}
+		if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+			prefs.edit().putBoolean(KEY_NOTIFICATION_PROMPTED, true).apply();
+			return;
+		}
+
+		new Handler(Looper.getMainLooper()).postDelayed(() -> {
+			ActivityCompat.requestPermissions(
+				this,
+				new String[] { Manifest.permission.POST_NOTIFICATIONS },
+				NOTIFICATION_PERMISSION_REQUEST_CODE
+			);
+			prefs.edit().putBoolean(KEY_NOTIFICATION_PROMPTED, true).apply();
+		}, TEN_MINUTES_MS);
+	}
+
 	private class ViMoreWebChromeClient extends BridgeWebChromeClient {
 		ViMoreWebChromeClient(com.getcapacitor.Bridge bridge) {
 			super(bridge);
@@ -138,6 +169,10 @@ public class MainActivity extends BridgeActivity {
 			else pendingWebPermissionRequest.deny();
 			pendingWebPermissionRequest = null;
 			return;
+		}
+		if (requestCode == NOTIFICATION_PERMISSION_REQUEST_CODE) {
+			SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+			prefs.edit().putBoolean(KEY_NOTIFICATION_PROMPTED, true).apply();
 		}
 		super.onRequestPermissionsResult(requestCode, permissions, grantResults);
 	}

@@ -67,12 +67,37 @@ export async function registerNativePush(
   }
 
   const permission = await PushNotifications.checkPermissions();
-  const requested =
-    permission.receive === "prompt"
-      ? await PushNotifications.requestPermissions()
-      : permission;
-  if (requested.receive !== "granted") return;
+  if (permission.receive !== "prompt") {
+    if (permission.receive === "granted") {
+      await PushNotifications.register();
+      await saveLatestToken();
+    }
+    return;
+  }
 
-  await PushNotifications.register();
-  await saveLatestToken();
+  const promptKey = "vimore_native_push_prompted";
+  if (typeof window !== "undefined" && window.localStorage.getItem(promptKey) === "1") {
+    return;
+  }
+
+  const TEN_MINUTES_MS = 10 * 60 * 1000;
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const requested = await PushNotifications.requestPermissions();
+        if (requested.receive === "granted") {
+          await PushNotifications.register();
+          await saveLatestToken();
+        }
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem(promptKey, "1");
+        }
+      } catch (error) {
+        console.warn("[native-push] delayed permission request failed", error);
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem(promptKey, "1");
+        }
+      }
+    })();
+  }, TEN_MINUTES_MS);
 }

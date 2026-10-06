@@ -3,6 +3,7 @@ import webpush from "web-push";
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getMessaging } from "firebase-admin/messaging";
 import { getAdminDatabases, DATABASE_ID } from "@/lib/appwrite-server";
+import { getSessionUser } from "@/lib/session";
 import { rateLimit } from "@/lib/rate-limit";
 import { Query } from "node-appwrite";
 
@@ -72,12 +73,86 @@ interface PushPayload {
   actions?: { action: string; title: string; icon?: string }[];
 }
 
+async function isAuthorizedPush(
+  db: ReturnType<typeof getAdminDatabases>,
+  senderId: string,
+  targetIds: string[],
+  payload: PushPayload,
+  sourceId?: string,
+  sourceIds: string[] = [],
+): Promise<boolean> {
+  const type = String(payload.data?.type || '').toUpperCase();
+
+  if (type === 'MESSAGE') {
+    if (!sourceId) return false;
+    let source: any = null;
+    let collection = 'messages';
+    try {
+      source = await db.getDocument(DATABASE_ID, collection, sourceId);
+    } catch {
+      collection = 'group_messages';
+      try {
+        source = await db.getDocument(DATABASE_ID, collection, sourceId);
+      } catch {
+        return false;
+      }
+    }
+    if (source.sender_id !== senderId) return false;
+    if (collection === 'messages') {
+      return targetIds.every((targetId) => source.receiver_id === targetId);
+    }
+    try {
+      const members = await db.listDocuments(DATABASE_ID, 'cluster_members', [
+        Query.equal('cluster_id', source.cluster_id),
+        Query.limit(100),
+      ]);
+      const memberIds = new Set(members.documents.map((doc: any) => String(doc.user_id || '')));
+      return targetIds.every((targetId) => targetId !== senderId && memberIds.has(targetId));
+    } catch {
+      return false;
+    }
+  }
+
+  if (type === 'INCOMING_CALL' || type === 'MISSED_CALL') {
+    const allowedCallIds = [...new Set([sourceId, ...sourceIds].filter((id): id is string => typeof id === 'string'))];
+    if (!allowedCallIds.length) return false;
+    const calls = await Promise.all(allowedCallIds.map(async (id) => {
+      try {
+        return await db.getDocument(DATABASE_ID, 'calls', id);
+      } catch {
+        return null;
+      }
+    }));
+    return targetIds.every((targetId) => calls.some((call: any) =>
+      call?.caller_id === senderId &&
+      call?.callee_id === targetId &&
+      (type === 'MISSED_CALL'
+        ? call.status === 'missed'
+        : ['dialing', 'ringing'].includes(String(call.status))),
+    ));
+  }
+
+  if (!sourceId) return false;
+  try {
+    const notification: any = await db.getDocument(DATABASE_ID, 'notifications', sourceId);
+    const recipientId = notification.user_id || notification.recipient_id;
+    return notification.from_user_id === senderId && targetIds.every((targetId) => recipientId === targetId);
+  } catch {
+    return false;
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
+    const session = await getSessionUser(req);
+    if (!session) {
+      return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
+    }
+
     const ip =
       req.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown";
 
-    const rl = rateLimit(`push-send:${ip}`, 60, 60_000);
+    const rl = rateLimit(`push-send:${session.userId}:${ip}`, 60, 60_000);
     if (!rl.allowed) {
       return NextResponse.json(
         { error: "Too many requests." },
@@ -86,10 +161,12 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { userId, userIds, payload } = body as {
+    const { userId, userIds, payload, sourceId, sourceIds } = body as {
       userId?: string;
       userIds?: string[];
       payload: PushPayload;
+      sourceId?: string;
+      sourceIds?: string[];
     };
 
     const rawTargets = (
@@ -146,6 +223,16 @@ export async function POST(req: NextRequest) {
     ensureVapid();
 
     const db = getAdminDatabases();
+    if (!(await isAuthorizedPush(
+      db,
+      session.userId,
+      targets,
+      payload,
+      typeof sourceId === 'string' ? sourceId : undefined,
+      Array.isArray(sourceIds) ? sourceIds.filter((id): id is string => typeof id === 'string') : [],
+    ))) {
+      return NextResponse.json({ error: 'Push event could not be verified.' }, { status: 403 });
+    }
 
     const subs: Array<{
       $id: string;

@@ -3082,6 +3082,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       cl.$id === recipientId ? { ...cl, lastMessage: preview, lastTime: time } : cl
     ));
 
+    let pushSourceId: string | undefined;
     try {
       const isClusterMsg = clusters.some(cl => cl.$id === recipientId);
       const clusterId = isClusterMsg ? recipientId : [currentUser.username, recipientId].sort().join('_');
@@ -3133,8 +3134,16 @@ export function PostProvider({ children }: { children: ReactNode }) {
           const data = await response.json().catch(() => ({}));
           throw new Error(data?.error || 'Could not deliver your voice message.');
         }
+        const data = await response.json().catch(() => ({}));
+        pushSourceId = typeof data?.messageId === 'string' ? data.messageId : undefined;
       } else {
-        await databases.createDocument(DATABASE_ID, isClusterMsg ? COL.GROUP_MESSAGES : COL.MESSAGES, ID.unique(), docData);
+        const createdMessage = await databases.createDocument(
+          DATABASE_ID,
+          isClusterMsg ? COL.GROUP_MESSAGES : COL.MESSAGES,
+          ID.unique(),
+          docData,
+        );
+        pushSourceId = createdMessage.$id;
       }
 
       // Deliver a Web Push to the recipient(s) for the new chat message
@@ -3154,6 +3163,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
           recipientIds.forEach((rid) => {
             firePush({
               userId: rid,
+              sourceId: pushSourceId,
               title: currentUser.name || currentUser.username || 'New message',
               body: preview,
               url: `/messages?chat=${encodeURIComponent(recipientId)}`,

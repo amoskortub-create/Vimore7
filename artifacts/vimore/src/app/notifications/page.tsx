@@ -32,6 +32,8 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useToast } from "@/hooks/use-toast";
+import { Capacitor } from "@capacitor/core";
+import { isPushSupported } from "@/lib/push-notifications";
 
 const TYPE_CONFIG: Record<string, { color: string; bg: string; border: string; dot: string; Icon: any }> = {
   SOCIAL:  { color: "text-blue-500",   bg: "bg-blue-500/10",   border: "border-blue-500/15",   dot: "bg-blue-500",   Icon: UserPlus   },
@@ -63,7 +65,7 @@ export default function NotificationsPage() {
   const router = useRouter();
   const { toast } = useToast();
   const { t } = useTranslation();
-  const { notifications, markAsRead, markAllAsRead, purgeSignal } = useNotifications();
+  const { notifications, markAsRead, markAllAsRead, purgeSignal, hasPushPermission, requestPushPermission } = useNotifications();
   const { isFollowing, triggerHaptic, currentUser } = usePosts();
   const { setTrack, currentTrack, isExpanded, globalSongs } = useMusic();
   const [activeFilter, setActiveFilter] = useState("all");
@@ -129,11 +131,33 @@ export default function NotificationsPage() {
                       Notifications
                     </h1>
                   </div>
+                  <div className="flex items-center gap-2">
+                  {currentUser && !Capacitor.isNativePlatform() && isPushSupported() && !hasPushPermission && (
+                    <Button
+                      variant="secondary"
+                      className="rounded-full bg-white/15 text-white hover:bg-white/25"
+                      onClick={async () => {
+                        try {
+                          await requestPushPermission();
+                          if (Notification.permission === "granted") {
+                            toast({ title: "Push notifications enabled", description: "New messages, calls, and notifications can reach you when ViMore is closed." });
+                          } else {
+                            toast({ variant: "destructive", title: "Notifications not enabled", description: "Allow notifications for this site in your browser settings, then try again." });
+                          }
+                        } catch (error: any) {
+                          toast({ variant: "destructive", title: "Could not enable notifications", description: error?.message || "Please try again." });
+                        }
+                      }}
+                    >
+                      <Bell className="mr-2 h-4 w-4" /> Enable push
+                    </Button>
+                  )}
                   {unreadCount > 0 && (
                     <div className="bg-white/20 backdrop-blur px-3 py-1.5 rounded-full">
                       <span className="text-white font-black text-sm">{unreadCount} new</span>
                     </div>
                   )}
+                  </div>
                 </div>
                 <button
                   onClick={() => { triggerHaptic(5); markAllAsRead(); }}

@@ -1,3 +1,5 @@
+import { authFetch } from "@/lib/auth-fetch";
+
 /**
  * Fire-and-forget helper: triggers Web Push and native FCM delivery to the
  * target user's registered devices.
@@ -16,6 +18,8 @@ export interface FirePushOptions {
   renotify?: boolean;
   data?: Record<string, any>;
   actions?: { action: string; title: string; icon?: string; type?: 'button' | 'text'; placeholder?: string }[];
+  sourceId?: string;
+  sourceIds?: string[];
 }
 
 export function firePush(opts: FirePushOptions): void {
@@ -37,18 +41,15 @@ export function firePush(opts: FirePushOptions): void {
     actions: opts.actions,
   };
 
-  // Use sendBeacon when possible so the request survives navigation
-  try {
-    const blob = new Blob([JSON.stringify({ userIds: targets, payload })], {
-      type: 'application/json',
-    });
-    if (navigator.sendBeacon && navigator.sendBeacon('/api/push/send', blob)) return;
-  } catch {}
-
-  fetch('/api/push/send', {
+  void authFetch('/api/push/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userIds: targets, payload }),
+    body: JSON.stringify({
+      userIds: targets,
+      payload,
+      sourceId: opts.sourceId,
+      sourceIds: opts.sourceIds,
+    }),
     keepalive: true,
   }).then((response) => {
     if (!response.ok) {

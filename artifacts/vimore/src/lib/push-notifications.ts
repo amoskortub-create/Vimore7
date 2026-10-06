@@ -1,3 +1,5 @@
+import { authFetch } from '@/lib/auth-fetch';
+
 /**
  * Web Push subscription helpers.
  *
@@ -58,11 +60,12 @@ export async function subscribeToPush(): Promise<PushSubscription | null> {
   }
 
   try {
-    await fetch('/api/push/subscribe', {
+    const response = await authFetch('/api/push/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(sub.toJSON()),
     });
+    if (!response.ok) throw new Error(`Push subscription failed (${response.status})`);
   } catch (err) {
     console.warn('[push] failed to POST subscription to server', err);
   }
@@ -77,7 +80,7 @@ export async function unsubscribeFromPush(): Promise<boolean> {
   if (!sub) return true;
 
   try {
-    await fetch('/api/push/unsubscribe', {
+    await authFetch('/api/push/unsubscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ endpoint: sub.endpoint }),

@@ -6,6 +6,7 @@ import { usePosts } from '@/context/PostContext';
 import { databases, DATABASE_ID, COL, ID, Query } from '@/lib/appwrite';
 import { firePush } from '@/lib/push-fire';
 import { authFetch } from '@/lib/auth-fetch';
+import { subscribeToPush } from '@/lib/push-notifications';
 
 export type SignalType = 'SOCIAL' | 'SONIC' | 'POST' | 'SYSTEM';
 export type PulseCategory = 'HOME' | 'FRIENDS' | 'MUSIC' | 'MESSAGES' | 'ADMIN';
@@ -78,21 +79,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!currentUser?.$id || Capacitor.isNativePlatform() || typeof window === 'undefined' || !('Notification' in window)) return;
 
-    if (Notification.permission !== 'default') {
-      setHasPushPermission(Notification.permission === 'granted');
-      return;
-    }
-
-    let cancelled = false;
-    Notification.requestPermission()
-      .then((permission) => {
-        if (!cancelled) setHasPushPermission(permission === 'granted');
-      })
-      .catch(() => {
-        if (!cancelled) setHasPushPermission(false);
-      });
-
-    return () => { cancelled = true; };
+    setHasPushPermission(Notification.permission === 'granted');
   }, [currentUser?.$id]);
 
   // Tracks IDs currently being deleted so polls don't re-add them
@@ -200,30 +187,30 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           if (pendingReads.current.delete(localId)) {
             databases.updateDocument(DATABASE_ID, COL.NOTIFICATIONS, doc.$id, { is_read: true }).catch(() => {});
           }
+          // Send only after the notification exists so the server can verify
+          // the recipient and origin before delivering a push.
+          if (targetUserId !== currentUser?.$id) {
+            firePush({
+              userId: targetUserId,
+              sourceId: doc.$id,
+              title: signal.title || 'ViMore',
+              body: signal.content || '',
+              url: signal.actionHref || '/notifications',
+              icon: signal.avatar || '/icons/icon-192.png',
+              image: signal.image,
+              tag: `vimore-${signal.type.toLowerCase()}`,
+              data: {
+                type: signal.type,
+                postId: signal.postId,
+                trackId: signal.trackId,
+                targetUsername: signal.targetUsername,
+              },
+            });
+          }
         })
         .catch((err) => {
           console.error('addSignal DB write failed:', err);
         });
-
-      // Deliver a Web Push to the recipient for ALL notification types
-      // (SOCIAL, SONIC, POST, SYSTEM, ADMIN, etc.) — works in background too.
-      if (targetUserId !== currentUser?.$id) {
-        firePush({
-          userId: targetUserId,
-          title: signal.title || 'ViMore',
-          body: signal.content || '',
-          url: signal.actionHref || '/notifications',
-          icon: signal.avatar || '/icons/icon-192.png',
-          image: signal.image,
-          tag: `vimore-${signal.type.toLowerCase()}`,
-          data: {
-            type: signal.type,
-            postId: signal.postId,
-            trackId: signal.trackId,
-            targetUsername: signal.targetUsername,
-          },
-        });
-      }
     }
   }, [triggerSound, triggerHaptic, currentUser]);
 
@@ -349,10 +336,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   }, [loadNotifications]);
 
   const requestPushPermission = async () => {
-    if (typeof window !== 'undefined' && "Notification" in window) {
-      const permission = await Notification.requestPermission();
-      setHasPushPermission(permission === "granted");
-    }
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    const permission = await Notification.requestPermission();
+    const granted = permission === 'granted';
+    setHasPushPermission(granted);
+    if (granted) await subscribeToPush();
   };
 
   const unreadCount = notifications.filter(n => !n.isRead).length;

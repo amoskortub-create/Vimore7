@@ -378,7 +378,8 @@ self.addEventListener('push', event => {
     payload = { title: 'ViMore', body: event.data ? event.data.text() : '' };
   }
 
-  const isCallPush = payload.data && payload.data.type === 'incoming-call';
+  const pushType = String(payload.data?.type || '').toLowerCase().replace(/_/g, '-');
+  const isCallPush = pushType === 'incoming-call';
   const title = payload.title || 'ViMore';
   const options = {
     body: payload.body || '',

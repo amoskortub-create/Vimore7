@@ -1,5 +1,6 @@
 import { Capacitor } from "@capacitor/core";
 import { PushNotifications, type Token } from "@capacitor/push-notifications";
+import { authFetch } from "@/lib/auth-fetch";
 
 let listenersRegistered = false;
 let currentUserId: string | undefined;
@@ -13,7 +14,7 @@ export function isNativePushAvailable(): boolean {
 }
 
 async function saveToken(token: Token, userId: string): Promise<void> {
-  const response = await fetch("/api/push/native-subscribe", {
+  const response = await authFetch("/api/push/native-subscribe", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },

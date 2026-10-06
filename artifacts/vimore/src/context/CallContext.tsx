@@ -240,6 +240,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
               if (missedUserIds.length) {
                 firePush({
                   userIds: missedUserIds,
+                  sourceIds: updated.filter((item: CallDocument) => item?.status === "missed").map((item: CallDocument) => item.$id),
                   title: "Missed call",
                   body: `${currentUser?.name || currentUser?.username || "Someone"} tried to call you.`,
                   url: "/messages",
@@ -383,6 +384,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       upsertDocument(result.call);
       firePush({
         userId: peer.$id,
+        sourceId: result.call.$id,
         title: `Incoming ${type} call`,
         body: `${currentUser?.name || currentUser?.username || "Someone"} is calling you.`,
         url: "/messages",
@@ -420,6 +422,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
       if (invitedUserIds.length) {
         firePush({
           userIds: invitedUserIds,
+          sourceIds: docs
+            .filter((call: CallDocument) => call?.callee_id && call.callee_id !== currentUser?.$id)
+            .map((call: CallDocument) => call.$id),
           title: `Incoming group ${type} call`,
           body: `${currentUser?.name || currentUser?.username || "Someone"} started a call in ${groupName}.`,
           url: "/messages",
@@ -515,6 +520,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       upsertDocument(result.call);
       firePush({
         userId: peer.$id,
+        sourceId: result.call.$id,
         title: `Incoming ${activeCall.call.type} call`,
         body: `${currentUser?.name || currentUser?.username || "Someone"} invited you to a call.`,
         url: "/messages",

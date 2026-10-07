@@ -15,6 +15,32 @@ const MEDIA_CACHE     = `vimore-media-${SW_VERSION}`;
 const PINNED_CACHE    = `vimore-pinned-${SW_VERSION}`;
 const CACHE_NAMES     = [APP_SHELL_CACHE, PAGE_CACHE, MEDIA_CACHE, PINNED_CACHE];
 
+// Firebase Web Messaging is initialized only in browsers that expose the Push
+// API. The Capacitor Android app continues to receive native FCM notifications.
+const FIREBASE_WEB_CONFIG = {
+  apiKey: 'AIzaSyD9_45zPiEAxV6QByRQSGRMA3pdr3S4C84',
+  authDomain: 'studio-1245266398-590b7.firebaseapp.com',
+  projectId: 'studio-1245266398-590b7',
+  storageBucket: 'studio-1245266398-590b7.firebasestorage.app',
+  messagingSenderId: '695712565764',
+  appId: '1:695712565764:web:9bac8bfea8208b6cc4c351',
+};
+
+try {
+  if (self.registration?.pushManager && typeof Notification !== 'undefined') {
+    importScripts(
+      'https://www.gstatic.com/firebasejs/12.19.0/firebase-app-compat.js',
+      'https://www.gstatic.com/firebasejs/12.19.0/firebase-messaging-compat.js'
+    );
+    if (self.firebase) {
+      if (!self.firebase.apps.length) self.firebase.initializeApp(FIREBASE_WEB_CONFIG);
+      self.firebase.messaging();
+    }
+  }
+} catch (error) {
+  console.warn('[push] Firebase background messaging could not initialize.', error);
+}
+
 const MAX_PAGE_AGE_MS   = 5  * 60 * 60 * 1000;  // 5 h
 const MAX_MEDIA_AGE_MS  = 5  * 60 * 60 * 1000;  // 5 h
 const MAX_PINNED_AGE_MS = 24 * 60 * 60 * 1000;  // 24 h
@@ -378,6 +404,26 @@ self.addEventListener('push', event => {
     payload = { title: 'ViMore', body: event.data ? event.data.text() : '' };
   }
 
+  // The Firebase Messaging SDK handles display/click behavior for its own
+  // notification messages. Avoid displaying a second copy here.
+  if (
+    payload.data?.vimore_fcm_web === '1' ||
+    payload.vimore_fcm_web === '1'
+  ) {
+    event.waitUntil((async () => {
+      try {
+        const count = Number(payload.data?.badgeCount || payload.badgeCount);
+        if (self.navigator.setAppBadge) {
+          if (count > 0) await self.navigator.setAppBadge(count);
+          else await self.navigator.setAppBadge();
+        }
+      } catch {}
+      const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      clients.forEach(c => c.postMessage({ type: 'PUSH_RECEIVED', payload }));
+    })());
+    return;
+  }
+
   const pushType = String(payload.data?.type || '').toLowerCase().replace(/_/g, '-');
   const isCallPush = pushType === 'incoming-call';
   const title = payload.title || 'ViMore';
@@ -418,6 +464,10 @@ self.addEventListener('push', event => {
 self.addEventListener('notificationclick', event => {
   const action = event.action;
   const data = event.notification.data || {};
+  const isFirebasePush =
+    data.FCM_MSG?.data?.vimore_fcm_web === '1' ||
+    data.vimore_fcm_web === '1';
+  if (isFirebasePush && !action) return;
   const targetUrl = data.url || '/';
   event.notification.close();
 

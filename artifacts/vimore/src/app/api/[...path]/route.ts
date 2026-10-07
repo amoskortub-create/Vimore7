@@ -101,6 +101,8 @@ const ROUTES: Record<string, Handler> = {
   'push/subscribe': PushSubscribe,
   'push/unsubscribe': PushUnsubscribe,
   'push/native-subscribe': NativePushSubscribe,
+  'push/web-subscribe': NativePushSubscribe,
+  'push/web-unsubscribe': PushUnsubscribe,
   'transaction/gift': TransactionGift,
   'transaction/lock-post': TransactionLockPost,
   'transaction/subscribe': TransactionSubscribe,

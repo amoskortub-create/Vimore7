@@ -10,7 +10,7 @@ const IS_DEV = process.env.NODE_ENV !== 'production';
 const csp = [
   `default-src 'self'`,
   // unsafe-eval removed in production; ad-network script host explicitly whitelisted
-  `script-src 'self' 'unsafe-inline'${IS_DEV ? " 'unsafe-eval'" : ''} https://www.highperformanceformat.com`,
+  `script-src 'self' 'unsafe-inline'${IS_DEV ? " 'unsafe-eval'" : ''} https://www.highperformanceformat.com https://www.gstatic.com`,
   `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com`,
   `font-src 'self' data: https://fonts.gstatic.com`,
   // Appwrite + Agora signalling + push endpoint

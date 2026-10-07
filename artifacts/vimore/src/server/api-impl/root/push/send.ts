@@ -11,7 +11,7 @@ export const maxDuration = 30;
 
 const SUBS_COLLECTION = "push_subscriptions";
 const MAX_TARGETS = 100;
-const NATIVE_TOKENS_COLLECTION = "native_push_tokens";
+const FCM_TOKENS_COLLECTION = "native_push_tokens";
 
 const VAPID_PUBLIC =
   process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ||
@@ -42,7 +42,7 @@ function getFirebaseMessaging() {
   if (!projectId || !clientEmail || !privateKey) {
     if (!firebaseConfigWarningLogged) {
       console.warn(
-        "[push/send] Firebase Admin credentials are not configured; native FCM delivery is unavailable.",
+        "[push/send] Firebase Admin credentials are not configured; FCM delivery is unavailable.",
       );
       firebaseConfigWarningLogged = true;
     }
@@ -201,7 +201,7 @@ export async function POST(req: NextRequest) {
     }
     if (payload.url && typeof payload.url === "string") {
       try {
-        const u = new URL(payload.url, "https://placeholder.local");
+        const u = new URL(payload.url, "https://vimore.cfd");
         if (
           ![
             "/",
@@ -214,13 +214,15 @@ export async function POST(req: NextRequest) {
           ].some((p) => u.pathname.startsWith(p))
         ) {
           payload.url = "/notifications";
+        } else {
+          // FCM links must stay on ViMore even if a caller supplies an
+          // absolute URL with an otherwise allowed path.
+          payload.url = `${u.pathname}${u.search}${u.hash}`;
         }
       } catch {
         payload.url = "/notifications";
       }
     }
-
-    ensureVapid();
 
     const db = getAdminDatabases();
     if (!(await isAuthorizedPush(
@@ -283,9 +285,14 @@ export async function POST(req: NextRequest) {
     let sent = 0;
     let failed = 0;
 
+    if (subs.length) ensureVapid();
     await Promise.all(
       subs.map(async (s) => {
         try {
+          if (!vapidConfigured) {
+            failed++;
+            return;
+          }
           await webpush.sendNotification(
             { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
             json,
@@ -311,18 +318,24 @@ export async function POST(req: NextRequest) {
 
     let nativeSent = 0;
     let nativeFailed = 0;
+    let webSent = 0;
+    let webFailed = 0;
     const messaging = getFirebaseMessaging();
     if (messaging) {
-      const nativeTokens: Array<{ $id: string; token: string }> = [];
+      const fcmTokens: Array<{ $id: string; token: string; platform: string }> = [];
       for (const uid of targets) {
         try {
           const result = await db.listDocuments(
             DATABASE_ID,
-            NATIVE_TOKENS_COLLECTION,
+            FCM_TOKENS_COLLECTION,
             [Query.equal("user_id", uid), Query.limit(10)],
           );
           result.documents.forEach((d: any) =>
-            nativeTokens.push({ $id: d.$id, token: d.token }),
+            fcmTokens.push({
+              $id: d.$id,
+              token: d.token,
+              platform: String(d.platform || "android"),
+            }),
           );
         } catch (err: any) {
           console.warn(
@@ -332,8 +345,28 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      for (let index = 0; index < nativeTokens.length; index += 500) {
-        const batch = nativeTokens.slice(index, index + 500);
+      const appUrl = new URL(payload.url || "/notifications", "https://vimore.cfd").toString();
+      const callPush = String(payload.data?.type || "").toUpperCase() === "INCOMING_CALL";
+      const webActions = callPush
+        ? [
+            { action: "accept-call", title: "✅ Accept" },
+            { action: "decline-call", title: "❌ Decline" },
+          ]
+        : (payload.actions || []).map(({ action, title, icon }) => ({ action, title, icon }));
+      const fcmData = Object.fromEntries(
+        Object.entries({
+          ...payload.data,
+          url: payload.url || "/notifications",
+          tag: payload.tag || "",
+        })
+          .filter(([, value]) => Boolean(value))
+          .map(([key, value]) => [
+            key,
+            typeof value === "string" ? value : JSON.stringify(value),
+          ]),
+      );
+      for (let index = 0; index < fcmTokens.length; index += 500) {
+        const batch = fcmTokens.slice(index, index + 500);
         try {
           const response = await messaging.sendEachForMulticast({
             tokens: batch.map((item) => item.token),
@@ -342,18 +375,7 @@ export async function POST(req: NextRequest) {
               body: payload.body || "",
               imageUrl: payload.image,
             },
-            data: Object.fromEntries(
-              Object.entries({
-                ...payload.data,
-                url: payload.url || "/notifications",
-                tag: payload.tag || "",
-              })
-                .filter(([, value]) => Boolean(value))
-                .map(([key, value]) => [
-                  key,
-                  typeof value === "string" ? value : JSON.stringify(value),
-                ]),
-            ),
+            data: fcmData,
             android: {
               priority: "high",
               notification: {
@@ -365,9 +387,31 @@ export async function POST(req: NextRequest) {
                 sound: "default",
               },
             },
+            webpush: {
+              data: { ...fcmData, vimore_fcm_web: "1" },
+              notification: {
+                icon: payload.icon || "/icons/icon-192.png",
+                badge: payload.badge || "/icons/icon-192.png",
+                image: payload.image,
+                tag: payload.tag,
+                requireInteraction: callPush || payload.requireInteraction,
+                actions: webActions,
+                data: { ...fcmData, vimore_fcm_web: "1" },
+              },
+              fcmOptions: { link: appUrl },
+            },
           });
-          nativeSent += response.successCount;
-          nativeFailed += response.failureCount;
+          response.responses.forEach((result, responseIndex) => {
+            const isWeb = batch[responseIndex].platform === "web";
+            if (result.success) {
+              if (isWeb) webSent++;
+              else nativeSent++;
+            } else if (isWeb) {
+              webFailed++;
+            } else {
+              nativeFailed++;
+            }
+          });
           await Promise.all(
             response.responses.map(async (result, responseIndex) => {
               const code = (result.error as any)?.code;
@@ -378,7 +422,7 @@ export async function POST(req: NextRequest) {
                 try {
                   await db.deleteDocument(
                     DATABASE_ID,
-                    NATIVE_TOKENS_COLLECTION,
+                    FCM_TOKENS_COLLECTION,
                     batch[responseIndex].$id,
                   );
                 } catch {}
@@ -387,7 +431,7 @@ export async function POST(req: NextRequest) {
           );
         } catch (err: any) {
           console.warn(
-            "[push/send] native delivery failed:",
+            "[push/send] FCM delivery failed:",
             err?.message || err,
           );
         }
@@ -399,9 +443,11 @@ export async function POST(req: NextRequest) {
       sent,
       failed,
       total: subs.length,
-      reason: subs.length || nativeSent ? undefined : "no_subscriptions",
+      reason: subs.length || nativeSent || webSent ? undefined : "no_subscriptions",
       nativeSent,
       nativeFailed,
+      webSent,
+      webFailed,
     });
   } catch (err: any) {
     return NextResponse.json(

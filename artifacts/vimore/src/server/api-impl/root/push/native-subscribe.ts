@@ -7,7 +7,12 @@ import { getMessaging } from "firebase-admin/messaging";
 
 const COLLECTION_ID = "native_push_tokens";
 
-async function sendUnreadDigest(db: ReturnType<typeof getAdminDatabases>, userId: string, token: string) {
+async function sendUnreadDigest(
+  db: ReturnType<typeof getAdminDatabases>,
+  userId: string,
+  token: string,
+  platform: "android" | "web",
+) {
   const [messages, userNotifications, recipientNotifications] = await Promise.allSettled([
     db.listDocuments(DATABASE_ID, "messages", [
       Query.equal("receiver_id", userId),
@@ -46,6 +51,7 @@ async function sendUnreadDigest(db: ReturnType<typeof getAdminDatabases>, userId
   const app = getApps()[0] || initializeApp({
     credential: cert({ projectId, clientEmail, privateKey }),
   });
+  const url = messageCount ? "/messages" : "/notifications";
   await getMessaging(app).send({
     token,
     notification: {
@@ -54,12 +60,20 @@ async function sendUnreadDigest(db: ReturnType<typeof getAdminDatabases>, userId
     },
     data: {
       type: "UNREAD_DIGEST",
-      url: messageCount ? "/messages" : "/notifications",
+      url,
     },
-    android: {
+    ...(platform === "android" ? { android: {
       priority: "high",
       notification: { channelId: "vimore_default_v2", sound: "default" },
-    },
+    } } : {
+      webpush: {
+        data: { type: "UNREAD_DIGEST", url, vimore_fcm_web: "1" },
+        notification: {
+          data: { type: "UNREAD_DIGEST", url, vimore_fcm_web: "1" },
+        },
+        fcmOptions: { link: new URL(url, "https://vimore.cfd").toString() },
+      },
+    }),
   });
 }
 
@@ -79,7 +93,7 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    if (platform !== "android") {
+    if (platform !== "android" && platform !== "web") {
       return NextResponse.json(
         { error: "Unsupported platform." },
         { status: 400 },
@@ -115,16 +129,16 @@ export async function POST(req: NextRequest) {
 
     if (isNewToken) {
       try {
-        await sendUnreadDigest(db, session.userId, token);
+        await sendUnreadDigest(db, session.userId, token, platform);
       } catch (error: any) {
-        console.warn("[push/native-subscribe] unread digest delivery failed:", error?.message || error);
+        console.warn("[push/fcm-subscribe] unread digest delivery failed:", error?.message || error);
       }
     }
 
     return NextResponse.json({ ok: true });
   } catch (error: any) {
     console.warn(
-      "[push/native-subscribe] storage failed:",
+      "[push/fcm-subscribe] storage failed:",
       error?.message || error,
     );
     return NextResponse.json(

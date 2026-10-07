@@ -340,7 +340,17 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const permission = await Notification.requestPermission();
     const granted = permission === 'granted';
     setHasPushPermission(granted);
-    if (granted) await subscribeToPush();
+    if (granted) {
+      try {
+        const token = await subscribeToPush();
+        if (!token) {
+          throw new Error('This browser could not register for Firebase push notifications.');
+        }
+      } catch (error) {
+        setHasPushPermission(false);
+        throw error;
+      }
+    }
   };
 
   const unreadCount = notifications.filter(n => !n.isRead).length;

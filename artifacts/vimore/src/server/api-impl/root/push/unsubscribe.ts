@@ -14,7 +14,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
     }
 
-    const { endpoint } = await req.json();
+    const body = await req.json();
+    const { endpoint, token, platform } = body || {};
+    if (typeof token === 'string') {
+      if (token.length < 20 || token.length > 4096 || platform !== 'web') {
+        return NextResponse.json({ error: 'Invalid FCM token.' }, { status: 400 });
+      }
+      const db = getAdminDatabases();
+      const registered = await db.listDocuments(DATABASE_ID, 'native_push_tokens', [
+        Query.equal('token', token),
+        Query.equal('user_id', session.userId),
+        Query.equal('platform', 'web'),
+        Query.limit(10),
+      ]);
+      await Promise.all(registered.documents.map((doc: any) =>
+        db.deleteDocument(DATABASE_ID, 'native_push_tokens', doc.$id),
+      ));
+      return NextResponse.json({ ok: true });
+    }
     if (typeof endpoint !== 'string' || endpoint.length > 2048) {
       return NextResponse.json({ error: 'Missing endpoint' }, { status: 400 });
     }

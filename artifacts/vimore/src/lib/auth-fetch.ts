@@ -14,6 +14,8 @@
  * JWT is attempted in parallel as a secondary credential.
  */
 
+import { clearApiResponseCache, fetchCachedApiResponse } from './api-response-cache';
+
 const PROJECT_ID =
   process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || 'vimore123';
 
@@ -61,19 +63,44 @@ export async function authFetch(
     headers.set('X-Appwrite-Session', session);
   }
 
-  // Secondary: Appwrite JWT via Authorization header (belt-and-suspenders)
-  const jwt = await tryGetJwt();
-  if (jwt) {
-    headers.set('Authorization', `Bearer ${jwt}`);
+  const requestUrl = typeof window !== 'undefined' ? new URL(url, window.location.origin) : null;
+  const bypassPaths = [
+    '/api/auth/', '/api/presence', '/api/notifications', '/api/messages',
+    '/api/calls', '/api/admin/', '/api/payment/', '/api/withdraw',
+    '/api/monetization/', '/api/push/', '/api/user/activity',
+  ];
+  const canCache = Boolean(
+    typeof window !== 'undefined' &&
+    (options.method === undefined || options.method.toUpperCase() === 'GET') &&
+    options.cache === undefined && Boolean(getSessionFromStorage()) &&
+    requestUrl?.origin === window.location.origin &&
+    requestUrl.pathname.startsWith('/api/') &&
+    !bypassPaths.some((path) => requestUrl.pathname.startsWith(path))
+  );
+
+  const fetchFresh = async () => {
+    // Secondary: Appwrite JWT via Authorization header (belt-and-suspenders)
+    const jwt = await tryGetJwt();
+    if (jwt) headers.set('Authorization', `Bearer ${jwt}`);
+
+    // Keep the browser/WebView HTTP cache off; eligible reads use IndexedDB above.
+    return fetch(url, {
+      ...options,
+      headers,
+      cache: options.cache ?? 'no-store',
+    });
+  };
+
+  if (canCache) {
+    const session = getSessionFromStorage();
+    if (session) return fetchCachedApiResponse(url, session, fetchFresh);
   }
 
-  // Auth/session reads must never be satisfied by the Android WebView HTTP
-  // cache. The cached response can contain the previous profile document.
-  return fetch(url, {
-    ...options,
-    headers,
-    cache: options.cache ?? 'no-store',
-  });
+  const response = await fetchFresh();
+  if (response.ok && options.method && options.method.toUpperCase() !== 'GET') {
+    await clearApiResponseCache();
+  }
+  return response;
 }
 
 /** Call on logout to clear the JWT cache. */

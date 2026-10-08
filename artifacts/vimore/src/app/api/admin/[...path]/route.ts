@@ -10,6 +10,7 @@ import * as UsersWarn from '@/server/api-impl/admin/users/warn';
 import * as Verifications from '@/server/api-impl/admin/verifications';
 import * as VerifyApprove from '@/server/api-impl/admin/verify-approve';
 import * as VerifyReject from '@/server/api-impl/admin/verify-reject';
+import * as SecurityEvents from '@/server/api-impl/admin/security-events';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -27,6 +28,7 @@ const ROUTES: Record<string, Handler> = {
   'verifications': Verifications,
   'verify-approve': VerifyApprove,
   'verify-reject': VerifyReject,
+  'security-events': SecurityEvents,
 };
 
 async function dispatch(req: NextRequest, method: string, ctx: { params: Promise<{ path: string[] }> }) {

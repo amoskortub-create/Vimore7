@@ -76,6 +76,7 @@ const MEDIA_EXTENSIONS = [
 const VIDEO_EXTENSIONS = ['.mp4', '.webm', '.ogv'];
 
 const APPWRITE_FILE_PATTERNS = ['/v1/storage/buckets/', '/files/'];
+const PRIVATE_FILE_BUCKETS = new Set(['message_media', 'voice_messages', 'payment_screenshots']);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -90,6 +91,13 @@ function isMediaUrl(url) {
     if (host === 'picsum.photos') return true;
     if (host.includes('appwrite.io') || host.includes('appwrite.cloud')) return true;
     return false;
+  } catch { return false; }
+}
+
+function isPrivateFileUrl(url) {
+  try {
+    const match = new URL(url).pathname.match(/^\/api\/file\/([^/]+)\//);
+    return Boolean(match && PRIVATE_FILE_BUCKETS.has(decodeURIComponent(match[1])));
   } catch { return false; }
 }
 
@@ -141,6 +149,16 @@ async function purgeExpired(cacheName, maxAge) {
       })
     );
   } catch {}
+}
+
+async function purgePrivateFileCaches() {
+  await Promise.all([MEDIA_CACHE, PINNED_CACHE].map(async cacheName => {
+    try {
+      const cache = await caches.open(cacheName);
+      const keys = await cache.keys();
+      await Promise.all(keys.filter(request => isPrivateFileUrl(request.url)).map(request => cache.delete(request)));
+    } catch {}
+  }));
 }
 
 /**
@@ -211,6 +229,7 @@ self.addEventListener('activate', event => {
         purgeExpired(PAGE_CACHE,   MAX_PAGE_AGE_MS),
         purgeExpired(MEDIA_CACHE,  MAX_MEDIA_AGE_MS),
         purgeExpired(PINNED_CACHE, MAX_PINNED_AGE_MS),
+        purgePrivateFileCaches(),
       ]))
       .then(() => self.clients.claim())
       .then(async () => {
@@ -224,6 +243,7 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const { request } = event;
   if (request.method !== 'GET') return;
+  if (isPrivateFileUrl(request.url)) return;
 
   // ── 1. Static assets: network-first, cache fallback ──────────────────────
   // A cache-first strategy can keep an old Next bundle alive after an import
@@ -339,6 +359,7 @@ self.addEventListener('message', event => {
       caches.open(PINNED_CACHE).then(async cache => {
         for (const url of data.urls) {
           try {
+            if (isPrivateFileUrl(url)) continue;
             const existing = await cache.match(url);
             if (existing && !isExpired(existing, MAX_PINNED_AGE_MS)) continue;
             // Fetch without Range header so we get the complete file (status 200)

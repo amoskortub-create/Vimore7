@@ -371,7 +371,7 @@ function ChatPanel({
 
 // ─── Main inbox page ──────────────────────────────────────────────────────────
 export default function StoreInboxPage() {
-  const { storeId } = useParams<{ storeId: string }>();
+  const storeId = useParams<{ storeId: string }>()?.storeId ?? '';
   const router = useRouter();
   const { currentUser, isLoading } = usePosts();
 

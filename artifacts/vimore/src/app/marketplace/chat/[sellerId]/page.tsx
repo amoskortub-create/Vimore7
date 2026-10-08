@@ -102,14 +102,14 @@ function VoiceBubble({ url, duration, isMe }: { url: string; duration?: string; 
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function MarketplaceChatPage() {
-  const { sellerId } = useParams<{ sellerId: string }>();
+  const sellerId = useParams<{ sellerId: string }>()?.sellerId ?? '';
   const searchParams = useSearchParams();
   const router = useRouter();
   const { currentUser } = usePosts();
 
-  const productId = searchParams.get("product") || "store";
-  const productName = searchParams.get("pname") || "";
-  const storeName = searchParams.get("store") || "";
+  const productId = searchParams?.get("product") || "store";
+  const productName = searchParams?.get("pname") || "";
+  const storeName = searchParams?.get("store") || "";
 
   // ── Identity ──────────────────────────────────────────────────────────────
   const [guestId, setGuestId] = useState<string>("");

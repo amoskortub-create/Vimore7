@@ -24,7 +24,7 @@ function MessagesInner() {
   const isPlayerActive = currentTrack && !isExpanded;
 
   useEffect(() => {
-    const open = searchParams.get('open');
+    const open = searchParams?.get('open');
     if (open) { setSelectedChatId(open); setContextChatId(open); }
   }, [searchParams, setContextChatId]);
 

@@ -5,10 +5,11 @@
  *   - Appwrite Functions (correct runtime)
  */
 import { Client, Databases, Functions, IndexType, Runtime } from 'node-appwrite';
+import 'dotenv/config';
 
-const ENDPOINT   = 'https://mediatechliberia.online/v1';
-const PROJECT_ID = 'vimore123';
-const DB_ID      = 'vimoreprod';
+const ENDPOINT   = process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || 'https://appwrite.mediatechliberia.online/v1';
+const PROJECT_ID = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || 'vimore123';
+const DB_ID      = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID || 'vimoreprod';
 const COLL_ID    = 'security_events';
 const API_KEY    = process.env.APPWRITE_API_KEY;
 
@@ -27,6 +28,9 @@ async function tryCreate(label, fn) {
     else console.error(`  ✗ ${label}: ${e.message}`);
   }
 }
+
+await db.updateCollection(DB_ID, COLL_ID, 'security_events', [], false);
+console.log('  ✓ public security-event reads disabled');
 
 // Fix: severity — not required, with default 'INFO'
 console.log('\n[ fix: severity attribute ]');

@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
 import { getSessionUser } from '@/lib/session';
 import { ID } from 'node-appwrite';
@@ -13,7 +13,7 @@ const LEGACY_TYPES: Record<string, string> = {
   unlock_music: 'MUSIC_UNLOCK',
 };
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const session = await getSessionUser(req);
     if (!session) {

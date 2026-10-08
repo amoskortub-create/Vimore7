@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 export default function ChatRedirectPage() {
-  const { userId } = useParams<{ userId: string }>();
+  const userId = useParams<{ userId: string }>()?.userId ?? '';
   const router = useRouter();
 
   useEffect(() => {

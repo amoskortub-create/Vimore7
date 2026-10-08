@@ -13,8 +13,8 @@ function VerifyContent() {
   const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
-    const userId = searchParams.get('userId');
-    const secret = searchParams.get('secret');
+    const userId = searchParams?.get('userId');
+    const secret = searchParams?.get('secret');
 
     if (!userId || !secret) {
       setStatus('error');

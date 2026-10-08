@@ -33,6 +33,7 @@ const ROUTES = [
   { path: '/api/admin/verifications', method: 'GET' },
   { path: '/api/admin/verify-approve', method: 'POST' },
   { path: '/api/admin/verify-reject', method: 'POST' },
+  { path: '/api/admin/security-events', method: 'GET' },
 
   // oauth dispatcher
   { path: '/api/oauth/clients/info', method: 'GET' },

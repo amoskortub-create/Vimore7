@@ -1,6 +1,5 @@
 import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
-import { ID, Query } from 'node-appwrite';
 import { getAdminDatabases, getAdminUsers, DATABASE_ID } from '@/lib/appwrite-server';
 import { getSessionUser } from '@/lib/session';
 
@@ -31,9 +30,8 @@ export async function POST(req: NextRequest) {
       securityQuestion, securityAnswer, referralCode,
     } = body;
 
-    // Check if this is the very first user (assign SUPER role)
-    const existingCount = await db.listDocuments(DATABASE_ID, COL_USERS, [Query.limit(1)]);
-    const assignedRole = existingCount.total === 0 ? 'SUPER' : 'USER';
+    const bootstrapAdminId = process.env.SUPER_ADMIN_USER_ID?.trim();
+    const assignedRole = bootstrapAdminId === userId ? 'SUPER' : 'USER';
 
     const docData: Record<string, any> = {
       name,

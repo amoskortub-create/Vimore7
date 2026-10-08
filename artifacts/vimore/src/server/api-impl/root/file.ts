@@ -116,7 +116,9 @@ export async function GET(
     const responseHeaders: Record<string, string> = {
       'Content-Type': contentType,
       'Accept-Ranges': acceptRanges,
-      'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
+      'Cache-Control': PUBLIC_BUCKETS.has(bucket)
+        ? 'public, max-age=86400, stale-while-revalidate=604800'
+        : 'private, no-store',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, OPTIONS',
       'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',

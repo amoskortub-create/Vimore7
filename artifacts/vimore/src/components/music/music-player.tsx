@@ -127,8 +127,8 @@ export function MusicPlayer() {
   const stats = trackStats[currentTrack.id] || { likes: currentTrack.likes || 0, unlikes: currentTrack.unlikes || 0 };
 
   /* ── MINI PLAYER ────────────────────────────────────────────── */
-  const isChatPage = pathname.startsWith('/chat/');
-  const isMusicPage = pathname.startsWith('/music');
+  const isChatPage = pathname?.startsWith('/chat/') ?? false;
+  const isMusicPage = pathname?.startsWith('/music') ?? false;
   const miniPlayerBottom = isMusicPage ? 'bottom-[148px]' : 'bottom-[76px]';
 
   if (!isExpanded) {
@@ -150,7 +150,7 @@ export function MusicPlayer() {
               "relative h-11 w-11 rounded-xl overflow-hidden shrink-0 shadow-lg",
               isPlaying && "ring-2 ring-primary/40"
             )}>
-              <Image src={currentTrack.cover} alt={currentTrack.title} fill className={cn("object-cover transition-transform duration-[3s]", isPlaying && "animate-spin")} style={{ animationDuration: "12s" }} />
+              <Image src={currentTrack.cover} alt={currentTrack.title} fill className={cn("object-cover transition-transform [transition-duration:3s]", isPlaying && "animate-spin")} style={{ animationDuration: "12s" }} />
             </div>
 
             {/* info */}
@@ -252,7 +252,7 @@ export function MusicPlayer() {
                   isPlaying ? "opacity-100" : "opacity-0"
                 )} />
                 <div className={cn(
-                  "relative w-56 h-56 sm:w-72 sm:h-72 rounded-full overflow-hidden shadow-2xl ring-4 ring-white/10 transition-transform duration-[3s]",
+                  "relative w-56 h-56 sm:w-72 sm:h-72 rounded-full overflow-hidden shadow-2xl ring-4 ring-white/10 transition-transform [transition-duration:3s]",
                   isPlaying && "animate-spin"
                 )} style={{ animationDuration: "12s" }}>
                   <Image src={currentTrack.cover} alt={currentTrack.title} fill className="object-cover" />

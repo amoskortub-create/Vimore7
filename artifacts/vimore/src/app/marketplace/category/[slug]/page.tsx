@@ -10,7 +10,7 @@ import { listStoresByCategory, slugToCategory, StoreDoc } from "@/lib/stores";
 import { ArrowLeft, Store } from "lucide-react";
 
 export default function CategoryPage() {
-  const { slug } = useParams<{ slug: string }>();
+  const slug = useParams<{ slug: string }>()?.slug ?? '';
   const category = slugToCategory(slug);
   const [stores, setStores] = useState<StoreDoc[]>([]);
   const [loading, setLoading] = useState(true);

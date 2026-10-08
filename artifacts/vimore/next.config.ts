@@ -55,9 +55,7 @@ const nextConfig: NextConfig = {
       {
         source: '/(.*)',
         headers: [
-          // Content Security Policy
           { key: 'Content-Security-Policy', value: csp },
-          // Prevent MIME-type sniffing
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           // Only allow this site to frame itself (blocks clickjacking)
           { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
@@ -89,12 +87,6 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        source: '/api/file/:path*',
-        headers: [
-          { key: 'Cache-Control', value: 'public, max-age=86400, stale-while-revalidate=604800' },
-        ],
-      },
-      {
         source: '/.well-known/assetlinks.json',
         headers: [
           { key: 'Content-Type', value: 'application/json; charset=utf-8' },
@@ -103,12 +95,6 @@ const nextConfig: NextConfig = {
         ],
       },
     ];
-  },
-  typescript: {
-    ignoreBuildErrors: true,
-  },
-  eslint: {
-    ignoreDuringBuilds: true,
   },
   allowedDevOrigins: ['127.0.0.1', 'localhost', '*.replit.dev', '*.replit.app', '*.spock.replit.dev', '*.worf.replit.dev', '*.janeway.replit.dev'],
   experimental: {

@@ -12,6 +12,7 @@ import { BUCKET_STORIES, storage } from '@/lib/appwrite';
 
 import { formatErrorDescription, logAppwriteError } from '@/lib/appwrite-error';
 import { authFetch } from '@/lib/auth-fetch';
+import { clearApiResponseCache } from '@/lib/api-response-cache';
 import { offlineCache } from '@/lib/offline-cache';
 import { firePush } from '@/lib/push-fire';
 import { CREDIT_PRICES } from '@/lib/credit-pricing';
@@ -2131,6 +2132,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try { await account.deleteSession('current'); } catch { /* ignore */ }
+    await clearApiResponseCache();
     // Clear the server-side persistent session backup even if the Appwrite
     // client SDK has no in-memory session after an Android WebView restart.
     try { await fetch('/api/auth/logout', { method: 'POST', cache: 'no-store' }); } catch { /* ignore */ }

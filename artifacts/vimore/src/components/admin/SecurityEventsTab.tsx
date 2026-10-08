@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { databases, DATABASE_ID, client, Query } from '@/lib/appwrite';
+import { authFetch } from '@/lib/auth-fetch';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,7 +24,6 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const COLL = 'security_events';
 const PAGE_SIZE = 50;
 
 type Severity = 'INFO' | 'WARN' | 'ERROR' | 'CRITICAL';
@@ -96,10 +95,8 @@ export function SecurityEventsTab() {
   const [resultFilter, setResultFilter] = useState<EventResult | 'ALL'>('ALL');
 
   const cursorRef   = useRef<string | null>(null);
-  const unsubRef    = useRef<(() => void) | null>(null);
+  const eventsRef   = useRef<SecurityEvent[]>([]);
   const topRef      = useRef<HTMLDivElement>(null);
-  const isLiveRef   = useRef(isLive);
-  isLiveRef.current = isLive;
 
   // ─── fetch page ────────────────────────────────────────────────────────────
   const fetchPage = useCallback(async (reset = false) => {
@@ -111,22 +108,23 @@ export function SecurityEventsTab() {
     }
 
     try {
-      const q: string[] = [
-        Query.orderDesc('$createdAt'),
-        Query.limit(PAGE_SIZE),
-      ];
-      if (!reset && cursorRef.current) q.push(Query.cursorAfter(cursorRef.current));
-
-      const res = await databases.listDocuments(DATABASE_ID, COLL, q);
-      const docs = res.documents as unknown as SecurityEvent[];
+      const params = new URLSearchParams();
+      if (!reset && cursorRef.current) params.set('cursor', cursorRef.current);
+      const query = params.size ? `?${params.toString()}` : '';
+      const response = await authFetch(`/api/admin/security-events${query}`);
+      if (!response.ok) throw new Error('Unable to load security events.');
+      const page = await response.json();
+      const docs = page.documents as SecurityEvent[];
 
       if (reset) {
+        eventsRef.current = docs;
         setEvents(docs);
       } else {
-        setEvents(prev => [...prev, ...docs]);
+        eventsRef.current = [...eventsRef.current, ...docs];
+        setEvents(eventsRef.current);
       }
 
-      setHasMore(docs.length === PAGE_SIZE);
+      setHasMore(Boolean(page.hasMore));
       if (docs.length > 0) cursorRef.current = docs[docs.length - 1].$id;
     } catch {
       // silently ignore
@@ -141,30 +139,31 @@ export function SecurityEventsTab() {
     fetchPage(true);
   }, [fetchPage]);
 
-  // ─── real-time subscription ────────────────────────────────────────────────
+  // ─── authorized live polling ───────────────────────────────────────────────
   useEffect(() => {
-    const channel = `databases.${DATABASE_ID}.collections.${COLL}.documents`;
+    if (!isLive) return;
 
-    const unsub = client.subscribe(channel, (payload: any) => {
-      const event = payload.events?.[0] ?? '';
-      if (!event.includes('.create')) return;
-
-      const doc = payload.payload as SecurityEvent;
-
-      // Always count the live event
-      setLiveCount(c => c + 1);
-
-      // Prepend to the list only when "live" mode is on
-      if (isLiveRef.current) {
-        setEvents(prev => [doc, ...prev]);
-        // Scroll to top smoothly
-        topRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const poll = async () => {
+      try {
+        const response = await authFetch('/api/admin/security-events');
+        if (!response.ok) return;
+        const page = await response.json();
+        const knownIds = new Set(eventsRef.current.map(event => event.$id));
+        const incoming = (page.documents as SecurityEvent[]).filter(event => !knownIds.has(event.$id));
+        if (incoming.length > 0) {
+          eventsRef.current = [...incoming, ...eventsRef.current];
+          setEvents(eventsRef.current);
+          setLiveCount(count => count + incoming.length);
+          topRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }
+      } catch {
+        // Keep the last authorized snapshot visible during transient failures.
       }
-    });
+    };
 
-    unsubRef.current = unsub;
-    return () => { unsub(); };
-  }, []);
+    const intervalId = window.setInterval(() => void poll(), 15_000);
+    return () => window.clearInterval(intervalId);
+  }, [isLive]);
 
   // ─── filtered view ─────────────────────────────────────────────────────────
   const filtered = events.filter(ev => {

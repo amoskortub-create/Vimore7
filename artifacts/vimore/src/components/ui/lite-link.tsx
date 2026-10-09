@@ -1,6 +1,7 @@
 "use client";
 
 import Link, { LinkProps } from "next/link";
+import { useRouter } from "next/navigation";
 import { forwardRef, AnchorHTMLAttributes, ReactNode } from "react";
 import { useNetwork } from "@/context/NetworkContext";
 
@@ -15,10 +16,32 @@ type LiteLinkProps = LinkProps &
  * networks. Saves a bunch of background route bundles for users on tight data caps.
  */
 export const LiteLink = forwardRef<HTMLAnchorElement, LiteLinkProps>(function LiteLink(
-  { prefetch, ...props },
+  { prefetch, onPointerEnter, onTouchStart, ...props },
   ref
 ) {
   const { tier } = useNetwork();
+  const router = useRouter();
   const effectivePrefetch = tier === "lite" ? false : prefetch;
-  return <Link ref={ref} prefetch={effectivePrefetch} {...props} />;
+  const prefetchOnIntent = () => {
+    if (tier !== "lite") return;
+    const href = props.href;
+    const path = typeof href === "string" ? href : href.pathname;
+    if (path?.startsWith("/")) router.prefetch(path);
+  };
+
+  return (
+    <Link
+      ref={ref}
+      prefetch={effectivePrefetch}
+      {...props}
+      onPointerEnter={(event) => {
+        onPointerEnter?.(event);
+        prefetchOnIntent();
+      }}
+      onTouchStart={(event) => {
+        onTouchStart?.(event);
+        prefetchOnIntent();
+      }}
+    />
+  );
 });

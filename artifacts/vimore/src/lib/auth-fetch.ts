@@ -35,6 +35,16 @@ export function getSessionFromStorage(): string | null {
   }
 }
 
+export function storeSessionInStorage(session: string): void {
+  if (typeof window === 'undefined' || !session) return;
+  try {
+    const raw = localStorage.getItem(COOKIE_KEY);
+    const fallback = raw ? JSON.parse(raw) : {};
+    fallback[SESSION_KEY] = session;
+    localStorage.setItem(COOKIE_KEY, JSON.stringify(fallback));
+  } catch {}
+}
+
 /** Attempt to create an Appwrite JWT (short-lived, 15 min). Cached 10 min. */
 let _jwtCache: { token: string; exp: number } | null = null;
 async function tryGetJwt(): Promise<string | null> {
@@ -79,9 +89,11 @@ export async function authFetch(
   );
 
   const fetchFresh = async () => {
-    // Secondary: Appwrite JWT via Authorization header (belt-and-suspenders)
-    const jwt = await tryGetJwt();
-    if (jwt) headers.set('Authorization', `Bearer ${jwt}`);
+    // The direct session is sufficient; only request a JWT when it is absent.
+    if (!session) {
+      const jwt = await tryGetJwt();
+      if (jwt) headers.set('Authorization', `Bearer ${jwt}`);
+    }
 
     // Keep the browser/WebView HTTP cache off; eligible reads use IndexedDB above.
     return fetch(url, {

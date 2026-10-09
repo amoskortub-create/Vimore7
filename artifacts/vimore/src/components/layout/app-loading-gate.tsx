@@ -23,7 +23,7 @@ function isPublicActivePath(path: string): boolean {
 }
 
 export function AppLoadingGate({ children }: { children: React.ReactNode }) {
-  const { isLoading, initError, logout, triggerHaptic, currentUser } = usePosts();
+  const { isLoading, isOffline, initError, logout, triggerHaptic, currentUser } = usePosts();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -65,12 +65,12 @@ export function AppLoadingGate({ children }: { children: React.ReactNode }) {
   }, [pathname, isLoading, initError]);
 
   useEffect(() => {
-    if (!isLoading && !currentUser) {
+    if (!isLoading && !isOffline && !currentUser) {
       const current = getActivePath(pathname) || mountedPath.current;
       if (!current || isPublicActivePath(current)) return;
       router.replace('/login');
     }
-  }, [isLoading, currentUser, pathname, router]);
+  }, [isLoading, isOffline, currentUser, pathname, router]);
 
   const handleReset = async () => {
     triggerHaptic(50);

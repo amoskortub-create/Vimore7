@@ -11,13 +11,14 @@ import {
 import { BUCKET_STORIES, storage } from '@/lib/appwrite';
 
 import { formatErrorDescription, logAppwriteError } from '@/lib/appwrite-error';
-import { authFetch } from '@/lib/auth-fetch';
+import { authFetch, getSessionFromStorage, storeSessionInStorage } from '@/lib/auth-fetch';
 import { clearApiResponseCache } from '@/lib/api-response-cache';
 import { offlineCache } from '@/lib/offline-cache';
 import { firePush } from '@/lib/push-fire';
 import { CREDIT_PRICES } from '@/lib/credit-pricing';
 
 const PRESENCE_TTL_MS = 90_000;
+const SESSION_REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000;
 
 function hasFreshPresence(isOnline: unknown, lastSeenAt: unknown): boolean {
   if (!isOnline || typeof lastSeenAt !== 'string') return false;
@@ -1678,7 +1679,10 @@ export function PostProvider({ children }: { children: ReactNode }) {
       // a stale local snapshot is not shown during a normal reload.
       const meRes = await withStartupTimeout(authFetch('/api/auth/me'), 5000);
       if (!meRes) throw new Error('Session check timed out');
-      if (!meRes.ok) throw new Error('Unauthorized');
+      if (!meRes.ok) {
+        if (meRes.status === 401) throw new Error('Unauthorized');
+        throw new Error(`Session check unavailable (${meRes.status})`);
+      }
       const meData = await meRes.json();
       clearTimeout(timeoutId);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1695,7 +1699,8 @@ export function PostProvider({ children }: { children: ReactNode }) {
         } catch { /* ignore */ }
       }
 
-      await Promise.allSettled([
+      setIsLoadingState(false);
+      void Promise.allSettled([
         loadFeed(),
         loadSocialGraph(authUser.$id),
         loadConnections(authUser.$id, profileDoc.username || ''),
@@ -1704,14 +1709,14 @@ export function PostProvider({ children }: { children: ReactNode }) {
         loadUserWithdrawals(authUser.$id),
         loadCampaigns(),
         loadChatReadReceipts(authUser.$id),
-      ]);
-
-      loadUnreadSignals(authUser.$id, profileDoc.username || '').catch(() => {});
-      loadConversationMetadata(authUser.$id, profileDoc.username || '').catch(() => {});
+      ]).then(() => {
+        loadUnreadSignals(authUser.$id, profileDoc.username || '').catch(() => {});
+        loadConversationMetadata(authUser.$id, profileDoc.username || '').catch(() => {});
+      });
     } catch (err: any) {
       // Network failure (offline) but we have a cached session → go offline mode
       const isNetworkError = (typeof navigator !== 'undefined' && !navigator.onLine) ||
-        (err?.message && /fetch|network|failed to fetch|timed out/i.test(err.message));
+        (err?.message && /fetch|network|failed to fetch|timed out|session check unavailable/i.test(err.message));
       if (isNetworkError) {
         const cachedUser = offlineCache.getUser() as any | null;
         if (cachedUser) {
@@ -1724,6 +1729,8 @@ export function PostProvider({ children }: { children: ReactNode }) {
           setIsLoadingState(false);
           return;
         }
+        setIsOffline(true);
+        return;
       }
       // Auth error or no cached session — redirect to login
       clearTimeout(timeoutId);
@@ -1753,6 +1760,58 @@ export function PostProvider({ children }: { children: ReactNode }) {
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
   }, [checkSession]);
+
+  useEffect(() => {
+    if (!currentUser?.$id || typeof window === 'undefined') return;
+    const refreshedAtKey = `vimore_session_refreshed_at_${currentUser.$id}`;
+    let refreshInFlight = false;
+
+    const refreshSession = async () => {
+      if (refreshInFlight || document.visibilityState === 'hidden') return;
+      try {
+        const refreshedAt = Number(localStorage.getItem(refreshedAtKey) || 0);
+        if (Date.now() - refreshedAt < SESSION_REFRESH_INTERVAL_MS) return;
+      } catch {}
+
+      const session = getSessionFromStorage();
+      if (!session) return;
+      refreshInFlight = true;
+      try {
+        const response = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          headers: { 'X-Appwrite-Session': session },
+          cache: 'no-store',
+        });
+        if (response.status === 401) {
+          void checkSession();
+          return;
+        }
+        if (!response.ok) return;
+
+        const data = await response.json();
+        if (typeof data.secret === 'string' && data.secret) {
+          client.setSession(data.secret);
+          storeSessionInStorage(data.secret);
+        }
+        localStorage.setItem(refreshedAtKey, String(Date.now()));
+      } catch {
+        // Retry on a later foreground event if the network is unavailable.
+      } finally {
+        refreshInFlight = false;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void refreshSession();
+    };
+    void refreshSession();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const intervalId = window.setInterval(() => void refreshSession(), 30 * 60 * 1000);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.clearInterval(intervalId);
+    };
+  }, [currentUser?.$id, checkSession]);
 
   // ── Presence heartbeat ────────────────────────────────────────────────────
   useEffect(() => {
@@ -1972,7 +2031,8 @@ export function PostProvider({ children }: { children: ReactNode }) {
         } catch { /* ignore */ }
       }
 
-      await Promise.allSettled([
+      setIsLoadingState(false);
+      void Promise.allSettled([
         loadFeed(),
         loadSocialGraph(authUser.$id),
         loadConnections(authUser.$id, profileDoc.username || ''),
@@ -1981,11 +2041,10 @@ export function PostProvider({ children }: { children: ReactNode }) {
         loadUserWithdrawals(authUser.$id),
         loadCampaigns(),
         loadChatReadReceipts(authUser.$id),
-      ]);
-
-      loadUnreadSignals(authUser.$id, profileDoc.username || '').catch(() => {});
-      loadConversationMetadata(authUser.$id, profileDoc.username || '').catch(() => {});
-      setIsLoadingState(false);
+      ]).then(() => {
+        loadUnreadSignals(authUser.$id, profileDoc.username || '').catch(() => {});
+        loadConversationMetadata(authUser.$id, profileDoc.username || '').catch(() => {});
+      });
       toast({ title: "Welcome back!", description: "You are now signed in." });
       return { success: true };
     } catch (err: any) {

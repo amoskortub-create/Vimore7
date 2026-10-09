@@ -93,6 +93,7 @@ const ROUTES = [
   { path: '/api/user/activity', method: 'POST' },
   { path: '/api/user/profile', method: 'POST' },
   { path: '/api/withdraw', method: 'POST' },
+  { path: '/api/auth/refresh', method: 'POST' },
 ];
 
 // Paths that must NOT resolve (i.e. must 404) — guards against the dispatcher
@@ -108,7 +109,7 @@ const NEGATIVE_ROUTES = [
 // (400 for malformed IDs) before ever reaching Appwrite, so we can prove
 // routing works by sending a deliberately malformed fileId and expecting
 // 400 (from the handler) rather than 404 (from the dispatcher's ROUTES miss).
-const FILE_ROUTE_CHECK = { path: '/api/file/profile_images/!!!invalid!!!', method: 'GET', expect: 400 };
+const FILE_ROUTE_CHECK = { path: '/api/file/avatars/!!!invalid!!!', method: 'GET', expect: 400 };
 
 async function hit(path, method) {
   try {

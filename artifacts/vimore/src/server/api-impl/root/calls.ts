@@ -367,10 +367,10 @@ async function createRtcToken(body: Record<string, unknown>, userId: string) {
   const callDocId = body.callDocId;
   if (!isId(callDocId)) return jsonError('A valid call is required.', 400);
 
-  const accountSecret = process.env.MTL_ACCOUNT_SECRET;
+  const accountSecret = process.env.MTL_ACCOUNT_SECRET?.trim();
   if (!accountSecret) {
-    console.error('[calls] RTC token gateway configuration is incomplete.');
-    return jsonError('The call service is not configured yet.', 503);
+    console.error('[calls] Missing server-side MTL_ACCOUNT_SECRET configuration.');
+    return jsonError('The call service is unavailable because its server configuration is incomplete.', 503);
   }
 
   const db = getAdminDatabases();

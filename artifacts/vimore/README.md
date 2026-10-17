@@ -16,6 +16,19 @@ Configure `NEXT_PUBLIC_APPWRITE_ENDPOINT`, `NEXT_PUBLIC_APPWRITE_PROJECT_ID`,
 the deployment environment. Never expose `APPWRITE_API_KEY` through a
 `NEXT_PUBLIC_` variable.
 
+Configure the server-only `MTL_ACCOUNT_SECRET` in the production deployment
+environment for audio and video calls. The calls API reads this variable at
+request time; do not prefix it with `NEXT_PUBLIC_` or put it in Capacitor
+configuration, client code, or an APK. After adding or changing it in Vercel,
+redeploy the production deployment so the serverless API receives the value.
+
+The Android Capacitor app loads the production site at `https://vimore.cfd`
+(`capacitor.config.ts`) and calls its same-origin `/api/calls` endpoint. This is
+runtime server configuration, not a value that is bundled by `next build` or
+`cap sync`. If calls work on another web hostname but not in the APK, check the
+APK's loaded hostname and ensure that hostname is routed to the same Vercel
+deployment with `MTL_ACCOUNT_SECRET` configured.
+
 Set `SUPER_ADMIN_USER_ID` to the Appwrite user ID that should receive the
 initial `SUPER` role. New registrations are not granted administrative access
 based on signup order.

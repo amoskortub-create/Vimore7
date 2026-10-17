@@ -127,7 +127,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const existing = callDocumentsRef.current.get(call.$id);
     const existingUpdated = existing?.$updatedAt ? Date.parse(existing.$updatedAt) : 0;
     const incomingUpdated = call.$updatedAt ? Date.parse(call.$updatedAt) : 0;
-    if (existing && Number.isFinite(existingUpdated) && existingUpdated > incomingUpdated) return;
+    if (existing && Number.isFinite(existingUpdated) && existingUpdated >= incomingUpdated) return;
     callDocumentsRef.current.set(call.$id, call);
     setCallDocuments((current) => ({ ...current, [call.$id]: call }));
   }, []);
@@ -164,6 +164,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const callEntries = useMemo(
     () => Object.values(callDocuments).map(toCallRecord),
     [callDocuments, toCallRecord],
+  );
+  const hasActiveCalls = callEntries.some((call) =>
+    ["dialing", "ringing", "accepted"].includes(call.status),
   );
 
   const incomingCall = useMemo(() => {
@@ -347,6 +350,44 @@ export function CallProvider({ children }: { children: ReactNode }) {
       unsubscribe?.();
     };
   }, [currentUser?.$id, upsertDocument]);
+
+  useEffect(() => {
+    if (!currentUser?.$id || !hasActiveCalls) return;
+
+    let disposed = false;
+    let refreshing = false;
+    const refreshCallState = async () => {
+      if (disposed || refreshing || document.visibilityState !== "visible") return;
+      refreshing = true;
+      try {
+        const [asCaller, asCallee] = await Promise.all([
+          databases.listDocuments(DATABASE_ID, COL.CALLS, [
+            Query.equal("caller_id", currentUser.$id),
+            Query.limit(100),
+          ]),
+          databases.listDocuments(DATABASE_ID, COL.CALLS, [
+            Query.equal("callee_id", currentUser.$id),
+            Query.limit(100),
+          ]),
+        ]);
+        if (!disposed) {
+          [...asCaller.documents, ...asCallee.documents].forEach(upsertDocument);
+        }
+      } catch (refreshError) {
+        if (!disposed) console.warn("[calls] fallback call-state refresh failed:", refreshError);
+      } finally {
+        refreshing = false;
+      }
+    };
+
+    const interval = window.setInterval(() => void refreshCallState(), 5_000);
+    document.addEventListener("visibilitychange", refreshCallState);
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshCallState);
+    };
+  }, [currentUser?.$id, hasActiveCalls, upsertDocument]);
 
   useEffect(() => {
     if (!currentUser?.$id || activeCall || pendingConnection || isLoading) return;

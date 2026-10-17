@@ -12,9 +12,10 @@ import {
   VideoTrack,
   useLocalParticipant,
   useParticipants,
+  useConnectionState,
   useTracks,
 } from "@livekit/components-react";
-import { Track } from "livekit-client";
+import { ConnectionState, Track } from "livekit-client";
 import {
   Camera,
   Mic,
@@ -56,6 +57,7 @@ function AvatarBlock({ peer, size = "large" }: { peer?: CallPeer | null; size?: 
 
 function LiveCallControls({
   type,
+  isGroup,
   peer,
   title,
   startedAt,
@@ -65,6 +67,7 @@ function LiveCallControls({
   onInvite,
 }: {
   type: "audio" | "video";
+  isGroup: boolean;
   peer: CallPeer;
   title: string;
   startedAt?: string;
@@ -76,6 +79,7 @@ function LiveCallControls({
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const participants = useParticipants();
+  const roomConnected = useConnectionState() === ConnectionState.Connected;
   const [elapsed, setElapsed] = useState(0);
   const startedAtMs = useRef(startedAt ? Date.parse(startedAt) || Date.now() : Date.now());
   const toggleCamera = useCallback(async () => {
@@ -119,7 +123,14 @@ function LiveCallControls({
       <header className="relative z-10 flex items-center justify-between px-5 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-8">
         <div>
           <p className="text-xs font-medium tracking-wide text-white/60">{type === "video" ? "Video call" : "Audio call"}{title !== peer.name ? ` · ${title}` : ""}</p>
-          <p className="mt-1 text-sm font-semibold">{clock} <span className="ml-1 text-emerald-300">{participants.length > 1 ? "Connected" : "Waiting for others"}</span></p>
+          <p className="mt-1 text-sm font-semibold">
+            {clock}{" "}
+            <span className="ml-1 text-emerald-300">
+              {participants.length > 1
+                ? "Connected"
+                : isGroup && roomConnected ? "Waiting for them to pick up" : "Connecting"}
+            </span>
+          </p>
         </div>
       </header>
 
@@ -142,8 +153,12 @@ function LiveCallControls({
             <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{peer.name}</h1>
             <p className="mt-2 text-sm text-white/60">
               {type === "video"
-                ? participants.length > 1 ? "Connected. Waiting for their camera." : "Waiting for the other person to join…"
-                : "You’re together, just talking."}
+                ? participants.length > 1
+                  ? isGroup ? "Connected. Waiting for others to join…" : "Connected. Waiting for their camera."
+                  : isGroup && roomConnected ? "Waiting for them to pick up…" : "Connecting your call…"
+                : participants.length > 1
+                  ? isGroup ? "Connected. Waiting for others to join…" : "You’re together, just talking."
+                  : isGroup && roomConnected ? "Waiting for them to pick up…" : "Connecting your call…"}
             </p>
           </>
         ) : null}
@@ -281,6 +296,7 @@ export function CallExperience() {
             <RoomAudioRenderer />
             <LiveCallControls
               type={activeCall.call.type}
+              isGroup={Boolean(activeCall.call.groupId)}
               peer={activeCall.peer}
               title={activeCall.call.groupName || activeCall.peer.name}
               startedAt={activeCall.call.started_at}

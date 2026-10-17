@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect } from "react";
-import { Capacitor } from "@capacitor/core";
 
 const PRECACHE_ROUTES = [
   "/",
@@ -20,28 +19,6 @@ export function ServiceWorkerRegister() {
     if (typeof window === "undefined" || !("serviceWorker" in navigator))
       return;
 
-    if (Capacitor.isNativePlatform()) {
-      void Promise.all([
-        navigator.serviceWorker
-          .getRegistrations()
-          .then((registrations) =>
-            Promise.all(
-              registrations.map((registration) => registration.unregister()),
-            ),
-          ),
-        caches
-          .keys()
-          .then((cacheNames) =>
-            Promise.all(
-              cacheNames.map((cacheName) => caches.delete(cacheName)),
-            ),
-          ),
-      ]).catch((error: unknown) => {
-        console.error("[service-worker] native cleanup failed", error);
-      });
-      return;
-    }
-
     const onMessage = (event: MessageEvent) => {
       if (event.data?.type === "SW_UPDATED") {
         window.dispatchEvent(
@@ -54,8 +31,9 @@ export function ServiceWorkerRegister() {
     navigator.serviceWorker.addEventListener("message", onMessage);
 
     navigator.serviceWorker
-      // Never let the browser's HTTP cache keep an old worker that serves
-      // stale Next bundles after an import/build.
+      // The Capacitor app loads the same HTTPS origin as the website. Keep
+      // the worker enabled there too so its shell and offline media caches
+      // persist in the Android WebView; bypass the HTTP cache for worker updates.
       .register("/sw.js", { scope: "/", updateViaCache: "none" })
       .then((reg) => {
         void reg.update();

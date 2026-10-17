@@ -29,6 +29,13 @@ runtime server configuration, not a value that is bundled by `next build` or
 APK's loaded hostname and ensure that hostname is routed to the same Vercel
 deployment with `MTL_ACCOUNT_SECRET` configured.
 
+The HTTPS app site registers the same service worker in Android's Capacitor
+WebView as it does in a regular browser. The worker keeps its static shell,
+visited pages, and eligible media in WebView Cache Storage for offline fallback;
+it does not cache call API requests. Since the APK loads the site remotely, it
+must first load online and install the worker before offline fallback is
+available.
+
 Set `SUPER_ADMIN_USER_ID` to the Appwrite user ID that should receive the
 initial `SUPER` role. New registrations are not granted administrative access
 based on signup order.

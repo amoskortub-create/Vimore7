@@ -2,18 +2,15 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, Lock, Sparkles, ArrowRight, Loader2, CheckCircle2, Zap, Users, Star, AtSign, ShieldQuestion, KeyRound, X, ChevronRight, PlusCircle } from "lucide-react";
+import { Eye, EyeOff, Lock, Sparkles, ArrowRight, Loader2, CheckCircle2, Zap, Users, Star, AtSign, X, ChevronRight, PlusCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { usePosts } from "@/context/PostContext";
 import { useToast } from "@/hooks/use-toast";
 import Link from "next/link";
-import { getSecurityQuestion, verifySecurityAnswer } from "@/lib/appwrite";
 import { AcronymCaption } from "@/components/branding/acronym-meaning";
 import { useTranslation } from "@/context/LanguageContext";
-
-type ForgotStep = "id" | "question" | "newpass" | "done";
 
 interface SavedAccount {
   id: string;
@@ -57,14 +54,6 @@ export default function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [showForgot, setShowForgot] = useState(false);
-  const [forgotStep, setForgotStep] = useState<ForgotStep>("id");
-  const [forgotId, setForgotId] = useState("");
-  const [forgotQuestion, setForgotQuestion] = useState("");
-  const [forgotAnswer, setForgotAnswer] = useState("");
-  const [forgotNewPass, setForgotNewPass] = useState("");
-  const [forgotConfirm, setForgotConfirm] = useState("");
-  const [forgotLoading, setForgotLoading] = useState(false);
-  const [showNewPass, setShowNewPass] = useState(false);
 
   const quickPassRef = useRef<HTMLInputElement>(null);
 
@@ -128,91 +117,6 @@ export default function LoginPage() {
       toast({ variant: "destructive", title: "Sign in failed", description: "Please check your credentials." });
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const resetForgot = () => {
-    setShowForgot(false);
-    setForgotStep("id");
-    setForgotId("");
-    setForgotQuestion("");
-    setForgotAnswer("");
-    setForgotNewPass("");
-    setForgotConfirm("");
-  };
-
-  const handleFindAccount = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!forgotId) return;
-    setForgotLoading(true);
-    await new Promise(r => setTimeout(r, 800));
-    const normalised = forgotId.includes("@") ? forgotId : `${forgotId}@vimore.cfd`;
-    const question = await getSecurityQuestion(normalised);
-    setForgotLoading(false);
-    if (!question) {
-      toast({ variant: "destructive", title: "Account not found", description: "No account matches that ViMore ID." });
-      return;
-    }
-    setForgotQuestion(question);
-    setForgotStep("question");
-  };
-
-  const handleVerifyAnswer = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!forgotAnswer) return;
-    setForgotLoading(true);
-    await new Promise(r => setTimeout(r, 800));
-    const normalised = forgotId.includes("@") ? forgotId : `${forgotId}@vimore.cfd`;
-    const correct = await verifySecurityAnswer(normalised, forgotAnswer);
-    setForgotLoading(false);
-    if (!correct) {
-      toast({ variant: "destructive", title: "Wrong answer", description: "Your answer does not match. Please try again." });
-      return;
-    }
-    setForgotStep("newpass");
-  };
-
-  const handleResetPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!forgotNewPass || forgotNewPass !== forgotConfirm) {
-      toast({ variant: "destructive", title: "Passwords don't match", description: "Please confirm your new password correctly." });
-      return;
-    }
-    if (forgotNewPass.length < 8) {
-      toast({ variant: "destructive", title: "Password too short", description: "Password must be at least 8 characters." });
-      return;
-    }
-    setForgotLoading(true);
-    try {
-      const res = await fetch('/api/auth/reset-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          vimoreId: forgotId,
-          securityAnswer: forgotAnswer,
-          newPassword: forgotNewPass,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast({ variant: "destructive", title: "Reset failed", description: data.error || "Could not reset password." });
-        setForgotLoading(false);
-        return;
-      }
-      // If the server returned a session, hydrate the client SDK and log in directly
-      if (data.sessionCreated && data.secret) {
-        try {
-          const PROJECT_ID = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || 'vimore123';
-          const { client } = await import('@/lib/appwrite');
-          client.setSession(data.secret);
-          localStorage.setItem('cookieFallback', JSON.stringify({ [`a_session_${PROJECT_ID}`]: data.secret }));
-        } catch { /* ignore */ }
-      }
-      setForgotLoading(false);
-      setForgotStep("done");
-    } catch {
-      toast({ variant: "destructive", title: "Reset failed", description: "Something went wrong. Please try again." });
-      setForgotLoading(false);
     }
   };
 
@@ -513,138 +417,23 @@ export default function LoginPage() {
       {showForgot && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-[2rem] w-full max-w-sm p-7 shadow-2xl space-y-6 animate-in slide-in-from-bottom-4 duration-300">
-
-            {forgotStep === "done" ? (
-              <div className="text-center space-y-4 py-4">
-                <div className="h-16 w-16 bg-green-50 rounded-full flex items-center justify-center mx-auto">
-                  <CheckCircle2 className="h-8 w-8 text-green-500" />
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="h-9 w-9 rounded-xl bg-violet-50 flex items-center justify-center">
+                  <Lock className="h-5 w-5 text-[#9940E5]" />
                 </div>
-                <div className="space-y-1">
-                  <h3 className="text-xl font-black italic uppercase tracking-tighter text-gray-900">{t('auth_reset_done')}</h3>
-                  <p className="text-sm text-gray-500">{t('auth_reset_done_desc')}</p>
-                </div>
-                <Button
-                  onClick={resetForgot}
-                  className="w-full h-12 rounded-2xl bg-[#9940E5] text-white font-black italic uppercase tracking-widest text-sm"
-                >
-                  {t('auth_go_sign_in')}
-                </Button>
+                <h3 className="text-xl font-black italic uppercase tracking-tighter text-gray-900">Password recovery</h3>
               </div>
-            ) : forgotStep === "id" ? (
-              <>
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <div className="h-9 w-9 rounded-xl bg-violet-50 flex items-center justify-center">
-                      <AtSign className="h-5 w-5 text-[#9940E5]" />
-                    </div>
-                    <h3 className="text-xl font-black italic uppercase tracking-tighter text-gray-900">{t('auth_forgot_title')}</h3>
-                  </div>
-                  <p className="text-sm text-gray-500 pl-11">{t('auth_enter_vimore_id')}</p>
-                </div>
-                <form onSubmit={handleFindAccount} className="space-y-4">
-                  <div className="relative">
-                    <AtSign className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-300" />
-                    <Input
-                      type="text"
-                      value={forgotId}
-                      onChange={e => setForgotId(e.target.value)}
-                      placeholder="yourname@vimore.cfd"
-                      required
-                      className="h-14 pl-11 bg-gray-50 border-gray-100 rounded-2xl text-gray-900 font-medium placeholder:text-gray-300 focus:border-[#9940E5] focus:ring-[#9940E5]/20 focus:ring-4 transition-all"
-                    />
-                  </div>
-                  <Button
-                    type="submit"
-                    disabled={forgotLoading || !forgotId}
-                    className="w-full h-12 rounded-2xl bg-[#9940E5] text-white font-black italic uppercase tracking-widest text-sm"
-                  >
-                    {forgotLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : t('auth_find_account')}
-                  </Button>
-                  <button type="button" onClick={resetForgot} className="w-full text-sm font-bold text-gray-400 hover:text-gray-600 transition-colors py-1">Cancel</button>
-                </form>
-              </>
-            ) : forgotStep === "question" ? (
-              <>
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <div className="h-9 w-9 rounded-xl bg-violet-50 flex items-center justify-center">
-                      <ShieldQuestion className="h-5 w-5 text-[#9940E5]" />
-                    </div>
-                    <h3 className="text-xl font-black italic uppercase tracking-tighter text-gray-900">{t('auth_security_question')}</h3>
-                  </div>
-                  <p className="text-sm text-gray-500 pl-11">{t('auth_your_answer')}</p>
-                </div>
-                <div className="bg-violet-50 border border-violet-100 rounded-2xl px-4 py-3">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-[#9940E5] mb-1">Your Question</p>
-                  <p className="text-sm font-bold text-gray-800">{forgotQuestion}</p>
-                </div>
-                <form onSubmit={handleVerifyAnswer} className="space-y-4">
-                  <Input
-                    type="text"
-                    value={forgotAnswer}
-                    onChange={e => setForgotAnswer(e.target.value)}
-                    placeholder={t('auth_your_answer')}
-                    required
-                    className="h-14 px-4 bg-gray-50 border-gray-100 rounded-2xl text-gray-900 font-medium placeholder:text-gray-300 focus:border-[#9940E5] focus:ring-[#9940E5]/20 focus:ring-4 transition-all"
-                  />
-                  <Button
-                    type="submit"
-                    disabled={forgotLoading || !forgotAnswer}
-                    className="w-full h-12 rounded-2xl bg-[#9940E5] text-white font-black italic uppercase tracking-widest text-sm"
-                  >
-                    {forgotLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : t('auth_verify_answer')}
-                  </Button>
-                  <button type="button" onClick={resetForgot} className="w-full text-sm font-bold text-gray-400 hover:text-gray-600 transition-colors py-1">Cancel</button>
-                </form>
-              </>
-            ) : (
-              <>
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <div className="h-9 w-9 rounded-xl bg-violet-50 flex items-center justify-center">
-                      <KeyRound className="h-5 w-5 text-[#9940E5]" />
-                    </div>
-                    <h3 className="text-xl font-black italic uppercase tracking-tighter text-gray-900">{t('auth_new_password')}</h3>
-                  </div>
-                  <p className="text-sm text-gray-500 pl-11">{t('auth_reset_password')}</p>
-                </div>
-                <form onSubmit={handleResetPassword} className="space-y-4">
-                  <div className="relative">
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-300" />
-                    <Input
-                      type={showNewPass ? "text" : "password"}
-                      value={forgotNewPass}
-                      onChange={e => setForgotNewPass(e.target.value)}
-                      placeholder={t('auth_new_password')}
-                      required
-                      className="h-14 pl-11 pr-12 bg-gray-50 border-gray-100 rounded-2xl text-gray-900 font-medium placeholder:text-gray-300 focus:border-[#9940E5] focus:ring-[#9940E5]/20 focus:ring-4 transition-all"
-                    />
-                    <button type="button" onClick={() => setShowNewPass(!showNewPass)} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 transition-colors">
-                      {showNewPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                  <div className="relative">
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-300" />
-                    <Input
-                      type="password"
-                      value={forgotConfirm}
-                      onChange={e => setForgotConfirm(e.target.value)}
-                      placeholder={t('auth_confirm_new_password')}
-                      required
-                      className="h-14 pl-11 bg-gray-50 border-gray-100 rounded-2xl text-gray-900 font-medium placeholder:text-gray-300 focus:border-[#9940E5] focus:ring-[#9940E5]/20 focus:ring-4 transition-all"
-                    />
-                  </div>
-                  <Button
-                    type="submit"
-                    disabled={forgotLoading || !forgotNewPass || !forgotConfirm}
-                    className="w-full h-12 rounded-2xl bg-[#9940E5] text-white font-black italic uppercase tracking-widest text-sm"
-                  >
-                    {forgotLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : t('auth_reset_password')}
-                  </Button>
-                  <button type="button" onClick={resetForgot} className="w-full text-sm font-bold text-gray-400 hover:text-gray-600 transition-colors py-1">Cancel</button>
-                </form>
-              </>
-            )}
+              <p className="text-sm text-gray-600">
+                Recovery using security questions has been disabled because those answers were not protected from exposure. Contact ViMore support to recover your account.
+              </p>
+            </div>
+            <Button
+              onClick={() => setShowForgot(false)}
+              className="w-full h-12 rounded-2xl bg-[#9940E5] text-white font-black italic uppercase tracking-widest text-sm"
+            >
+              Return to sign in
+            </Button>
           </div>
         </div>
       )}

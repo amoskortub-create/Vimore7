@@ -2109,8 +2109,6 @@ export function PostProvider({ children }: { children: ReactNode }) {
           nationality: data.nationality || '',
           dob: data.dob || '',
           gender: data.gender || '',
-          securityQuestion: data.securityQuestion || '',
-          securityAnswer: data.securityAnswer || '',
           referralCode,
         }),
       });

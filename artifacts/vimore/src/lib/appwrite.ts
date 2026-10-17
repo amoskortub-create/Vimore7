@@ -193,32 +193,3 @@ export function avatarFallback(name?: string): string {
     .map(w => w[0].toUpperCase())
     .join('');
 }
-
-export async function getSecurityQuestion(vimoreId: string): Promise<string | null> {
-  try {
-    const normalised = vimoreId.includes('@') ? vimoreId : `${vimoreId}@vimore.cfd`;
-    const result = await databases.listDocuments(DATABASE_ID, COL.USERS, [
-      Query.equal('email', normalised),
-      Query.limit(1),
-    ]);
-    if (result.documents.length === 0) return null;
-    return result.documents[0].security_question || null;
-  } catch {
-    return null;
-  }
-}
-
-export async function verifySecurityAnswer(vimoreId: string, answer: string): Promise<boolean> {
-  try {
-    const normalised = vimoreId.includes('@') ? vimoreId : `${vimoreId}@vimore.cfd`;
-    const result = await databases.listDocuments(DATABASE_ID, COL.USERS, [
-      Query.equal('email', normalised),
-      Query.limit(1),
-    ]);
-    if (result.documents.length === 0) return false;
-    const stored = (result.documents[0].security_answer || '').toLowerCase().trim();
-    return stored === answer.toLowerCase().trim();
-  } catch {
-    return false;
-  }
-}

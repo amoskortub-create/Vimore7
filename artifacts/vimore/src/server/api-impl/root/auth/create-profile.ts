@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const {
       name, username, email, phone, nationality, dob, gender,
-      securityQuestion, securityAnswer, referralCode,
+      referralCode,
     } = body;
 
     const bootstrapAdminId = process.env.SUPER_ADMIN_USER_ID?.trim();
@@ -57,8 +57,6 @@ export async function POST(req: NextRequest) {
       referral_code: referralCode || '',
       referral_count: 0,
       language: 'en',
-      security_question: securityQuestion || '',
-      security_answer: (securityAnswer || '').toLowerCase().trim(),
     };
 
     if (phone) {

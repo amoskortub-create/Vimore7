@@ -144,8 +144,6 @@ const COLLECTIONS = [
       { key: 'referral_code',         type: 'string',   size: 32,   required: true  },
       { key: 'referral_count',        type: 'integer',  defaultValue: 0 },
       { key: 'language',              type: 'string',   size: 16    },
-      { key: 'security_question',     type: 'string',   size: 256   },
-      { key: 'security_answer',       type: 'string',   size: 256   },
       { key: 'phone',                 type: 'string',   size: 32    },
       { key: 'avatar',                type: 'string',   size: 512   },
       { key: 'avatar_id',             type: 'string',   size: 36    },

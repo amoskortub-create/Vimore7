@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   Eye, EyeOff, Lock, User, Globe, Calendar, ArrowRight, Loader2,
-  CheckCircle2, Zap, Search, X, Sparkles, RefreshCw, ShieldCheck, AtSign, ShieldQuestion, Smartphone
+  CheckCircle2, Zap, Search, X, Sparkles, RefreshCw, ShieldCheck, AtSign, Smartphone
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -75,14 +75,6 @@ const COUNTRIES = [
   { name: "Vanuatu", flag: "🇻🇺" },
 ];
 
-const SECURITY_QUESTIONS = [
-  "What was the name of your first pet?",
-  "What city were you born in?",
-  "What is the name of your first school?",
-  "What was your childhood nickname?",
-  "What is your mother's maiden name?",
-];
-
 function generateVimoreId(name: string, suffix?: number): string {
   const clean = name.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
   const parts = clean.split(/\s+/).filter(Boolean);
@@ -141,12 +133,9 @@ export default function SignupPage() {
   const [vimoreId, setVimoreId] = useState("");
   const [idSuffix, setIdSuffix] = useState<number | undefined>(undefined);
   const [phone, setPhone] = useState("");
-  const [securityQuestion, setSecurityQuestion] = useState("");
-  const [securityAnswer, setSecurityAnswer] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showCountryDialog, setShowCountryDialog] = useState(false);
   const [countrySearch, setCountrySearch] = useState("");
-  const [showQuestionPicker, setShowQuestionPicker] = useState(false);
 
   useEffect(() => {
     if (!contextLoading && currentUser) {
@@ -197,21 +186,13 @@ export default function SignupPage() {
       toast({ variant: "destructive", title: "Password too short", description: "Password must be at least 8 characters." });
       return;
     }
-    if (!securityQuestion) {
-      toast({ variant: "destructive", title: "Security question required", description: "Please choose a security question." });
-      return;
-    }
     if (!gender) {
       toast({ variant: "destructive", title: "Gender required", description: "Please select your gender." });
       return;
     }
-    if (!securityAnswer.trim()) {
-      toast({ variant: "destructive", title: "Security answer required", description: "Please answer your security question." });
-      return;
-    }
     setIsSubmitting(true);
     try {
-      const result = await signup({ name, vimoreId, password, dob, nationality, gender, securityQuestion, securityAnswer, phone: phone.trim() || undefined });
+      const result = await signup({ name, vimoreId, password, dob, nationality, gender, phone: phone.trim() || undefined });
       if (result.success) {
         router.replace("/");
       } else if (!result.success && result.message) {
@@ -432,46 +413,6 @@ export default function SignupPage() {
               </div>
             </div>
 
-            <div className="bg-white rounded-[2rem] border border-gray-100 shadow-2xl shadow-violet-100/50 p-7 space-y-5">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <ShieldQuestion className="h-4 w-4 text-[#9940E5]" />
-                  <Label className="text-[11px] font-black uppercase tracking-widest text-gray-400">{t('auth_security_question')}</Label>
-                </div>
-                <p className="text-[11px] text-gray-400 font-medium">{t('auth_security_note')}</p>
-              </div>
-
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  onClick={() => setShowQuestionPicker(true)}
-                  className="w-full min-h-14 px-4 py-3 bg-gray-50 border border-gray-100 rounded-2xl text-left flex items-start gap-3 focus:border-[#9940E5] focus:ring-[#9940E5]/20 focus:ring-4 transition-all outline-none"
-                >
-                  <ShieldQuestion className="h-4 w-4 text-gray-300 shrink-0 mt-0.5" />
-                  {securityQuestion ? (
-                    <span className="text-sm font-bold text-gray-800 leading-snug">{securityQuestion}</span>
-                  ) : (
-                    <span className="text-gray-300 text-sm font-medium">{t('auth_choose_question')}</span>
-                  )}
-                </button>
-              </div>
-
-              {securityQuestion && (
-                <div className="space-y-2 animate-in fade-in duration-300">
-                  <Label className="text-[11px] font-black uppercase tracking-widest text-gray-400">{t('auth_your_answer')}</Label>
-                  <Input
-                    type="text"
-                    value={securityAnswer}
-                    onChange={e => setSecurityAnswer(e.target.value)}
-                    placeholder="Type your answer"
-                    required
-                    className="h-14 px-4 bg-gray-50 border-gray-100 rounded-2xl text-gray-900 font-medium placeholder:text-gray-300 focus:border-[#9940E5] focus:ring-[#9940E5]/20 focus:ring-4 transition-all"
-                  />
-                  <p className="text-[10px] text-gray-400 font-medium pl-1">Keep this answer memorable. It&apos;s not case-sensitive.</p>
-                </div>
-              )}
-            </div>
-
             <div className="px-2">
               <p className="text-[11px] text-gray-400 font-medium text-center leading-relaxed">
                 By creating an account, you agree to our{" "}
@@ -482,7 +423,7 @@ export default function SignupPage() {
 
             <Button
               type="submit"
-              disabled={isSubmitting || !name || !dob || !gender || !nationality || !password || !confirmPassword || passwordsMismatch || !securityQuestion || !securityAnswer.trim()}
+              disabled={isSubmitting || !name || !dob || !gender || !nationality || !password || !confirmPassword || passwordsMismatch}
               className="w-full h-14 rounded-2xl bg-[#9940E5] hover:bg-violet-700 text-white font-black italic uppercase tracking-[0.15em] text-sm shadow-xl shadow-violet-200 transition-all active:scale-95 gap-3"
             >
               {isSubmitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <> {t('auth_create_account_btn')} <ArrowRight className="h-5 w-5" /> </>}
@@ -534,30 +475,6 @@ export default function SignupPage() {
         </div>
       )}
 
-      {showQuestionPicker && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-end justify-center animate-in fade-in duration-200">
-          <div className="bg-white rounded-t-[2rem] w-full max-w-lg shadow-2xl flex flex-col animate-in slide-in-from-bottom-4 duration-300" style={{ maxHeight: "60vh" }}>
-            <div className="p-6 pb-4 shrink-0 flex items-center justify-between">
-              <h3 className="text-xl font-black italic uppercase tracking-tighter text-gray-900">{t('auth_security_question')}</h3>
-              <button onClick={() => setShowQuestionPicker(false)} className="h-9 w-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition-colors">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto px-4 pb-6 space-y-2">
-              {SECURITY_QUESTIONS.map(q => (
-                <button key={q} type="button" onClick={() => { setSecurityQuestion(q); setShowQuestionPicker(false); }}
-                  className={`w-full text-left px-4 py-4 rounded-2xl transition-all border ${securityQuestion === q ? "bg-violet-50 border-violet-100 text-[#9940E5]" : "bg-gray-50 border-gray-100 text-gray-800 hover:bg-gray-100"}`}>
-                  <div className="flex items-start gap-3">
-                    <ShieldQuestion className={`h-4 w-4 mt-0.5 shrink-0 ${securityQuestion === q ? "text-[#9940E5]" : "text-gray-400"}`} />
-                    <span className="text-sm font-bold leading-snug">{q}</span>
-                    {securityQuestion === q && <CheckCircle2 className="h-4 w-4 text-[#9940E5] ml-auto shrink-0" />}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

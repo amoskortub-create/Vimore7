@@ -25,6 +25,13 @@ for the desired Android idle-login period. While the app is active, ViMore
 refreshes a valid session on foreground at most every 12 hours; an expired
 server-side session cannot be renewed by the client.
 
+Password recovery using security questions is disabled because those answers
+were stored in user profiles that may be readable by clients. Before deploying
+this change, run `node scripts/clear-legacy-security-answers.mjs` from this
+directory to preview the affected records, then rerun with `--apply` to clear
+legacy answers and questions. Recovery requires a verified contact method and
+is not available until one is implemented.
+
 ## Security Setup
 
 Run `node scripts/provision-security.mjs` from this directory with the

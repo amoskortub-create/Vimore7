@@ -26,6 +26,19 @@ function hasFreshPresence(isOnline: unknown, lastSeenAt: unknown): boolean {
   return Number.isFinite(lastSeenMs) && Date.now() - lastSeenMs <= PRESENCE_TTL_MS;
 }
 
+function isAuthorizationError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const { code, status } = err as { code?: unknown; status?: unknown };
+  return code === 401 || code === 403 || status === 401 || status === 403;
+}
+
+function persistAppwriteSession(session: string): void {
+  storeSessionInStorage(session);
+  if (getSessionFromStorage() !== session) {
+    throw new Error('Your sign-in session could not be saved. Enable site storage and try again.');
+  }
+}
+
 export interface AppSettings {
   theme: 'light' | 'dark' | 'system';
   hapticIntensity: number;
@@ -1991,15 +2004,10 @@ export function PostProvider({ children }: { children: ReactNode }) {
         if (!loginRes.ok) {
           throw new Error(loginData.error || 'Invalid credentials.');
         }
-        // Hydrate the Appwrite client SDK with the server-returned session.
+        // Persist the session before treating this browser as signed in.
+        persistAppwriteSession(loginData.secret);
         const { client } = await import('@/lib/appwrite');
         client.setSession(loginData.secret);
-        // Also persist in localStorage so authFetch and page refreshes work.
-        try {
-          const PROJECT_ID = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || 'vimore123';
-          const fallback = { [`a_session_${PROJECT_ID}`]: loginData.secret };
-          localStorage.setItem('cookieFallback', JSON.stringify(fallback));
-        } catch { /* ignore */ }
         // Skip account.get() — client-side account ops fail when the domain
         // isn't registered as an Appwrite platform (general_unauthorized_scope).
         // The server already gave us the userId we need.
@@ -2072,15 +2080,10 @@ export function PostProvider({ children }: { children: ReactNode }) {
         throw new Error(registerData.error || 'Failed to create account.');
       }
 
-      // Hydrate the Appwrite client SDK and localStorage with the new session.
+      // Persist the session before treating this browser as signed in.
+      persistAppwriteSession(registerData.secret);
       const { client: appwriteClient } = await import('@/lib/appwrite');
       appwriteClient.setSession(registerData.secret);
-      try {
-        const PROJECT_ID_REG = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || 'vimore123';
-        localStorage.setItem('cookieFallback', JSON.stringify({
-          [`a_session_${PROJECT_ID_REG}`]: registerData.secret,
-        }));
-      } catch { /* ignore */ }
 
       // Construct a minimal auth user object from the server response.
       // We don't call account.get() here — that would fail on unregistered domains.
@@ -3964,7 +3967,9 @@ export function PostProvider({ children }: { children: ReactNode }) {
       });
     } catch (err: any) {
       logAppwriteError('recordView', err);
-      toast({ variant: 'destructive', title: 'View Error', description: err?.message || 'Could not record post view.' });
+      if (!isAuthorizationError(err)) {
+        toast({ variant: 'destructive', title: 'View Error', description: err?.message || 'Could not record post view.' });
+      }
     }
   }, [viewedPostIds, currentUser, toast]);
 
@@ -4012,7 +4017,9 @@ export function PostProvider({ children }: { children: ReactNode }) {
       }
     } catch (err: any) {
       logAppwriteError('recordStoryView', err);
-      toast({ variant: 'destructive', title: 'View Error', description: err?.message || 'Could not record story view.' });
+      if (!isAuthorizationError(err)) {
+        toast({ variant: 'destructive', title: 'View Error', description: err?.message || 'Could not record story view.' });
+      }
     }
   };
 

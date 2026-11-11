@@ -8,6 +8,10 @@ const API_KEY = process.env.APPWRITE_API_KEY || '';
 export const DATABASE_ID = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID || 'vimoreprod';
 
 function createAdminClient(): Client {
+  if (!API_KEY) {
+    throw new Error('APPWRITE_API_KEY is not configured for server-side Appwrite operations.');
+  }
+
   return new Client()
     .setEndpoint(ENDPOINT)
     .setProject(PROJECT_ID)

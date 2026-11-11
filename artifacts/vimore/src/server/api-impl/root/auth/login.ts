@@ -1,5 +1,6 @@
 import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
+import { getSessionCookieMaxAge } from '@/lib/session-cookie';
 
 const ENDPOINT = (
   process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || 'https://appwrite.mediatechliberia.online/v1'
@@ -29,18 +30,6 @@ function extractSessionCookie(setCookieHeader: string | null, projectId: string)
   const pattern = new RegExp(`a_session_${projectId}=([^;,\\s]+)`);
   const match = setCookieHeader.match(pattern);
   return match ? decodeURIComponent(match[1]) : '';
-}
-
-function getSessionMaxAge(expire: unknown): number {
-  if (typeof expire === 'string') {
-    const remainingSeconds = Math.floor((Date.parse(expire) - Date.now()) / 1000);
-    if (Number.isFinite(remainingSeconds) && remainingSeconds > 0) {
-      return remainingSeconds;
-    }
-  }
-  // Appwrite normally returns an expiry timestamp. Keep a safe fallback for
-  // older/self-hosted versions that omit it from the session response.
-  return 365 * 24 * 60 * 60;
 }
 
 export async function POST(req: NextRequest) {
@@ -100,7 +89,7 @@ export async function POST(req: NextRequest) {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
-      maxAge: getSessionMaxAge(data.expire),
+      maxAge: getSessionCookieMaxAge(data.expire),
     });
     return response;
   } catch (err: any) {

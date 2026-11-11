@@ -1,5 +1,6 @@
 import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
+import { getSessionCookieMaxAge } from '@/lib/session-cookie';
 
 const ENDPOINT = (
   process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || 'https://appwrite.mediatechliberia.online/v1'
@@ -10,14 +11,6 @@ function extractSessionCookie(setCookieHeader: string | null): string {
   if (!setCookieHeader) return '';
   const match = setCookieHeader.match(new RegExp(`a_session_${PROJECT_ID}=([^;,\\s]+)`));
   return match ? decodeURIComponent(match[1]) : '';
-}
-
-function getSessionMaxAge(expire: unknown): number {
-  if (typeof expire === 'string') {
-    const remainingSeconds = Math.floor((Date.parse(expire) - Date.now()) / 1000);
-    if (Number.isFinite(remainingSeconds) && remainingSeconds > 0) return remainingSeconds;
-  }
-  return 365 * 24 * 60 * 60;
 }
 
 export async function POST(req: NextRequest) {
@@ -55,7 +48,7 @@ export async function POST(req: NextRequest) {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
-      maxAge: getSessionMaxAge(data.expire),
+      maxAge: getSessionCookieMaxAge(data.expire),
     });
     return response;
   } catch {

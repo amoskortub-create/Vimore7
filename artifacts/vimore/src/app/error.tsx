@@ -1,7 +1,7 @@
 "use client";
 
-import { MaintenanceScreen } from "@/components/layout/maintenance-screen";
+import { AppErrorScreen } from "@/components/layout/app-error-screen";
 
-export default function GlobalError() {
-  return <MaintenanceScreen />;
+export default function GlobalError({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  return <AppErrorScreen onRetry={reset} />;
 }

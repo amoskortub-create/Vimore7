@@ -1,7 +1,7 @@
 "use client";
 
 import React, { Component, ErrorInfo, ReactNode } from "react";
-import { MaintenanceScreen } from "./maintenance-screen";
+import { AppErrorScreen } from "./app-error-screen";
 
 interface Props {
   children?: ReactNode;
@@ -31,9 +31,13 @@ export class DiagnosticErrorBoundary extends Component<Props, State> {
     console.error("Uncaught spatial error:", error, errorInfo);
   }
 
+  private reset = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
   public render() {
     if (this.state.hasError) {
-      return <MaintenanceScreen />;
+      return <AppErrorScreen onRetry={this.reset} />;
     }
 
     return this.props.children;

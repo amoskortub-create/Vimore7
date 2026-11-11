@@ -5,7 +5,6 @@ import { KineticSplashScreen } from "./kinetic-splash-screen";
 import { useState, useEffect, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { MaintenanceScreen } from "./maintenance-screen";
 
 const PUBLIC_PATHS = ["/login", "/signup", "/auth/", "/terms", "/privacy", "/child-safety", "/marketplace", "/join/", "/admin", "/downloads"];
 
@@ -25,30 +24,6 @@ export function AppLoadingGate({ children }: { children: React.ReactNode }) {
   const { isLoading, isOffline, initError, currentUser } = usePosts();
   const router = useRouter();
   const pathname = usePathname();
-  const [backendUnavailable, setBackendUnavailable] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-
-    const checkBackend = async () => {
-      try {
-        const response = await fetch('/api/health', { cache: 'no-store' });
-        if (active) setBackendUnavailable(!response.ok);
-      } catch {
-        if (active) setBackendUnavailable(true);
-      }
-    };
-
-    void checkBackend();
-    const interval = window.setInterval(checkBackend, 15000);
-    window.addEventListener('online', checkBackend);
-
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-      window.removeEventListener('online', checkBackend);
-    };
-  }, []);
 
   const mountedPath = useRef(getActivePath(pathname));
   useEffect(() => {
@@ -96,10 +71,6 @@ export function AppLoadingGate({ children }: { children: React.ReactNode }) {
   }, [isLoading, isOffline, currentUser, pathname, router]);
 
   const showSplash = !isPublicPath && shouldRenderSplash;
-
-  if (backendUnavailable || isOffline || initError) {
-    return <MaintenanceScreen />;
-  }
 
   return (
     <>

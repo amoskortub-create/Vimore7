@@ -4,14 +4,15 @@ import { createContext, useContext, useState, useRef, startTransition, ReactNode
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
 import {
-  account, databases, client, ID, Query, Models,
+  account, databases, client, ID, Query, Models, Permission, Role,
   COL, BUCKET, DATABASE_ID,
   getFileUrl, extractFileId, formatTimeAgo, avatarFallback, toProxyUrl,
 } from '@/lib/appwrite';
 import { BUCKET_STORIES, storage } from '@/lib/appwrite';
 
 import { formatErrorDescription, logAppwriteError } from '@/lib/appwrite-error';
-import { authFetch, clearAuthRedirectState, getSessionFromStorage, redirectToLoginOnce, storeSessionInStorage } from '@/lib/auth-fetch';
+import { authFetch, clearAuthRedirectState, redirectToLoginOnce } from '@/lib/auth-fetch';
+import { signInWithIdentifier } from '@/lib/client-auth';
 import { clearApiResponseCache } from '@/lib/api-response-cache';
 import { offlineCache } from '@/lib/offline-cache';
 import { firePush } from '@/lib/push-fire';
@@ -30,14 +31,6 @@ function isSessionExpiredError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
   const { code, status } = err as { code?: unknown; status?: unknown };
   return code === 401 || status === 401;
-}
-
-function persistAppwriteSession(session: string): void {
-  storeSessionInStorage(session);
-  if (getSessionFromStorage() !== session) {
-    throw new Error('Your sign-in session could not be saved. Enable site storage and try again.');
-  }
-  clearAuthRedirectState();
 }
 
 export interface AppSettings {
@@ -1642,13 +1635,13 @@ export function PostProvider({ children }: { children: ReactNode }) {
     } catch { /* ignore */ }
   }, []);
 
-  const withStartupTimeout = useCallback(async <T,>(task: Promise<T>, timeoutMs = 8000): Promise<T | null> => {
-    return await new Promise<T | null>((resolve) => {
+  const withStartupTimeout = useCallback(async <T,>(task: Promise<T>, timeoutMs = 8000): Promise<T> => {
+    return await new Promise<T>((resolve, reject) => {
       let settled = false;
       const timer = setTimeout(() => {
         if (!settled) {
           settled = true;
-          resolve(null);
+          reject(new Error('Appwrite startup check timed out'));
         }
       }, timeoutMs);
 
@@ -1658,11 +1651,11 @@ export function PostProvider({ children }: { children: ReactNode }) {
           clearTimeout(timer);
           resolve(value);
         }
-      }).catch(() => {
+      }).catch((error: unknown) => {
         if (!settled) {
           settled = true;
           clearTimeout(timer);
-          resolve(null);
+          reject(error);
         }
       });
     });
@@ -1691,16 +1684,13 @@ export function PostProvider({ children }: { children: ReactNode }) {
       // Android WebView can briefly report navigator.onLine=false while the
       // network is already usable. Always try the live session first so that
       // a stale local snapshot is not shown during a normal reload.
-      const meRes = await withStartupTimeout(authFetch('/api/auth/me'), 5000);
-      if (!meRes) throw new Error('Session check timed out');
-      if (!meRes.ok) {
-        if (meRes.status === 401) throw new Error('Unauthorized');
-        throw new Error(`Session check unavailable (${meRes.status})`);
-      }
-      const meData = await meRes.json();
+      const authUser = await withStartupTimeout(account.get(), 5000);
+      const profileDoc = await withStartupTimeout(
+        databases.getDocument(DATABASE_ID, COL.USERS, authUser.$id),
+        5000,
+      );
       clearTimeout(timeoutId);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { authUser, profileDoc } = meData as any;
+      clearAuthRedirectState();
       const user = mapDocToUser(authUser, profileDoc);
       setCurrentUserState(user);
       offlineCache.saveUser(user);
@@ -1787,25 +1777,16 @@ export function PostProvider({ children }: { children: ReactNode }) {
         if (Date.now() - refreshedAt < SESSION_REFRESH_INTERVAL_MS) return;
       } catch {}
 
-      const session = getSessionFromStorage();
-      if (!session) return;
       refreshInFlight = true;
       try {
-        const response = await fetch('/api/auth/refresh', {
-          method: 'POST',
-          headers: { 'X-Appwrite-Session': session },
-          cache: 'no-store',
-        });
-        if (response.status === 401) {
-          void checkSession();
-          return;
-        }
-        if (!response.ok) return;
-
-        const data = await response.json();
-        if (typeof data.secret === 'string' && data.secret) {
-          client.setSession(data.secret);
-          storeSessionInStorage(data.secret);
+        try {
+          await account.updateSession('current');
+        } catch (error: any) {
+          if (error?.code === 401 || error?.type === 'user_session_not_found') {
+            void checkSession();
+            return;
+          }
+          throw error;
         }
         localStorage.setItem(refreshedAtKey, String(Date.now()));
       } catch {
@@ -1960,67 +1941,9 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (identifier: string, password: string) => {
     setIsLoadingState(true);
 
-    const trimmed = identifier.trim();
-    let vimoreId = trimmed.includes('@') ? trimmed : `${trimmed}@vimore.cfd`;
-
     try {
-      let authUser;
-      try {
-        authUser = await account.get();
-      } catch {
-        authUser = null;
-      }
-      if (!authUser) {
-        const isPhoneLogin = !trimmed.includes('@') && /^[+\d][\d\s\-().]{5,}$/.test(trimmed);
-        if (isPhoneLogin) {
-          const loginUrl = new URL('/api/auth/login', window.location.origin).href;
-          const loginRes = await fetch(loginUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ identifier: trimmed, password }),
-          }).catch((err: unknown) => {
-            console.error('[auth/login] Browser request failed', {
-              url: loginUrl,
-              error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
-            });
-            throw err;
-          });
-          const loginData = await loginRes.json();
-          if (!loginRes.ok) {
-            throw new Error(loginData.error || 'Invalid credentials.');
-          }
-          persistAppwriteSession(loginData.secret);
-          if (typeof loginData.email === 'string' && loginData.email) vimoreId = loginData.email;
-          client.setSession(loginData.secret);
-          authUser = {
-            $id: loginData.userId,
-            email: loginData.email || vimoreId,
-            name: '',
-            emailVerification: false,
-            $createdAt: loginData.expire ?? new Date().toISOString(),
-          } as any;
-        } else {
-          const email = trimmed.includes('@') ? trimmed : `${trimmed}@vimore.cfd`;
-          await account.createEmailPasswordSession(email, password);
-          authUser = await account.get();
-        }
-      }
-      if (typeof authUser.email === 'string' && authUser.email) vimoreId = authUser.email;
-      const profileUrl = new URL('/api/auth/me', window.location.origin).href;
-      const profileRes = await authFetch(profileUrl, { cache: 'no-store' }).catch((err: unknown) => {
-        console.error('[auth/login] Profile request failed', {
-          url: profileUrl,
-          error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
-        });
-        throw err;
-      });
-      const profileData = await profileRes.json();
-      if (!profileRes.ok) {
-        throw new Error(profileData.error || 'Could not load your account profile.');
-      }
-      authUser = profileData.authUser;
-      if (typeof authUser.email === 'string' && authUser.email) vimoreId = authUser.email;
-      const profileDoc = profileData.profileDoc;
+      const { authUser, profileDoc } = await signInWithIdentifier(identifier, password);
+      const vimoreId = authUser.email;
       const user = mapDocToUser(authUser, profileDoc);
       setCurrentUserState(user);
 
@@ -2059,8 +1982,10 @@ export function PostProvider({ children }: { children: ReactNode }) {
     } catch (err: any) {
       setIsLoadingState(false);
       logAppwriteError('login', err);
-      const msg = formatErrorDescription(err, null) || 'Invalid credentials. Please try again.';
-      return { success: false, message: msg };
+      return {
+        success: false,
+        message: err?.userMessage || formatErrorDescription(err, null) || 'Invalid credentials. Please try again.',
+      };
     }
   }, [toast, loadFeed, loadSocialGraph, loadConnections, loadStories, loadClusters, loadUserWithdrawals, loadCampaigns, loadChatReadReceipts, loadUnreadSignals, loadConversationMetadata]);
 
@@ -2069,62 +1994,50 @@ export function PostProvider({ children }: { children: ReactNode }) {
     try {
       const vimoreId = data.vimoreId.includes('@') ? data.vimoreId : `${data.vimoreId}@vimore.cfd`;
 
-      // Create account and session server-side — avoids client-SDK platform check
-      // that rejects requests from unregistered domains (general_unauthorized_scope).
-      const registerRes = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: vimoreId, password: data.password, name: data.name }),
-      });
-      const registerData = await registerRes.json();
-      if (!registerRes.ok) {
-        throw new Error(registerData.error || 'Failed to create account.');
-      }
-
-      // Persist the session before treating this browser as signed in.
-      persistAppwriteSession(registerData.secret);
-      const { client: appwriteClient } = await import('@/lib/appwrite');
-      appwriteClient.setSession(registerData.secret);
-
-      // Construct a minimal auth user object from the server response.
-      // We don't call account.get() here — that would fail on unregistered domains.
-      const authUser = {
-        $id: registerData.userId,
-        email: vimoreId,
-        name: data.name,
-        emailVerification: false,
-        $createdAt: new Date().toISOString(),
-      } as any;
+      await account.create(ID.unique(), vimoreId, data.password, data.name);
+      await account.createEmailPasswordSession(vimoreId, data.password);
+      const authUser = await account.get();
 
       const parts = data.name.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/);
       const username = parts.length >= 2 ? `${parts[0]}.${parts[parts.length - 1]}` : parts[0] || 'user';
       const referralCode = `VM${username.toUpperCase().slice(0, 6)}${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
 
-      // Create the user profile document server-side (admin key bypasses collection perms)
-      const { authFetch } = await import('@/lib/auth-fetch');
-      const profileRes = await authFetch('/api/auth/create-profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const newDoc = await databases.createDocument(
+        DATABASE_ID,
+        COL.USERS,
+        authUser.$id,
+        {
           name: data.name,
           username,
           email: vimoreId,
-          phone: data.phone || null,
+          bio: '',
+          category: '',
+          is_verified: false,
+          has_ever_been_verified: false,
+          followers_count: 0,
+          following_count: 0,
+          friends_count: 0,
+          posts_count: 0,
+          gold_balance: 0,
+          diamond_balance: 0,
+          credit_balance: 0,
+          star_balance: 0,
+          role: 'USER',
+          join_date: new Date().toISOString(),
           nationality: data.nationality || '',
-          dob: data.dob || '',
+          date_of_birth: data.dob || '',
           gender: data.gender || '',
-          referralCode,
-        }),
-      });
-      if (!profileRes.ok) {
-        const profileErr = await profileRes.json().catch(() => ({}));
-        throw new Error(profileErr.error || 'Failed to create user profile.');
-      }
-      const profileResult = await profileRes.json();
-      const assignedRole = profileResult.role || 'USER';
-
-      // Fetch the profile doc we just created to build the local user object
-      const newDoc = await databases.getDocument(DATABASE_ID, COL.USERS, authUser.$id);
+          referral_code: referralCode,
+          referral_count: 0,
+          language: 'en',
+          ...(data.phone ? { phone: data.phone.replace(/[\s\-().]/g, '') } : {}),
+        },
+        [
+          Permission.read(Role.any()),
+          Permission.update(Role.user(authUser.$id)),
+          Permission.delete(Role.user(authUser.$id)),
+        ],
+      );
       const user = mapDocToUser(authUser, newDoc);
       setCurrentUserState(user);
 
@@ -2194,14 +2107,10 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     try { await account.deleteSession('current'); } catch { /* ignore */ }
     await clearApiResponseCache();
-    // Clear the server-side persistent session backup even if the Appwrite
-    // client SDK has no in-memory session after an Android WebView restart.
-    try { await fetch('/api/auth/logout', { method: 'POST', cache: 'no-store' }); } catch { /* ignore */ }
     if (typeof window !== 'undefined') {
       try {
         const uid = currentUser?.$id;
         if (uid) localStorage.removeItem(`vimore_unread_signals_${uid}`);
-        localStorage.removeItem('cookieFallback');
       } catch { /* ignore */ }
     }
     offlineCache.clearUser();

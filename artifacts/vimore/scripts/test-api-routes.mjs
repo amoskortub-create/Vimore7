@@ -93,7 +93,6 @@ const ROUTES = [
   { path: '/api/user/activity', method: 'POST' },
   { path: '/api/user/profile', method: 'POST' },
   { path: '/api/withdraw', method: 'POST' },
-  { path: '/api/auth/refresh', method: 'POST' },
 ];
 
 // Paths that must NOT resolve (i.e. must 404) — guards against the dispatcher
@@ -103,6 +102,8 @@ const NEGATIVE_ROUTES = [
   { path: '/api/admin/does-not-exist', method: 'GET' },
   { path: '/api/oauth/does-not-exist', method: 'GET' },
   { path: '/api/file/not-an-allowed-bucket/xyz', method: 'GET' },
+  { path: '/api/auth/login', method: 'POST' },
+  { path: '/api/auth/me', method: 'GET' },
 ];
 
 // The file proxy route is special-cased: it validates fileId format itself

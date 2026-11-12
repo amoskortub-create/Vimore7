@@ -1,13 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import * as AuthLogin from '@/server/api-impl/root/auth/login';
-import * as AuthLogout from '@/server/api-impl/root/auth/logout';
-import * as AuthMe from '@/server/api-impl/root/auth/me';
-import * as AuthRegister from '@/server/api-impl/root/auth/register';
-import * as AuthRefresh from '@/server/api-impl/root/auth/refresh';
-import * as AuthResetPassword from '@/server/api-impl/root/auth/reset-password';
-import * as AuthLookupPhone from '@/server/api-impl/root/auth/lookup-phone';
-import * as AuthCreateProfile from '@/server/api-impl/root/auth/create-profile';
 import * as AdvertiseSubmit from '@/server/api-impl/root/advertise/submit';
 import * as CronCleanup from '@/server/api-impl/root/cron/cleanup';
 import * as CronExpiryAlerts from '@/server/api-impl/root/cron/expiry-alerts';
@@ -65,14 +57,6 @@ export const maxDuration = 30;
 type Handler = Partial<Record<'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'OPTIONS', (...args: any[]) => Promise<Response> | Response>>;
 
 const ROUTES: Record<string, Handler> = {
-  'auth/login': AuthLogin,
-  'auth/logout': AuthLogout,
-  'auth/me': AuthMe,
-  'auth/register': AuthRegister,
-  'auth/refresh': AuthRefresh,
-  'auth/reset-password': AuthResetPassword,
-  'auth/lookup-phone': AuthLookupPhone,
-  'auth/create-profile': AuthCreateProfile,
   'advertise/submit': AdvertiseSubmit,
   'cron/cleanup': CronCleanup,
   'cron/expiry-alerts': CronExpiryAlerts,

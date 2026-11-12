@@ -15,12 +15,14 @@ export const UPLOAD_CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB per chunk
 // before the 15-minute Appwrite default expiry.
 let cachedJwt = '';
 let jwtExpiresAt = 0;
+let cachedJwtUserId = '';
 
-async function getJwt(): Promise<string> {
+async function getJwt(userId: string): Promise<string> {
   // Refresh 60 s before expiry so mid-upload refreshes are seamless
-  if (Date.now() < jwtExpiresAt - 60_000) return cachedJwt;
+  if (cachedJwtUserId === userId && Date.now() < jwtExpiresAt - 60_000) return cachedJwt;
   const { jwt } = await account.createJWT();
   cachedJwt = jwt;
+  cachedJwtUserId = userId;
   jwtExpiresAt = Date.now() + 14 * 60 * 1000; // 14 min
   return jwt;
 }
@@ -50,13 +52,20 @@ export async function chunkedUploadToAppwrite(
     signal,
   } = opts;
 
+  // Verify a real session before requesting the JWT used for direct uploads.
+  const user = await account.get();
+  if (cachedJwtUserId && cachedJwtUserId !== user.$id) {
+    cachedJwt = '';
+    jwtExpiresAt = 0;
+  }
+
   const totalSize = file.size;
 
   // Small files (≤ chunkSize): single request, no range header needed.
   // This is the fast path and also the fallback when ChunkedUpload header
   // is not supported by the Appwrite instance.
   if (totalSize <= chunkSize) {
-    return uploadSingleChunk({ bucketId, fileId, file, onProgress, maxRetries, signal });
+    return uploadSingleChunk({ bucketId, fileId, file, userId: user.$id, onProgress, maxRetries, signal });
   }
 
   let offset = 0;
@@ -78,9 +87,10 @@ export async function chunkedUploadToAppwrite(
     while (attempt < maxRetries) {
       if (signal?.aborted) throw new Error('Upload cancelled');
       try {
-        const jwt = await getJwt();
+        const jwt = await getJwt(user.$id);
         const res = await fetch(`${ENDPOINT}/storage/buckets/${bucketId}/files`, {
           method: 'POST',
+          credentials: 'include',
           headers: {
             'x-appwrite-project': PROJECT_ID,
             'x-appwrite-jwt': jwt,
@@ -125,6 +135,7 @@ async function uploadSingleChunk({
   bucketId,
   fileId,
   file,
+  userId,
   onProgress,
   maxRetries = 3,
   signal,
@@ -132,6 +143,7 @@ async function uploadSingleChunk({
   bucketId: string;
   fileId: string;
   file: File;
+  userId: string;
   onProgress?: (pct: number) => void;
   maxRetries?: number;
   signal?: AbortSignal;
@@ -146,9 +158,10 @@ async function uploadSingleChunk({
   while (attempt < maxRetries) {
     if (signal?.aborted) throw new Error('Upload cancelled');
     try {
-      const jwt = await getJwt();
+      const jwt = await getJwt(userId);
       const res = await fetch(`${ENDPOINT}/storage/buckets/${bucketId}/files`, {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'x-appwrite-project': PROJECT_ID,
           'x-appwrite-jwt': jwt,

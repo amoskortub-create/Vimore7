@@ -10,8 +10,7 @@
  * network round-trip that can fail.
  *
  * Solution: read the session value directly from localStorage and send it as
- * "X-Appwrite-Session" — a custom header our session.ts reads via client.setSession().
- * JWT is attempted in parallel as a secondary credential.
+ * "X-Appwrite-Session" — a custom header our session.ts validates with Appwrite.
  */
 
 import { clearApiResponseCache, fetchCachedApiResponse } from './api-response-cache';
@@ -66,22 +65,6 @@ export function storeSessionInStorage(session: string): void {
   } catch {}
 }
 
-/** Attempt to create an Appwrite JWT (short-lived, 15 min). Cached 10 min. */
-let _jwtCache: { token: string; exp: number } | null = null;
-async function tryGetJwt(): Promise<string | null> {
-  try {
-    if (_jwtCache && Date.now() < _jwtCache.exp) return _jwtCache.token;
-    // Lazy import to avoid loading appwrite module in server context
-    const { account } = await import('./appwrite');
-    const result = await account.createJWT();
-    _jwtCache = { token: result.jwt, exp: Date.now() + 10 * 60 * 1000 };
-    return result.jwt;
-  } catch {
-    _jwtCache = null;
-    return null;
-  }
-}
-
 export async function authFetch(
   url: string,
   options: RequestInit = {}
@@ -110,16 +93,11 @@ export async function authFetch(
   );
 
   const fetchFresh = async () => {
-    // The direct session is sufficient; only request a JWT when it is absent.
-    if (!session) {
-      const jwt = await tryGetJwt();
-      if (jwt) headers.set('Authorization', `Bearer ${jwt}`);
-    }
-
     // Keep the browser/WebView HTTP cache off; eligible reads use IndexedDB above.
     const response = await fetch(url, {
       ...options,
       headers,
+      credentials: options.credentials ?? 'same-origin',
       cache: options.cache ?? 'no-store',
     });
 
@@ -144,9 +122,4 @@ export async function authFetch(
     await clearApiResponseCache();
   }
   return response;
-}
-
-/** Call on logout to clear the JWT cache. */
-export function clearJwtCache() {
-  _jwtCache = null;
 }

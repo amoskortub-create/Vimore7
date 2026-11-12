@@ -11,10 +11,20 @@ const leaders = [
     name: "Amos B. Kortu",
     title: "Founder & CEO",
     company: "Media Tech Liberia",
-    image: "/amos-kortu.png",
+    image: "/amos-b-kortu.jpg",
     gradient: "from-violet-600 via-purple-500 to-indigo-600",
     accent: "violet" as const,
     tagline: "The visionary who sparked the dream",
+    quote: "Africa's digital future is not something to wait for — it is something to build.",
+  },
+  {
+    name: "Ebenezer Johnson",
+    title: "Co-founder & President",
+    company: "Media Tech Liberia",
+    image: "/ebenezer-johnson.jpg",
+    gradient: "from-sky-600 via-cyan-500 to-blue-600",
+    accent: "blue" as const,
+    tagline: "Helping power Africa's digital future",
     quote: null,
   },
 ];
@@ -70,12 +80,13 @@ export default function MTLPage() {
                 <div className="absolute inset-0 bg-gradient-to-br from-blue-600 via-primary to-indigo-700 rounded-full blur-2xl opacity-30 scale-125" />
                 <div className="relative h-28 w-28 rounded-full overflow-hidden border-4 border-white/20 dark:border-white/10 shadow-2xl shadow-primary/30 ring-4 ring-primary/15">
                   <Image
-                    src="/mtl-logo.png"
+                    src="/mtl-logo.jpg"
                     alt="Media Tech Liberia"
                     width={112}
                     height={112}
                     className="w-full h-full object-cover"
                     priority
+                    unoptimized
                   />
                 </div>
               </div>
@@ -151,6 +162,7 @@ export default function MTLPage() {
                       width={80}
                       height={96}
                       className="object-cover object-top w-full h-full"
+                      unoptimized
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
                   </div>
@@ -198,15 +210,6 @@ export default function MTLPage() {
           </div>
 
           <div className="bg-white dark:bg-white/4 rounded-3xl border border-black/5 dark:border-white/8 shadow-lg shadow-black/5 overflow-hidden">
-            {/* Pull quote */}
-            <div className="bg-gradient-to-br from-primary/8 to-purple-500/5 border-b border-black/5 dark:border-white/5 p-6">
-              <Quote className="h-7 w-7 text-primary/40 mb-3" />
-              <p className="text-lg font-black leading-snug text-foreground">
-                "Africa's digital future is not something to wait for — it is something to build."
-              </p>
-              <p className="text-[11px] font-bold text-primary mt-3 uppercase tracking-widest">— Amos B. Kortu, Founder & CEO</p>
-            </div>
-
             {/* Story paragraphs */}
             <div className="p-6 space-y-5">
               {storyParagraphs.map((para, i) => (

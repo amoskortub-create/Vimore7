@@ -118,10 +118,34 @@ export async function signInWithIdentifier(
       });
     }
 
-    stage = 'login';
-    await account.createEmailPasswordSession(document.email, password);
     stage = 'session';
-    const authUser = await account.get();
+    let authUser: Models.User<Models.Preferences> | null;
+    try {
+      authUser = await account.get();
+      console.log('active session:', { found: true, userId: authUser.$id });
+    } catch (error) {
+      const sessionError = error as { code?: number; type?: string };
+      if (sessionError?.code === 401 || sessionError?.type === 'user_session_not_found') {
+        authUser = null;
+        console.log('active session:', { found: false });
+      } else {
+        throw error;
+      }
+    }
+
+    if (authUser?.$id !== document.$id) {
+      if (authUser) {
+        await account.deleteSession('current');
+      }
+      stage = 'login';
+      await account.createEmailPasswordSession(document.email, password);
+      stage = 'session';
+      authUser = await account.get();
+    }
+
+    if (!authUser) {
+      throw new Error('Appwrite did not return an authenticated account');
+    }
     if (authUser.$id !== document.$id) {
       throw Object.assign(new Error('The signed-in account does not match the looked-up profile'), {
         userMessage: 'The profile lookup did not match the signed-in account. Please try again.',

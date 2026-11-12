@@ -236,6 +236,8 @@ interface PostContextType {
   posts: Post[];
   hasMoreFeed: boolean;
   isFeedLoading: boolean;
+  hasLoadedFeed: boolean;
+  feedRefreshStatus: 'idle' | 'refreshing' | 'server-error';
   loadMoreFeed: () => Promise<void>;
   appendRealtimePost: (document: any) => Promise<void>;
   activeComments: PostComment[];
@@ -606,7 +608,7 @@ function getChatMessagePreview(message: Partial<ChatMessage> & { type?: string }
   return '';
 }
 
-const FEED_PAGE_SIZE = 30;
+const FEED_PAGE_SIZE = 10;
 
 export function PostProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
@@ -623,6 +625,8 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const skipInitialFeedCacheWrite = useRef(true);
   const [hasMoreFeed, setHasMoreFeed] = useState(true);
   const [isFeedLoading, setIsFeedLoading] = useState(false);
+  const [hasLoadedFeed, setHasLoadedFeed] = useState(false);
+  const [feedRefreshStatus, setFeedRefreshStatus] = useState<'idle' | 'refreshing' | 'server-error'>('idle');
   const feedCursorRef = useRef<string | null>(null);
   const feedPhaseRef = useRef<'connections' | 'global'>('connections');
   const feedConnCursorRef = useRef<string | null>(null);
@@ -641,9 +645,21 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const [activeComments, setActiveComments] = useState<PostComment[]>([]);
   const [isLoading, setIsLoadingState] = useState(true);
   const [initError] = useState<string | null>(null);
-  const [isOffline, setIsOffline] = useState(false);
+  const [isOffline, setIsOffline] = useState(() =>
+    typeof navigator !== 'undefined' && !navigator.onLine
+  );
   const sessionCheckInFlightRef = useRef(false);
   const [settings, setSettingsState] = useState<AppSettings>(INITIAL_SETTINGS);
+
+  useEffect(() => {
+    const updateOfflineState = () => setIsOffline(!navigator.onLine);
+    window.addEventListener('online', updateOfflineState);
+    window.addEventListener('offline', updateOfflineState);
+    return () => {
+      window.removeEventListener('online', updateOfflineState);
+      window.removeEventListener('offline', updateOfflineState);
+    };
+  }, []);
 
   useEffect(() => {
     if (skipInitialFeedCacheWrite.current) {
@@ -745,7 +761,17 @@ export function PostProvider({ children }: { children: ReactNode }) {
     return docs.map((doc: any) => mapDocToPost(doc, authorsMap[doc.user_id]));
   }, []);
 
-  const loadFeed = useCallback(async () => {
+  const loadFeed = useCallback(async (force = false) => {
+    const cachedFeed = loadFeedCache<Post>();
+    if (!force && cachedFeed.savedAt && Date.now() - cachedFeed.savedAt < 5 * 60 * 1000) {
+      if (cachedFeed.posts.length > 0) setPostsState(cachedFeed.posts);
+      feedHasLoadedRef.current = true;
+      setHasLoadedFeed(true);
+      setFeedRefreshStatus('idle');
+      return;
+    }
+
+    setFeedRefreshStatus('refreshing');
     const PAGE = FEED_PAGE_SIZE;
     feedHasLoadedRef.current = false;
     feedPhaseRef.current = 'connections';
@@ -825,14 +851,17 @@ export function PostProvider({ children }: { children: ReactNode }) {
       const cachedPosts = nextPosts.length === 0 ? loadFeedCache<Post>().posts : [];
       const visiblePosts = nextPosts.length === 0 && cachedPosts.length > 0 ? cachedPosts : nextPosts;
       setPostsState(visiblePosts);
-      setIsOffline(false);
+      setIsOffline(typeof navigator !== 'undefined' && !navigator.onLine);
+      setHasLoadedFeed(true);
+      setFeedRefreshStatus('idle');
       if (nextPosts.length > 0 || cachedPosts.length === 0) {
         saveFeedCache(nextPosts);
         offlineCache.savePosts(nextPosts);
       }
     } catch (err) {
       logAppwriteError('loadFeed', err);
-      setIsOffline(true);
+      setIsOffline(typeof navigator !== 'undefined' && !navigator.onLine);
+      setFeedRefreshStatus('server-error');
       const savedFeed = loadFeedCache<Post>().posts;
       const cachedPosts = savedFeed.length > 0 ? savedFeed : offlineCache.getPosts() as Post[];
       const loadedIds = new Set(cachedPosts.map((post: any) => post.$id));
@@ -1724,7 +1753,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
         setCurrentUserState(cachedUser);
         const cachedPosts = offlineCache.getPosts() as any[];
         if (cachedPosts.length > 0) setPostsState(cachedPosts);
-        setIsOffline(true);
+        setIsOffline(typeof navigator !== 'undefined' && !navigator.onLine);
       } else {
         setCurrentUserState(null);
       }
@@ -1745,7 +1774,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       const user = mapDocToUser(authUser, profileDoc);
       setCurrentUserState(user);
       offlineCache.saveUser(user);
-      setIsOffline(false);
+      setIsOffline(typeof navigator !== 'undefined' && !navigator.onLine);
 
       if (typeof window !== 'undefined') {
         try {
@@ -1782,11 +1811,11 @@ export function PostProvider({ children }: { children: ReactNode }) {
           const acceptedCachedConns = cachedConns.filter(connection => connection.friendshipStatus === 'accepted');
           setConnectionsState(acceptedCachedConns);
           setFriendUsernamesState(new Set(acceptedCachedConns.map(connection => connection.username).filter(Boolean)));
-          setIsOffline(true);
+          setIsOffline(typeof navigator !== 'undefined' && !navigator.onLine);
           setIsLoadingState(false);
           return;
         }
-        setIsOffline(true);
+        setIsOffline(typeof navigator !== 'undefined' && !navigator.onLine);
         return;
       }
       // Auth error or no cached session — redirect to login
@@ -2168,7 +2197,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       } catch { /* ignore */ }
     }
     offlineCache.clearUser();
-    setIsOffline(false);
+    setIsOffline(typeof navigator !== 'undefined' && !navigator.onLine);
     setCurrentUserState(null);
     setPostsState([]);
     setStoriesState([]);
@@ -2253,7 +2282,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
     setSettingsState(prev => ({ ...prev, ...data }));
   };
 
-  const refreshFeed = useCallback(async () => { await loadFeed(); }, [loadFeed]);
+  const refreshFeed = useCallback(async () => { await loadFeed(true); }, [loadFeed]);
   const refreshStories = useCallback(async () => { if (currentUser) await loadStories(); }, [currentUser, loadStories]);
 
   const refreshAdminData = useCallback(async () => {
@@ -4110,6 +4139,12 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
   const applyPostCountUpdate = useCallback((postId: string, update: { likes?: number; unlikes?: number; comments?: number; shares?: number }) => {
     setPostCountOverrides(prev => ({ ...prev, [postId]: { ...(prev[postId] || {}), ...update } }));
+    setPostsState(previous => {
+      const next = previous.map(post => post.$id === postId ? { ...post, ...update } : post);
+      saveFeedCache(next);
+      offlineCache.savePosts(next);
+      return next;
+    });
   }, []);
 
   const addStreamedComment = useCallback((comment: PostComment) => {
@@ -4119,7 +4154,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const clearStreamedComments = useCallback(() => setStreamedComments([]), []);
 
   const value: PostContextType = {
-    currentUser, isAuthenticated: !!currentUser, posts, hasMoreFeed, isFeedLoading, loadMoreFeed, appendRealtimePost, activeComments, isLoading, initError, isOffline,
+    currentUser, isAuthenticated: !!currentUser, posts, hasMoreFeed, isFeedLoading, hasLoadedFeed, feedRefreshStatus, loadMoreFeed, appendRealtimePost, activeComments, isLoading, initError, isOffline,
     likedPostIds, unlikedPostIds, savedPostIds, unlockedPostIds, seenPostIds, viewedPostIds,
     followingUsernames, followingUserIds, followerUsernames, friendUsernames, sentRequestUsernames,
     receivedRequestUsernames,

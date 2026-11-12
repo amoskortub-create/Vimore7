@@ -52,11 +52,12 @@ export function ChatList({ selectedId, onSelect }: ChatListProps) {
         .filter(cl => cl.members && cl.members.some((m: any) => m.username === currentUser.username))
         .map(cl => ({ ...cl, isGroup: true })),
       ...cachedChats
-        .filter((chat: any) => chat?.$id && (chat.isGroup || chat.username))
+        .filter((chat: any) => chat?.$id && (
+          chat.isGroup || (chat.username && chat.friendshipStatus === 'accepted')
+        ))
         .map((chat: any) => ({
           ...chat,
           isCachedConversation: true,
-          friendshipStatus: 'accepted',
           members: chat.isGroup ? [{ username: currentUser.username }] : undefined,
         })),
     ];
@@ -122,6 +123,7 @@ export function ChatList({ selectedId, onSelect }: ChatListProps) {
       name: c.name,
       avatar: c.avatar,
       isGroup: c.isGroup || false,
+      friendshipStatus: c.isGroup ? undefined : c.friendshipStatus,
       isOnline: c.isOnline || false,
       isVerified: c.isVerified || false,
     }));

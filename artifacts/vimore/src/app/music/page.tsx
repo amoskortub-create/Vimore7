@@ -150,12 +150,17 @@ function MusicPageContent() {
   const { toast } = useToast();
 
   const [activeTab, setActiveTab] = useState("discover");
+  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(() => new Set(["discover"]));
   const [libraryTab, setLibraryTab] = useState("playlists");
   const [searchQuery, setSearchQuery] = useState("");
   const [deleteItem, setDeleteItem] = useState<{ id: string | number; type: "track" | "album" } | null>(null);
 
   const recentlyPlayedTracks = useMemo<Track[]>(() => loadCache<Track>(OFFLINE_KEYS.MUSIC_PLAYED), []);
   const isPlayerActive = currentTrack && !isExpanded;
+
+  useEffect(() => {
+    setVisitedTabs(previous => previous.has(activeTab) ? previous : new Set([...previous, activeTab]));
+  }, [activeTab]);
 
   useEffect(() => {
     const tab = searchParams?.get("tab");
@@ -303,8 +308,8 @@ function MusicPageContent() {
           <div className="px-3 sm:px-5 py-4">
 
             {/* ── DISCOVER ── */}
-            {activeTab === "discover" && (
-              <div className="space-y-6 animate-in fade-in slide-in-from-bottom-3 duration-400">
+            {(activeTab === "discover" || visitedTabs.has("discover")) && (
+              <div hidden={activeTab !== "discover"} className="space-y-6 animate-in fade-in slide-in-from-bottom-3 duration-400">
 
                 {/* Offline recently played */}
                 {isOffline && recentlyPlayedTracks.length > 0 && (
@@ -528,14 +533,20 @@ function MusicPageContent() {
             )}
 
             {/* ── CHARTS ── */}
-            {activeTab === "chart" && <MusicCharts />}
+            {(activeTab === "chart" || visitedTabs.has("chart")) && (
+              <div hidden={activeTab !== "chart"}><MusicCharts /></div>
+            )}
 
             {/* ── UPLOAD ── */}
-            {activeTab === "upload" && <MusicUpload onCancel={() => setActiveTab("discover")} />}
+            {(activeTab === "upload" || visitedTabs.has("upload")) && (
+              <div hidden={activeTab !== "upload"}>
+                <MusicUpload onCancel={() => setActiveTab("discover")} />
+              </div>
+            )}
 
             {/* ── LIBRARY ── */}
-            {activeTab === "library" && (
-              <div className="space-y-5 animate-in fade-in slide-in-from-bottom-3 duration-400">
+            {(activeTab === "library" || visitedTabs.has("library")) && (
+              <div hidden={activeTab !== "library"} className="space-y-5 animate-in fade-in slide-in-from-bottom-3 duration-400">
 
                 {/* Header */}
                 <div className="flex items-center justify-between">

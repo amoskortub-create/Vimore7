@@ -1,6 +1,6 @@
 /** Browser-only Appwrite Storage upload helpers. */
 
-import { account, client, ID, Permission, Role, storage, BUCKET, getFileUrl } from './appwrite';
+import { account, ID, Permission, Role, storage, BUCKET, getFileUrl } from './appwrite';
 
 const UPLOADABLE_MIME_TYPES = new Set([
   'application/pdf',
@@ -31,6 +31,14 @@ function validateUploadFile(file: File | null | undefined): asserts file is File
   }
 }
 
+function validateUploadSize(file: File, bucketId: string): void {
+  const isAudioOrVideo = file.type.startsWith('audio/') || file.type.startsWith('video/');
+  const maxBytes = (isAudioOrVideo ? 100 : 30) * 1024 * 1024;
+  if (file.size > maxBytes) {
+    throw new Error(`File too large for bucket ${bucketId}. Maximum: ${isAudioOrVideo ? 100 : 30} MB; file size: ${formatFileSize(file.size)}.`);
+  }
+}
+
 function normalizeUploadFile(file: File, fallbackName: string): File {
   // Capacitor/WebView can return a File-like object from a different realm,
   // making `instanceof File` unreliable. Re-wrap it in the current realm.
@@ -55,7 +63,7 @@ function uploadError(error: unknown, file: File, bucketId: string): Error {
   const errorType = `${type} ${message}`.toLowerCase();
 
   if (numericCode === 500) {
-    return new Error(`Upload failed for bucket ${bucketId}. Appwrite code: 500; message: ${message}`);
+    return new Error(`Upload failed for bucket ${bucketId}. Appwrite code: 500; message: ${message}; file size: ${formatFileSize(file.size)}`);
   }
   if (numericCode === 404 || errorType.includes('storage_bucket_not_found')) {
     return new Error(`Storage bucket not found for bucket ${bucketId}. ${detail}`);
@@ -105,29 +113,7 @@ async function createFileWithRetry(file: File, bucketId: string, fileId: string,
   }
 }
 
-async function getBucketMaxFileSize(bucketId: string): Promise<number | null> {
-  try {
-    const bucket = await client.call(
-      'get',
-      new URL(`${client.config.endpoint}/storage/buckets/${encodeURIComponent(bucketId)}`),
-      { 'content-type': 'application/json' },
-    );
-    return bucket.maximumFileSize ?? null;
-  } catch (error) {
-    const appwriteError = error as { code?: number | string; message?: string };
-    console.warn(`[upload] Could not read file-size limit for bucket ${bucketId}; attempting direct upload.`, {
-      code: appwriteError?.code,
-      message: appwriteError?.message || String(error),
-    });
-    return null;
-  }
-}
-
 async function createFile(file: File, bucketId: string, fileId?: string, permissions?: string[]) {
-  const maxFileSize = await getBucketMaxFileSize(bucketId);
-  if (maxFileSize !== null && file.size > maxFileSize) {
-    throw new Error(`File too large - max ${formatFileSize(maxFileSize)} for bucket ${bucketId}. Your file is ${formatFileSize(file.size)}.`);
-  }
   return createFileWithRetry(file, bucketId, fileId || ID.unique(), await filePermissions(bucketId, permissions));
 }
 
@@ -150,6 +136,7 @@ export async function uploadViaClient(
 ): Promise<string> {
   validateUploadFile(file);
   const normalizedFile = normalizeUploadFile(file, 'upload.bin');
+  validateUploadSize(normalizedFile, bucketId);
   const uploaded = await createFile(normalizedFile, bucketId, fileId, permissions);
   return uploaded.$id;
 }
@@ -182,10 +169,7 @@ export async function uploadLargeViaClient(
   if (options.signal?.aborted) throw new Error('Upload cancelled');
   validateUploadFile(file);
   const normalizedFile = normalizeUploadFile(file, 'upload.bin');
-  const maxFileSize = await getBucketMaxFileSize(bucketId);
-  if (maxFileSize !== null && normalizedFile.size > maxFileSize) {
-    throw new Error(`File too large - max ${formatFileSize(maxFileSize)} for bucket ${bucketId}. Your file is ${formatFileSize(normalizedFile.size)}.`);
-  }
+  validateUploadSize(normalizedFile, bucketId);
   const timeoutMs = options.timeoutMs ?? 180_000;
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {

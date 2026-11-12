@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, useCallback, ReactNode 
 
 export type NetworkTier = 'lite' | 'standard' | 'rich';
 export type EffectiveType = 'slow-2g' | '2g' | '3g' | '4g' | 'unknown';
+export type ConnectionStatus = 'checking' | 'online' | 'offline' | 'slow';
 
 export interface NetworkInfo {
   tier: NetworkTier;
@@ -12,6 +13,7 @@ export interface NetworkInfo {
   rtt: number;
   saveData: boolean;
   isOnline: boolean;
+  connectionStatus: ConnectionStatus;
   forcedTier: NetworkTier | null;
   setForcedTier: (tier: NetworkTier | null) => void;
 }
@@ -23,6 +25,7 @@ const DEFAULT_INFO: NetworkInfo = {
   rtt: 50,
   saveData: false,
   isOnline: true,
+  connectionStatus: 'checking',
   forcedTier: null,
   setForcedTier: () => {},
 };
@@ -62,6 +65,9 @@ function publishTierGlobal(tier: NetworkTier) {
 
 export function NetworkProvider({ children }: { children: ReactNode }) {
   const [forcedTier, setForcedTierState] = useState<NetworkTier | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(() =>
+    typeof navigator === 'undefined' || navigator.onLine ? 'checking' : 'offline'
+  );
   const [info, setInfo] = useState(() => {
     const c = readConnection();
     return {
@@ -107,6 +113,44 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    const heartbeat = async () => {
+      if (!navigator.onLine) {
+        setConnectionStatus('offline');
+        return;
+      }
+
+      try {
+        const response = await fetch('https://appwrite.mediatechliberia.online/v1/health', {
+          cache: 'no-store',
+          signal: AbortSignal.timeout(3000),
+        });
+        if (!response.ok) throw new Error(`Health check returned ${response.status}`);
+        if (active) setConnectionStatus('online');
+      } catch {
+        if (active) setConnectionStatus(navigator.onLine ? 'slow' : 'offline');
+      }
+    };
+
+    const handleOnline = () => {
+      setConnectionStatus('checking');
+      void heartbeat();
+    };
+    const handleOffline = () => setConnectionStatus('offline');
+
+    void heartbeat();
+    const timer = window.setInterval(heartbeat, 30_000);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   const detectedTier = classify(info.effectiveType, info.saveData);
   const tier = forcedTier ?? detectedTier;
 
@@ -129,6 +173,7 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
     rtt: info.rtt,
     saveData: info.saveData,
     isOnline: info.isOnline,
+    connectionStatus,
     forcedTier,
     setForcedTier,
   };

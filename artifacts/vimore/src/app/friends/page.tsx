@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef, useCallback, Suspense } from "react";
-import { saveCache, loadCache, OFFLINE_KEYS } from "@/lib/offline-cache";
+import { saveCache, loadCache, isCacheFresh, OFFLINE_KEYS } from "@/lib/offline-cache";
 import { Header } from "@/components/layout/header";
 import { SubHeader } from "@/components/layout/sub-header";
 import { MainNav } from "@/components/layout/main-nav";
@@ -101,6 +101,7 @@ function FriendsPageContent() {
 
   const fetchDiscoveryBatch = useCallback(async () => {
     if (!currentUser) return;
+    if (isCacheFresh(OFFLINE_KEYS.FRIENDS_DISCOVERY)) return;
     try {
       const result = await databases.listDocuments(DATABASE_ID, COL.USERS, [Query.limit(friendsPageLimit)]);
       const mapped = result.documents.map((doc: any) => ({
@@ -120,6 +121,7 @@ function FriendsPageContent() {
 
   const fetchPendingRequests = useCallback(async () => {
     if (!currentUser) return;
+    if (isCacheFresh(OFFLINE_KEYS.FRIENDS_PENDING)) return;
     try {
       const reqResult = await databases.listDocuments(DATABASE_ID, COL.FRIEND_REQUESTS, [
         Query.equal('from_user_id', currentUser.$id),
@@ -141,6 +143,7 @@ function FriendsPageContent() {
 
   const fetchConfirmRequests = useCallback(async () => {
     if (!currentUser) return;
+    if (isCacheFresh(OFFLINE_KEYS.FRIENDS_CONFIRM)) return;
     try {
       const reqResult = await databases.listDocuments(DATABASE_ID, COL.FRIEND_REQUESTS, [
         Query.equal('to_user_id', currentUser.$id),
@@ -162,25 +165,28 @@ function FriendsPageContent() {
 
   useEffect(() => {
     if (activeTab !== 'add') { if (discoveryIntervalRef.current) { clearInterval(discoveryIntervalRef.current); discoveryIntervalRef.current = null; } return; }
+    if (isCacheFresh(OFFLINE_KEYS.FRIENDS_DISCOVERY)) return;
     setIsLoadingDiscovery(true);
     fetchDiscoveryBatch().finally(() => setIsLoadingDiscovery(false));
-    discoveryIntervalRef.current = setInterval(() => { fetchDiscoveryBatch(); }, 90000);
+    discoveryIntervalRef.current = setInterval(() => { fetchDiscoveryBatch(); }, 5 * 60 * 1000);
     return () => { if (discoveryIntervalRef.current) { clearInterval(discoveryIntervalRef.current); discoveryIntervalRef.current = null; } };
   }, [activeTab, fetchDiscoveryBatch]);
 
   useEffect(() => {
     if (activeTab !== 'confirm') { if (confirmIntervalRef.current) { clearInterval(confirmIntervalRef.current); confirmIntervalRef.current = null; } return; }
+    if (isCacheFresh(OFFLINE_KEYS.FRIENDS_CONFIRM)) return;
     setIsLoadingConfirm(true);
     fetchConfirmRequests().finally(() => setIsLoadingConfirm(false));
-    confirmIntervalRef.current = setInterval(() => { fetchConfirmRequests(); }, 5000);
+    confirmIntervalRef.current = setInterval(() => { fetchConfirmRequests(); }, 5 * 60 * 1000);
     return () => { if (confirmIntervalRef.current) { clearInterval(confirmIntervalRef.current); confirmIntervalRef.current = null; } };
   }, [activeTab, fetchConfirmRequests]);
 
   useEffect(() => {
     if (activeTab !== 'pending') { if (pendingIntervalRef.current) { clearInterval(pendingIntervalRef.current); pendingIntervalRef.current = null; } return; }
+    if (isCacheFresh(OFFLINE_KEYS.FRIENDS_PENDING)) return;
     setIsLoadingPending(true);
     fetchPendingRequests().finally(() => setIsLoadingPending(false));
-    pendingIntervalRef.current = setInterval(() => { fetchPendingRequests(); }, 90000);
+    pendingIntervalRef.current = setInterval(() => { fetchPendingRequests(); }, 5 * 60 * 1000);
     return () => { if (pendingIntervalRef.current) { clearInterval(pendingIntervalRef.current); pendingIntervalRef.current = null; } };
   }, [activeTab, fetchPendingRequests]);
 

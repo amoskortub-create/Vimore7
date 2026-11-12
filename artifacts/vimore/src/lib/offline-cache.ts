@@ -59,8 +59,10 @@ export const offlineCache = {
 
 export const OFFLINE_KEYS = {
   // Feeds
-  REELS:                'vimore_reels_cache_v1',
+  REELS:                'vimore_videos_cache_v1',
+  VIDEOS:               'vimore_videos_cache_v1',
   HOME_FEED:            'vimore_feed_cache_v1',
+  MUSIC:                'vimore_music_cache_v1',
   MUSIC_PLAYED:         'vimore_music_played_v1',
 
   // Conversations
@@ -75,6 +77,9 @@ export const OFFLINE_KEYS = {
 
   // Pages / hubs
   PROFILE:              'vimore_profile_cache_v1',
+  ACTIVITY:             'vimore_activity_cache_v1',
+  SEARCH:               'vimore_search_cache_v1',
+  MENU:                 'vimore_menu_cache_v1',
   CURRENCY_DATA:        'vimore_currency_data_v1',
   EARNINGS_DATA:        'vimore_earnings_data_v1',
   MARKETPLACE_STORES:   'vimore_marketplace_stores_v1',
@@ -223,9 +228,24 @@ export function saveFeedCache<T>(posts: T[]): void {
 export function saveCache<T>(key: string, items: T[], maxItems = 15): void {
   if (typeof window === 'undefined') return;
   try {
-    const entry: TimestampedEntry<T[]> = { data: items.slice(0, maxItems), savedAt: Date.now() };
+    const savedAt = Date.now();
+    const entry: TimestampedEntry<T[]> = { data: items.slice(0, maxItems), savedAt };
     localStorage.setItem(key, JSON.stringify(entry));
+    localStorage.setItem(`${key}_time`, String(savedAt));
   } catch {}
+}
+
+export function isCacheFresh(key: string, maxAgeMs = 5 * 60 * 1000): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    const savedAt = Number(parsed?.savedAt) || Number(localStorage.getItem(`${key}_time`)) || 0;
+    return savedAt > 0 && Date.now() - savedAt < maxAgeMs;
+  } catch {
+    return false;
+  }
 }
 
 /** Load items saved with saveCache. Returns [] on any failure or expiry. */
@@ -256,8 +276,10 @@ export function loadCache<T>(key: string): T[] {
 export function saveKeyValue<T>(key: string, value: T): void {
   if (typeof window === 'undefined') return;
   try {
-    const entry: TimestampedEntry<T> = { data: value, savedAt: Date.now() };
+    const savedAt = Date.now();
+    const entry: TimestampedEntry<T> = { data: value, savedAt };
     localStorage.setItem(key, JSON.stringify(entry));
+    localStorage.setItem(`${key}_time`, String(savedAt));
   } catch {}
 }
 
@@ -367,7 +389,8 @@ export function clearAllLocalCaches(): Promise<void> {
 
     const allKeys = [
       ...Object.values(KEYS),
-      ...Object.values(OFFLINE_KEYS),
+      ...Object.values(OFFLINE_KEYS).flatMap(key => [key, `${key}_time`]),
+      FEED_CACHE_TIME_KEY,
       OUTBOX_KEY,
       'vimore_marketplace_dir_v1',
       'vimore_product_grid_v1',

@@ -72,6 +72,7 @@ import {
 } from "@/components/ui/dialog";
 import { useTranslation } from "@/context/LanguageContext";
 import { authFetch } from "@/lib/auth-fetch";
+import { isCacheFresh, loadKeyValue, saveKeyValue, OFFLINE_KEYS } from "@/lib/offline-cache";
 
 export default function UserProfilePage({ params }: { params: Promise<{ username: string }> }) {
   const resolvedParams = use(params);
@@ -81,9 +82,10 @@ export default function UserProfilePage({ params }: { params: Promise<{ username
   const { addSignal } = useNotifications();
   const { t } = useTranslation();
   const router = useRouter();
+  const profileCacheKey = `${OFFLINE_KEYS.PROFILE}_${encodeURIComponent(username.toLowerCase())}`;
   
-  const [displayUser, setDisplayUser] = useState<User | null>(null);
-  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
+  const [displayUser, setDisplayUser] = useState<User | null>(() => loadKeyValue<User>(profileCacheKey));
+  const [isLoadingProfile, setIsLoadingProfile] = useState(() => !isCacheFresh(profileCacheKey));
   const [profilePosts, setProfilePosts] = useState<Post[]>([]);
   const [isLoadingProfilePosts, setIsLoadingProfilePosts] = useState(false);
   const [profileCursor, setProfileCursor] = useState<string | null>(null);
@@ -125,14 +127,25 @@ export default function UserProfilePage({ params }: { params: Promise<{ username
 
   useEffect(() => {
     const syncProfile = async () => {
-      setIsLoadingProfile(true);
-      const profile = await fetchProfileByUsername(username);
-      if (profile) setDisplayUser(profile);
+      const cachedProfile = loadKeyValue<User>(profileCacheKey);
+      if (cachedProfile) setDisplayUser(cachedProfile);
       else setDisplayUser(null);
+      if (isCacheFresh(profileCacheKey)) {
+        setIsLoadingProfile(false);
+        return;
+      }
+      setIsLoadingProfile(!cachedProfile);
+      const profile = await fetchProfileByUsername(username);
+      if (profile) {
+        setDisplayUser(profile);
+        saveKeyValue(profileCacheKey, profile);
+      } else if (!cachedProfile) {
+        setDisplayUser(null);
+      }
       setIsLoadingProfile(false);
     };
     syncProfile();
-  }, [username, fetchProfileByUsername]);
+  }, [username, profileCacheKey, fetchProfileByUsername]);
 
   useEffect(() => { if (isMe) router.replace('/profile'); }, [isMe, router]);
 

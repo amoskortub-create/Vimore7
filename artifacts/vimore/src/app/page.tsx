@@ -23,6 +23,7 @@ import { account } from "@/lib/appwrite";
 import { Button } from "@/components/ui/button";
 import { CreateStoryModal } from "@/components/feed/create-story-modal";
 import { useFeedSignal } from "@/context/FeedSignalContext";
+import { useNetwork } from "@/context/NetworkContext";
 import { AcronymRibbon } from "@/components/branding/acronym-meaning";
 import { listAllStores, isStoreBoosted, getStoreLogoUrl } from "@/lib/stores";
 import { cached } from "@/lib/client-cache";
@@ -252,7 +253,8 @@ const MAX_CACHED_POSTS = 30;
 export default function Home() {
   const router = useRouter();
   const { t } = useTranslation();
-  const { posts, campaigns, isLoading, initError, followingUsernames, friendUsernames, seenPostIds, isAuthenticated, isOffline, currentUser, triggerHaptic, loadMoreFeed, hasMoreFeed, isFeedLoading, refreshFeed } = usePosts();
+  const { posts, campaigns, isLoading, initError, followingUsernames, friendUsernames, seenPostIds, isAuthenticated, isOffline, currentUser, triggerHaptic, loadMoreFeed, hasMoreFeed, isFeedLoading, hasLoadedFeed, feedRefreshStatus, refreshFeed } = usePosts();
+  const { connectionStatus } = useNetwork();
   const { currentTrack, isExpanded } = useMusic();
   const { newFollowingPostsCount, clearNewPosts, uploadProgress } = useFeedSignal();
   const [isStoryModalOpen, setIsStoryModalOpen] = useState(false);
@@ -482,11 +484,23 @@ export default function Home() {
         <div className="w-full bg-amber-500/10 border-b border-amber-500/20 px-4 py-3 flex items-center justify-center gap-2">
           <WifiOff className="h-4 w-4 text-amber-500 shrink-0" />
           <span className="text-[11px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400">
-            {cachedPosts.length > 0
-              ? `No internet access — showing ${cachedPosts.length} cached posts`
-              : t('home_offline')}
+            No internet - showing saved posts
           </span>
         </div>
+      )}
+      {!isOffline && connectionStatus === 'slow' && (
+        <div className="w-full bg-amber-500/10 border-b border-amber-500/20 px-4 py-3 text-center text-[11px] font-bold text-amber-700 dark:text-amber-300">
+          Slow connection - showing saved posts, updating...
+        </div>
+      )}
+      {!isOffline && feedRefreshStatus === 'server-error' && (
+        <button
+          type="button"
+          onClick={() => void refreshFeed()}
+          className="w-full bg-amber-500/10 border-b border-amber-500/20 px-4 py-3 text-center text-[11px] font-bold text-amber-700 dark:text-amber-300"
+        >
+          Server slow - showing saved posts · Tap to retry
+        </button>
       )}
       {!isOffline && cachedPosts.length > 0 && cacheNeedsRefresh && (
         <button
@@ -628,7 +642,24 @@ export default function Home() {
                   </p>
                 </div>
               </>
-            ) : !isLoading && (
+            ) : !hasLoadedFeed && feedRefreshStatus === 'refreshing' ? (
+              <div className="space-y-3" aria-label="Loading feed">
+                {[0, 1].map(item => (
+                  <div key={item} className="h-72 animate-pulse rounded-[2rem] bg-white dark:bg-card">
+                    <div className="flex items-center gap-3 p-4">
+                      <div className="h-10 w-10 rounded-full bg-secondary/50" />
+                      <div className="h-3 w-32 rounded-full bg-secondary/50" />
+                    </div>
+                    <div className="mx-4 h-48 rounded-2xl bg-secondary/30" />
+                  </div>
+                ))}
+              </div>
+            ) : feedRefreshStatus === 'server-error' && posts.length === 0 && cachedPosts.length === 0 ? (
+              <div className="py-16 text-center text-sm text-muted-foreground">
+                The feed could not be refreshed.
+                <Button type="button" variant="link" onClick={() => void refreshFeed()}>Tap to retry</Button>
+              </div>
+            ) : hasLoadedFeed && !isLoading && (
               <div className="py-32 text-center bg-white dark:bg-card rounded-[2.5rem] border border-dashed border-primary/10 shadow-sm flex flex-col items-center justify-center space-y-6 px-12 animate-in fade-in zoom-in duration-700">
                 <div className="h-24 w-24 bg-primary/5 rounded-[2rem] flex items-center justify-center border-2 border-dashed border-primary/20">
                   <Rocket className="h-10 w-10 text-primary/40 animate-pulse" />

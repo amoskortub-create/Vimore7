@@ -7,6 +7,7 @@ import { databases, DATABASE_ID, COL, ID, Query } from '@/lib/appwrite';
 import { firePush } from '@/lib/push-fire';
 import { authFetch } from '@/lib/auth-fetch';
 import { subscribeToPush } from '@/lib/push-notifications';
+import { OFFLINE_KEYS } from '@/lib/offline-cache';
 
 export type SignalType = 'SOCIAL' | 'SONIC' | 'POST' | 'SYSTEM';
 export type PulseCategory = 'HOME' | 'FRIENDS' | 'MUSIC' | 'MESSAGES' | 'ADMIN';
@@ -51,6 +52,7 @@ interface NotificationContextType {
   updateMessagePreview: (clusterId: string, text: string, time: string) => void;
   refreshNotifications: (userId: string) => Promise<void>;
   notificationsOffline: boolean;
+  notificationsRefreshFailed: boolean;
   requestPushPermission: () => Promise<void>;
   hasPushPermission: boolean;
 }
@@ -59,6 +61,32 @@ const NotificationContext = createContext<NotificationContextType | undefined>(u
 
 const NOTIFICATION_SOUND = "/sounds/notification.mp3";
 const NOTIFICATION_CACHE_PREFIX = 'vimore_notifications_cache_v1_';
+
+function getNotificationCacheKey(prefix: string, userId: string): string {
+  return `${prefix}_${userId}`;
+}
+
+function readCachedNotifications(userId?: string): NotificationNode[] {
+  if (typeof window === 'undefined' || !userId) return [];
+  try {
+    const raw = localStorage.getItem(getNotificationCacheKey(OFFLINE_KEYS.ACTIVITY, userId))
+      || localStorage.getItem(`${NOTIFICATION_CACHE_PREFIX}${userId}`);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed?.items) ? parsed.items : [];
+  } catch {
+    return [];
+  }
+}
+
+function isActivityCacheFresh(userId: string): boolean {
+  try {
+    const key = getNotificationCacheKey(OFFLINE_KEYS.ACTIVITY, userId);
+    const savedAt = Number(localStorage.getItem(`${key}_time`)) || 0;
+    return savedAt > 0 && Date.now() - savedAt < 5 * 60 * 1000;
+  } catch {
+    return false;
+  }
+}
 
 function formatTimeAgoSimple(dateStr: string): string {
   const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
@@ -69,16 +97,18 @@ function formatTimeAgoSimple(dateStr: string): string {
 }
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
-  const [notifications, setNotifications] = useState<NotificationNode[]>([]);
+  const { settings, triggerHaptic, currentUser, selectedChatId } = usePosts();
+  const [notifications, setNotifications] = useState<NotificationNode[]>(() =>
+    readCachedNotifications(currentUser?.$id)
+  );
   const [notificationsOffline, setNotificationsOffline] = useState(false);
+  const [notificationsRefreshFailed, setNotificationsRefreshFailed] = useState(false);
   const [categoryPulses, setCategoryPulses] = useState<Record<PulseCategory, number>>({
     HOME: 0, FRIENDS: 0, MUSIC: 0, MESSAGES: 0, ADMIN: 0,
   });
   const [messagePreviews, setMessagePreviews] = useState<Record<string, MessagePreview>>({});
   const [hasPushPermission, setHasPushPermission] = useState(false);
   const [unreadMessageCount, setUnreadMessageCount] = useState(0);
-  const { settings, triggerHaptic, currentUser, selectedChatId } = usePosts();
-
   useEffect(() => {
     if (!currentUser?.$id || Capacitor.isNativePlatform() || typeof window === 'undefined' || !('Notification' in window)) return;
 
@@ -93,6 +123,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   const loadNotifications = useCallback(async (userId: string) => {
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    setNotificationsRefreshFailed(false);
     try {
       const request = databases.listDocuments(DATABASE_ID, COL.NOTIFICATIONS, [
         Query.equal('user_id', userId),
@@ -124,12 +155,21 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           actionHref: doc.action_href || undefined,
         }));
       setNotifications(mapped);
-      setNotificationsOffline(false);
+      setNotificationsOffline(typeof navigator !== 'undefined' && !navigator.onLine);
+      const savedAt = Date.now();
       try {
-        localStorage.setItem(`${NOTIFICATION_CACHE_PREFIX}${userId}`, JSON.stringify({ savedAt: Date.now(), items: mapped }));
+        const cacheValue = JSON.stringify({ savedAt, items: mapped });
+        const activityKey = getNotificationCacheKey(OFFLINE_KEYS.ACTIVITY, userId);
+        const menuKey = getNotificationCacheKey(OFFLINE_KEYS.MENU, userId);
+        localStorage.setItem(`${NOTIFICATION_CACHE_PREFIX}${userId}`, cacheValue);
+        localStorage.setItem(activityKey, cacheValue);
+        localStorage.setItem(`${activityKey}_time`, String(savedAt));
+        localStorage.setItem(menuKey, cacheValue);
+        localStorage.setItem(`${menuKey}_time`, String(savedAt));
       } catch {}
     } catch (err) {
-      setNotificationsOffline(true);
+      setNotificationsOffline(typeof navigator !== 'undefined' && !navigator.onLine);
+      setNotificationsRefreshFailed(true);
       console.error('loadNotifications error:', err);
     } finally {
       if (timeoutHandle) clearTimeout(timeoutHandle);
@@ -139,24 +179,29 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (currentUser) {
       try {
-        const saved = localStorage.getItem(`${NOTIFICATION_CACHE_PREFIX}${currentUser.$id}`);
-        const parsed = saved ? JSON.parse(saved) : null;
-        setNotifications(Array.isArray(parsed?.items) ? parsed.items : []);
+        setNotifications(readCachedNotifications(currentUser.$id));
       } catch {}
-      loadNotifications(currentUser.$id);
+      if (!isActivityCacheFresh(currentUser.$id)) loadNotifications(currentUser.$id);
     } else {
       setNotifications([]);
       setNotificationsOffline(false);
+      setNotificationsRefreshFailed(false);
     }
   }, [currentUser, loadNotifications]);
 
   useEffect(() => {
     if (!currentUser?.$id || notifications.length === 0) return;
     try {
-      localStorage.setItem(`${NOTIFICATION_CACHE_PREFIX}${currentUser.$id}`, JSON.stringify({
-        savedAt: Date.now(),
+      const savedAt = Date.now();
+      const cacheValue = JSON.stringify({
+        savedAt,
         items: notifications,
-      }));
+      });
+      const activityKey = getNotificationCacheKey(OFFLINE_KEYS.ACTIVITY, currentUser.$id);
+      const menuKey = getNotificationCacheKey(OFFLINE_KEYS.MENU, currentUser.$id);
+      localStorage.setItem(`${NOTIFICATION_CACHE_PREFIX}${currentUser.$id}`, cacheValue);
+      localStorage.setItem(activityKey, cacheValue);
+      localStorage.setItem(menuKey, cacheValue);
     } catch {}
   }, [currentUser?.$id, notifications]);
 
@@ -396,7 +441,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   return (
     <NotificationContext.Provider value={{
-      notifications, unreadCount, unreadMessageCount, categoryPulses, messagePreviews, notificationsOffline,
+      notifications, unreadCount, unreadMessageCount, categoryPulses, messagePreviews, notificationsOffline, notificationsRefreshFailed,
       addSignal, markAsRead, markAllAsRead, purgeSignal, clearPulse,
       incrementPulse, setPulseCount, incrementUnreadMessageCount, decrementUnreadMessageCount,
       updateMessagePreview, refreshNotifications,

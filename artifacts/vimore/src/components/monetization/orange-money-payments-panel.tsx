@@ -57,6 +57,13 @@ export function OrangeMoneyPaymentsPanel() {
   const confirmedEarnings = useMemo(() => records
     .filter(({ document }) => document.creatorId === currentUser?.$id && document.status === "confirmed")
     .reduce((sum, { document }) => sum + Number(document.amountLRD || 0), 0), [records, currentUser?.$id]);
+  const confirmedGifts = useMemo(() => records
+    .filter(({ kind, document }) => kind === "gift" && document.creatorId === currentUser?.$id && document.status === "confirmed"), [records, currentUser?.$id]);
+  const confirmedGiftTotal = useMemo(() => confirmedGifts
+    .reduce((sum, { document }) => sum + Number(document.amountLRD || 0), 0), [confirmedGifts]);
+  const confirmedLockedPostSales = useMemo(() => records
+    .filter(({ kind, document }) => kind === "lockedPost" && document.creatorId === currentUser?.$id && document.status === "confirmed")
+    .reduce((sum, { document }) => sum + Number(document.amountLRD || 0), 0), [records, currentUser?.$id]);
 
   const handleReview = async (record: PaymentRecord, status: "confirmed" | "rejected") => {
     if (!currentUser) return;
@@ -82,7 +89,11 @@ export function OrangeMoneyPaymentsPanel() {
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-black uppercase tracking-widest">Orange Money Payments</h2>
-          <p className="mt-1 text-xs text-muted-foreground">Direct creator-to-buyer transfers · Confirmed earnings: {confirmedEarnings.toLocaleString()} LRD</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Direct creator-to-buyer transfers · Confirmed earnings: {confirmedEarnings.toLocaleString()} LRD
+            {" · Gifts: "}{confirmedGifts.length} ({confirmedGiftTotal.toLocaleString()} LRD)
+            {" · Locked-post sales: "}{confirmedLockedPostSales.toLocaleString()} LRD
+          </p>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={() => void refresh()}>Refresh</Button>
       </div>
@@ -98,7 +109,7 @@ export function OrangeMoneyPaymentsPanel() {
             const screenshotUrl = getPaymentScreenshotUrl(String(document.screenshotFileId || ""));
             const status = String(document.status || "pending");
             return (
-              <article key={`${kind}-${document.$id}`} className="rounded-2xl border border-border p-4">
+              <article key={`${kind}-${document.$id}`} className={`rounded-2xl border border-border p-4 ${kind === "gift" && status === "confirmed" ? "animate-in zoom-in-95 duration-500" : ""}`}>
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <p className="text-sm font-bold">

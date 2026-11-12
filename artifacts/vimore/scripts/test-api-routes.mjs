@@ -52,6 +52,7 @@ const ROUTES = [
   { path: '/api/calls', method: 'PATCH' },
   { path: '/api/auth/me', method: 'GET' },
   { path: '/api/advertise/submit', method: 'POST' },
+  { path: '/api/friends/action', method: 'POST' },
   { path: '/api/cron/cleanup', method: 'GET' },
   { path: '/api/cron/expiry-alerts', method: 'GET' },
   // Note: the file proxy legitimately 404s for a non-existent fileId even

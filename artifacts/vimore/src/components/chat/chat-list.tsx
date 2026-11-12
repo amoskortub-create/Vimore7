@@ -32,7 +32,7 @@ interface ChatListProps {
 
 export function ChatList({ selectedId, onSelect }: ChatListProps) {
   const { tier } = useNetwork();
-  const { connections = [], clusters = [], triggerHaptic, settings, currentUser, friendUsernames, acceptedStrangerUsernames, chatMessages, markChatMessagesRead, chatLastMessageAt, chatLastIncomingAt, chatReadReceipts, chatUnreadCounts, onlineUserIds } = usePosts();
+  const { connections = [], clusters = [], triggerHaptic, settings, currentUser, friendUsernames, chatMessages, markChatMessagesRead, chatLastMessageAt, chatLastIncomingAt, chatReadReceipts, chatUnreadCounts, onlineUserIds } = usePosts();
   const { categoryPulses, clearPulse, messagePreviews } = useNotifications();
   const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState("");
@@ -45,7 +45,7 @@ export function ChatList({ selectedId, onSelect }: ChatListProps) {
 
     const allItems = [
       ...(connections || [])
-        .filter(c => c && c.username && c.username !== currentUser.username)
+        .filter(c => c && c.username && c.username !== currentUser.username && c.friendshipStatus === 'accepted' && friendUsernames.has(c.username))
         .map(c => ({ ...c, isGroup: false })),
       ...(clusters || [])
         .filter(cl => cl.members && cl.members.some((m: any) => m.username === currentUser.username))
@@ -102,7 +102,7 @@ export function ChatList({ selectedId, onSelect }: ChatListProps) {
     });
 
     return { sortedChats: sorted, requestCount: 0 };
-  }, [connections, clusters, searchQuery, activeFilter, pinnedUsernames, currentUser, friendUsernames, acceptedStrangerUsernames, chatMessages, chatLastMessageAt, chatLastIncomingAt, chatReadReceipts]);
+  }, [connections, clusters, searchQuery, activeFilter, pinnedUsernames, currentUser, friendUsernames, chatMessages, chatLastMessageAt, chatLastIncomingAt, chatReadReceipts]);
 
   // Persist the sorted conversation list to localStorage for offline access
   useEffect(() => {

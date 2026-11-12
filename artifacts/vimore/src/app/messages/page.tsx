@@ -16,7 +16,7 @@ import MessagesLoading from "./loading";
 
 function MessagesInner() {
   const { currentTrack, isExpanded } = useMusic();
-  const { connections, clusters, currentUser, isLoading, isOffline, allUsers, setSelectedChatId: setContextChatId } = usePosts();
+  const { connections, clusters, currentUser, friendUsernames, isLoading, isOffline, setSelectedChatId: setContextChatId } = usePosts();
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [showMobileChat, setShowMobileChat] = useState(false);
   const searchParams = useSearchParams();
@@ -25,8 +25,18 @@ function MessagesInner() {
 
   useEffect(() => {
     const open = searchParams?.get('open');
-    if (open) { setSelectedChatId(open); setContextChatId(open); }
-  }, [searchParams, setContextChatId]);
+    if (!open) return;
+    const isAcceptedFriend = connections.some(connection => connection.username === open && connection.friendshipStatus === 'accepted')
+      && friendUsernames.has(open);
+    const isMemberCluster = clusters.some(cluster => cluster.$id === open);
+    if (isAcceptedFriend || isMemberCluster) {
+      setSelectedChatId(open);
+      setContextChatId(open);
+    } else if (!isLoading) {
+      setSelectedChatId(null);
+      setContextChatId(null);
+    }
+  }, [searchParams, connections, clusters, friendUsernames, isLoading, setContextChatId]);
 
   useEffect(() => {
     if (selectedChatId) {
@@ -38,30 +48,14 @@ function MessagesInner() {
 
   const selectedContact = useMemo(() => {
     if (!selectedChatId || !currentUser) return null;
-    
     const conn = connections.find(c => c.username === selectedChatId);
     if (conn) return { ...conn, isGroup: false } as Connection;
     
     const cluster = clusters.find(cl => cl.$id === selectedChatId);
     if (cluster) return { ...cluster, isGroup: true } as Cluster;
-
-    const fallbackUser = allUsers.find(u => u.username === selectedChatId);
-    if (fallbackUser) {
-      return {
-        $id: fallbackUser.$id,
-        name: fallbackUser.name,
-        username: fallbackUser.username,
-        email: fallbackUser.vimoreId || '',
-        avatar: fallbackUser.avatar,
-        isVerified: fallbackUser.isVerified,
-        isGroup: false,
-        isOnline: false,
-        followsYou: false,
-      } as Connection;
-    }
     
     return null;
-  }, [connections, clusters, selectedChatId, currentUser, allUsers]);
+  }, [connections, clusters, selectedChatId, currentUser]);
 
   if (isLoading || !currentUser) {
     return <MessagesLoading />;

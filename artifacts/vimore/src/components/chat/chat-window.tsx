@@ -16,7 +16,6 @@ import {
   X,
   Zap,
   LayoutDashboard,
-  ShieldCheck,
   Eye,
   FileText,
   Link as LinkIcon,
@@ -41,7 +40,6 @@ import {
   Plus,
   Loader2,
   Check,
-  Ban,
   Camera,
 } from "lucide-react";
 import { getAvatarUrl, BUCKET, getFileUrl } from "@/lib/appwrite";
@@ -88,7 +86,7 @@ interface ChatWindowProps {
 }
 
 export function ChatWindow({ contact, onBack }: ChatWindowProps) {
-  const { currentUser, triggerHaptic, leaveCluster, connections = [], addMemberToCluster, updateCluster, settings, chatMessages, sendChatMessage, markChatMessageViewed, uploadMedia, friendUsernames, acceptedStrangerUsernames, acceptMessageRequest, declineMessageRequest, deleteMessage, editMessage, clusterMemberReceipts } = usePosts();
+  const { currentUser, triggerHaptic, leaveCluster, connections = [], friendUsernames, addMemberToCluster, updateCluster, settings, chatMessages, sendChatMessage, markChatMessageViewed, uploadMedia, deleteMessage, editMessage, clusterMemberReceipts } = usePosts();
   const { startCall, startGroupCall, groupCalls = [], joinGroupCall } = useCall();
   const { tier: netTier } = useNetwork();
   const { t } = useTranslation();
@@ -144,11 +142,6 @@ export function ChatWindow({ contact, onBack }: ChatWindowProps) {
   const [coverUploading, setCoverUploading] = useState(false);
   const logoEditRef = useRef<HTMLInputElement>(null);
   const coverEditRef = useRef<HTMLInputElement>(null);
-
-  const isRequest = useMemo(() => {
-    if (isCluster) return false;
-    return !friendUsernames.has(contactId) && !acceptedStrangerUsernames.has(contactId);
-  }, [isCluster, friendUsernames, acceptedStrangerUsernames, contactId]);
 
   const messages = useMemo(() => {
     const live = chatMessages[contactId];
@@ -506,15 +499,6 @@ export function ChatWindow({ contact, onBack }: ChatWindowProps) {
     }
   };
 
-  const handleAccept = async () => {
-    await acceptMessageRequest(contactId);
-  };
-
-  const handleDecline = async () => {
-    await declineMessageRequest(contactId);
-    onBack();
-  };
-
   const isContactOnline = !isCluster && (contact as Connection).isOnline && !settings.isGhostMode;
   const contactLastSeenAt = !isCluster ? (contact as Connection).lastSeenAt : null;
 
@@ -555,7 +539,7 @@ export function ChatWindow({ contact, onBack }: ChatWindowProps) {
                   <AvatarFallback>{contact.name[0]}</AvatarFallback>
                 </Avatar>
               )}
-              {!isCluster && !isRequest && (
+              {!isCluster && (
                 <OnlineIndicator
                   isOnline={!!isContactOnline}
                   lastSeenAt={contactLastSeenAt}
@@ -570,8 +554,6 @@ export function ChatWindow({ contact, onBack }: ChatWindowProps) {
                 <span className="text-[10px] font-black uppercase tracking-widest text-primary">
                   {`${((contact as Cluster).members || []).length} ${t('chat_members_pulse')}`}
                 </span>
-              ) : isRequest ? (
-                <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">STRANGER PULSE</span>
               ) : (
                 <OnlineIndicator
                   isOnline={!!isContactOnline}
@@ -584,30 +566,26 @@ export function ChatWindow({ contact, onBack }: ChatWindowProps) {
           </div>
           
           <div className="flex items-center gap-1">
-            {!isRequest && (
-              <>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label="Start audio call"
-                  title="Audio call"
-                  className="rounded-full text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
-                  onClick={() => handleStartCall("audio")}
-                >
-                  <Phone className="h-5 w-5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label="Start video call"
-                  title="Video call"
-                  className="rounded-full text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
-                  onClick={() => handleStartCall("video")}
-                >
-                  <Video className="h-5 w-5" />
-                </Button>
-              </>
-            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Start audio call"
+              title="Audio call"
+              className="rounded-full text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+              onClick={() => handleStartCall("audio")}
+            >
+              <Phone className="h-5 w-5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Start video call"
+              title="Video call"
+              className="rounded-full text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+              onClick={() => handleStartCall("video")}
+            >
+              <Video className="h-5 w-5" />
+            </Button>
             <Button variant="ghost" size="icon" className={cn("rounded-full transition-all", showVault ? "bg-primary/10 text-primary" : "text-muted-foreground")} onClick={() => { triggerHaptic(5); setShowVault(!showVault); }}>
               {isCluster ? <Bookmark className="h-5 w-5" /> : <InfoIcon className="h-5 w-5" />}
             </Button>
@@ -633,27 +611,13 @@ export function ChatWindow({ contact, onBack }: ChatWindowProps) {
         )}
 
         <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-8 scroll-smooth" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, rgba(153, 64, 22, 0.03) 1px, transparent 0)', backgroundSize: '24px 24px' }}>
-          {isRequest && (
-            <div className="max-w-md mx-auto p-6 bg-white dark:bg-card border border-primary/10 rounded-[2rem] text-center space-y-4 animate-in zoom-in-95 duration-500 shadow-xl">
-              <div className="h-16 w-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto text-primary">
-                <ShieldCheck className="h-8 w-8" />
-              </div>
-              <div className="space-y-1">
-                <h4 className="text-lg font-black italic uppercase tracking-tighter">{t('chat_requests')}</h4>
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-relaxed">
-                  {t('chat_request_desc')}
-                </p>
-              </div>
-            </div>
-          )}
-
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center opacity-40 p-12">
               <div className="h-20 w-20 bg-primary/5 rounded-[2rem] flex items-center justify-center border border-dashed border-primary/20 mb-6">
                 <Zap className="h-10 w-10" />
               </div>
-              <h3 className="text-xl font-black italic uppercase tracking-tighter">Handshake Initialized</h3>
-              <p className="text-sm font-medium mt-2">Start typing to materialize your thoughts in the network.</p>
+              <h3 className="text-xl font-black tracking-tight">No messages yet</h3>
+              <p className="text-sm font-medium mt-2">Send a message to start this conversation.</p>
             </div>
           ) : (
             messages.map((msg) => (
@@ -737,26 +701,7 @@ export function ChatWindow({ contact, onBack }: ChatWindowProps) {
           )}
         </div>
 
-        {isRequest ? (
-          <div className="p-6 bg-white dark:bg-card border-t border-primary/5 z-20">
-            <div className="max-w-xl mx-auto flex gap-4">
-              <Button 
-                variant="destructive" 
-                className="flex-1 h-14 rounded-2xl font-black uppercase tracking-widest text-[10px] gap-2 shadow-xl shadow-destructive/10"
-                onClick={handleDecline}
-              >
-                <Ban className="h-4 w-4" /> {t('chat_decline')}
-              </Button>
-              <Button 
-                className="flex-[2] h-14 rounded-2xl bg-primary text-white font-black italic uppercase tracking-widest text-[10px] gap-2 shadow-xl shadow-primary/20"
-                onClick={handleAccept}
-              >
-                <Check className="h-4 w-4" /> {t('chat_accept')}
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <>
+        <>
             {replyingTo && (
               <div className="flex items-center gap-3 px-4 py-2 bg-white dark:bg-card border-t border-primary/5 animate-in slide-in-from-bottom-2 duration-200">
                 <div className="flex-1 flex items-start gap-2 border-l-4 border-primary pl-3 min-w-0">
@@ -775,8 +720,7 @@ export function ChatWindow({ contact, onBack }: ChatWindowProps) {
               </div>
             )}
             <ChatInput onSend={handleSend} onTyping={handleTyping} onStopTyping={handleStopTyping} />
-          </>
-        )}
+        </>
       </div>
 
       <aside className={cn("h-full bg-white dark:bg-card border-l border-primary/5 transition-all duration-500 overflow-hidden flex flex-col shrink-0 relative z-30", showVault ? "w-full sm:w-[360px] opacity-100 translate-x-0" : "w-0 opacity-0 translate-x-full")}>
@@ -913,7 +857,6 @@ export function ChatWindow({ contact, onBack }: ChatWindowProps) {
             <div className="pt-6 border-t border-primary/5 space-y-4">
               <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground px-1">System Controls</h4>
               <div className="space-y-2">
-                <Button variant="ghost" className="w-full justify-start gap-3 h-12 rounded-2xl text-muted-foreground hover:bg-primary/5 hover:text-primary transition-all"><ShieldCheck className="h-5 w-5" /><span className="font-bold text-sm">Security Handshake</span></Button>
                 {isCluster && (
                   <Button variant="ghost" className="w-full justify-start gap-3 h-12 rounded-2xl text-destructive hover:bg-destructive/5 transition-all" onClick={() => { triggerHaptic(15); setIsLeaveDialogOpen(true); }}>
                     <LogOut className="h-5 w-5" />

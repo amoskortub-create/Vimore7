@@ -186,6 +186,7 @@ export interface Cluster {
 export interface Connection extends User {
   followsYou?: boolean;
   isGroup: false;
+  friendshipStatus?: 'accepted';
   isOnline?: boolean;
   lastSeenAt?: string | null;
   lastMessage?: string;
@@ -257,7 +258,6 @@ interface PostContextType {
   clearStreamedComments: () => void;
   sentRequestUsernames: Set<string>;
   receivedRequestUsernames: Set<string>;
-  acceptedStrangerUsernames: Set<string>;
   activeStoryIndex: number | null;
   selectedPostId: string | null;
   selectedChatId: string | null;
@@ -323,11 +323,10 @@ interface PostContextType {
   isRequestSent: (username: string) => boolean;
   isRequestReceived: (username: string) => boolean;
   sendFriendRequest: (username: string) => Promise<void>;
-  confirmFriendRequest: (username: string) => Promise<void>;
-  cancelFriendRequest: (username: string) => Promise<void>;
+  confirmFriendRequest: (username: string) => Promise<boolean>;
+  declineFriendRequest: (username: string) => Promise<boolean>;
+  cancelFriendRequest: (username: string) => Promise<boolean>;
   unfriendUser: (username: string) => Promise<void>;
-  acceptMessageRequest: (username: string) => Promise<void>;
-  declineMessageRequest: (username: string) => Promise<void>;
   isSubscribed: (username: string) => boolean;
   addComment: (postId: string, text: string) => Promise<void>;
   addReply: (postId: string, parentId: string, text: string) => Promise<void>;
@@ -382,7 +381,6 @@ interface PostContextType {
   submitTicket: (data: { subject: string; message: string; category: string; priority?: string }) => Promise<void>;
   sendChatMessage: (recipientId: string, message: Partial<ChatMessage>) => Promise<void>;
   markChatMessageViewed: (messageId: string, chatId: string) => Promise<void>;
-  sendMessageRequest: (targetUserId: string, targetUser: User, text: string) => Promise<void>;
   purgeVibeCache: () => Promise<void>;
   archiveIdentityNode: () => Promise<void>;
   boostNode: (nodeId: string, duration: number, currency: 'CREDIT', type: 'POST' | 'SONIC') => Promise<void>;
@@ -637,6 +635,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const clustersRef = useRef<Cluster[]>([]);
   useEffect(() => { clustersRef.current = clusters; }, [clusters]);
   const [connections, setConnectionsState] = useState<Connection[]>([]);
+  const conversationCleanupUsersRef = useRef(new Set<string>());
   const [stories, setStoriesState] = useState<any[]>([]);
   const [chatMessages, setChatMessages] = useState<Record<string, ChatMessage[]>>({});
   const [campaigns, setCampaignsState] = useState<any[]>([]);
@@ -671,7 +670,6 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const [friendUsernames, setFriendUsernamesState] = useState<Set<string>>(new Set());
   const [sentRequestUsernames, setSentRequestUsernamesState] = useState<Set<string>>(new Set());
   const [receivedRequestUsernames, setReceivedRequestUsernamesState] = useState<Set<string>>(new Set());
-  const [acceptedStrangerUsernames] = useState<Set<string>>(new Set());
   const [activeSubscriptions, setActiveSubscriptionsState] = useState<Set<string>>(new Set());
   const [chatLastMessageAt, setChatLastMessageAt] = useState<Record<string, number>>({});
   const [chatLastIncomingAt, setChatLastIncomingAt] = useState<Record<string, number>>({});
@@ -991,68 +989,61 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
   const loadConnections = useCallback(async (userId: string, currentUsername?: string) => {
     try {
-      const [followsResult, friendsSentResult, friendsReceivedResult] = await Promise.allSettled([
-        databases.listDocuments(DATABASE_ID, COL.FOLLOWS, [
-          Query.equal('follower_id', userId),
-          Query.limit(200),
-        ]),
-        databases.listDocuments(DATABASE_ID, COL.FRIEND_REQUESTS, [
-          Query.equal('from_user_id', userId),
-          Query.equal('status', 'ACCEPTED'),
-          Query.limit(200),
-        ]),
-        databases.listDocuments(DATABASE_ID, COL.FRIEND_REQUESTS, [
-          Query.equal('to_user_id', userId),
-          Query.equal('status', 'ACCEPTED'),
-          Query.limit(200),
-        ]),
+      if (!conversationCleanupUsersRef.current.has(userId)) {
+        const response = await authFetch('/api/friends/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'cleanup' }),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data?.error || 'Could not clean up unaccepted conversations.');
+        }
+        conversationCleanupUsersRef.current.add(userId);
+      }
+
+      const listAll = async (queries: string[]) => {
+        const documents: any[] = [];
+        let cursor: string | undefined;
+        while (true) {
+          const page = await databases.listDocuments(DATABASE_ID, COL.FRIEND_REQUESTS, [
+            ...queries,
+            Query.limit(100),
+            ...(cursor ? [Query.cursorAfter(cursor)] : []),
+          ]);
+          documents.push(...page.documents);
+          if (page.documents.length < 100) return documents;
+          cursor = page.documents[page.documents.length - 1]?.$id;
+          if (!cursor) return documents;
+        }
+      };
+      const [sentAccepted, receivedAccepted] = await Promise.all([
+        listAll([Query.equal('from_user_id', userId), Query.equal('status', 'ACCEPTED')]),
+        listAll([Query.equal('to_user_id', userId), Query.equal('status', 'ACCEPTED')]),
       ]);
-
-      const allUserIds = new Set<string>();
-
-      if (followsResult.status === 'fulfilled') {
-        followsResult.value.documents.forEach((f: any) => { if (f.following_id) allUserIds.add(f.following_id); });
-      }
-      if (friendsSentResult.status === 'fulfilled') {
-        friendsSentResult.value.documents.forEach((f: any) => { if (f.to_user_id) allUserIds.add(f.to_user_id); });
-      }
-      if (friendsReceivedResult.status === 'fulfilled') {
-        friendsReceivedResult.value.documents.forEach((f: any) => { if (f.from_user_id) allUserIds.add(f.from_user_id); });
+      const friendIds = new Set<string>();
+      sentAccepted.forEach((request: any) => request.to_user_id && friendIds.add(request.to_user_id));
+      receivedAccepted.forEach((request: any) => request.from_user_id && friendIds.add(request.from_user_id));
+      const friendIdList = [...friendIds];
+      if (friendIdList.length === 0) {
+        setFriendUsernamesState(new Set());
+        setConnectionsState([]);
+        offlineCache.saveConnections([]);
+        return;
       }
 
-      // Open inbox: also include anyone who has ever exchanged DMs with this user,
-      // so non-friends still show up in the conversation list.
-      try {
-        const [sentMsgs, recvMsgs] = await Promise.allSettled([
-          databases.listDocuments(DATABASE_ID, COL.MESSAGES, [
-            Query.equal('sender_id', userId),
-            Query.orderDesc('$createdAt'),
-            Query.limit(500),
-          ]),
-          databases.listDocuments(DATABASE_ID, COL.MESSAGES, [
-            Query.equal('receiver_id', userId),
-            Query.orderDesc('$createdAt'),
-            Query.limit(500),
-          ]),
+      const friendUsers: any[] = [];
+      for (let offset = 0; offset < friendIdList.length; offset += 100) {
+        const ids = friendIdList.slice(offset, offset + 100);
+        const result = await databases.listDocuments(DATABASE_ID, COL.USERS, [
+          Query.equal('$id', ids),
+          Query.limit(100),
         ]);
-        if (sentMsgs.status === 'fulfilled') {
-          sentMsgs.value.documents.forEach((m: any) => {
-            if (m.receiver_id && m.receiver_id !== userId) allUserIds.add(m.receiver_id);
-          });
-        }
-        if (recvMsgs.status === 'fulfilled') {
-          recvMsgs.value.documents.forEach((m: any) => {
-            if (m.sender_id && m.sender_id !== userId) allUserIds.add(m.sender_id);
-          });
-        }
-      } catch { /* ignore — friends/follows already loaded */ }
+        friendUsers.push(...result.documents);
+      }
+      setFriendUsernamesState(new Set(friendUsers.map(user => user.username).filter(Boolean)));
 
-      const userIdsArr = Array.from(allUserIds).filter(id => id !== userId);
-      if (userIdsArr.length === 0) { setConnectionsState([]); return; }
-
-      const usersResult = await databases.listDocuments(DATABASE_ID, COL.USERS, [Query.equal('$id', userIdsArr), Query.limit(200)]);
-
-      const conns: Connection[] = usersResult.documents.map((u: any) => ({
+      const conns: Connection[] = friendUsers.map((u: any) => ({
         $id: u.$id,
         name: u.name || '',
         username: u.username || '',
@@ -1066,39 +1057,61 @@ export function PostProvider({ children }: { children: ReactNode }) {
         followsYou: false,
       }));
 
-      if (currentUsername && conns.length > 0) {
-        try {
-          const recentMsgs = await databases.listDocuments(DATABASE_ID, COL.MESSAGES, [
-            Query.orderDesc('$createdAt'),
-            Query.limit(500),
+      const allMessages: any[] = [];
+      if (currentUsername) {
+        const listAcceptedMessages = async (queries: string[]) => {
+          const documents: any[] = [];
+          let cursor: string | undefined;
+          while (true) {
+            const page = await databases.listDocuments(DATABASE_ID, COL.MESSAGES, [
+              ...queries,
+              Query.orderDesc('$createdAt'),
+              Query.limit(100),
+              ...(cursor ? [Query.cursorAfter(cursor)] : []),
+            ]);
+            documents.push(...page.documents);
+            if (page.documents.length < 100) return documents;
+            cursor = page.documents[page.documents.length - 1]?.$id;
+            if (!cursor) return documents;
+          }
+        };
+        for (let offset = 0; offset < friendIdList.length; offset += 100) {
+          const ids = friendIdList.slice(offset, offset + 100);
+          const results = await Promise.all([
+            listAcceptedMessages([Query.equal('sender_id', userId), Query.equal('receiver_id', ids)]),
+            listAcceptedMessages([Query.equal('sender_id', ids), Query.equal('receiver_id', userId)]),
           ]);
-          const lastMsgMap: Record<string, { text?: string; type?: ChatMessage['type']; time?: string }> = {};
-          recentMsgs.documents.forEach((doc: any) => {
-            const cid = doc.cluster_id;
-            if (cid && !lastMsgMap[cid]) {
-              lastMsgMap[cid] = { text: doc.text, type: doc.type as ChatMessage['type'], time: formatTimeAgo(doc.$createdAt) };
-            }
-          });
-          const enriched = conns.map(c => {
-            const clusterId = [currentUsername, c.username].sort().join('_');
-            const lastMsg = lastMsgMap[clusterId];
-            if (!lastMsg) return c;
-            const preview = getChatMessagePreview(lastMsg);
-            return { ...c, lastMessage: preview, lastTime: lastMsg.time };
-          });
-          setConnectionsState(enriched);
-          offlineCache.saveConnections(enriched);
-        } catch {
-          setConnectionsState(conns);
-          offlineCache.saveConnections(conns);
+          allMessages.push(...results[0], ...results[1]);
         }
-      } else {
-        setConnectionsState(conns);
-        offlineCache.saveConnections(conns);
       }
-    } catch {
-      const cachedConns = offlineCache.getConnections() as any[];
-      if (cachedConns.length > 0) setConnectionsState(cachedConns);
+
+      const lastMessageByChat = new Map<string, any>();
+      for (const message of allMessages) {
+        const chatId = message.cluster_id;
+        const previous = chatId ? lastMessageByChat.get(chatId) : null;
+        if (!chatId || (previous && previous.$createdAt >= message.$createdAt)) continue;
+        lastMessageByChat.set(chatId, message);
+      }
+      const enriched = conns.map(connection => {
+        const chatId = [currentUsername, connection.username].sort().join('_');
+        const message = lastMessageByChat.get(chatId);
+        return message
+          ? {
+              ...connection,
+              friendshipStatus: 'accepted' as const,
+              lastMessage: getChatMessagePreview({ text: message.text, type: message.type }),
+              lastTime: formatTimeAgo(message.$createdAt),
+            }
+          : { ...connection, friendshipStatus: 'accepted' as const };
+      });
+      setConnectionsState(enriched);
+      offlineCache.saveConnections(enriched);
+    } catch (error) {
+      console.error('[connections] Could not load accepted conversations:', error);
+      const cachedConns = offlineCache.getConnections() as Connection[];
+      const acceptedCachedConns = cachedConns.filter(connection => connection.friendshipStatus === 'accepted');
+      setConnectionsState(acceptedCachedConns);
+      setFriendUsernamesState(new Set(acceptedCachedConns.map(connection => connection.username).filter(Boolean)));
     }
   }, []);
 
@@ -1727,8 +1740,10 @@ export function PostProvider({ children }: { children: ReactNode }) {
           setCurrentUserState(cachedUser);
           const cachedPosts = offlineCache.getPosts() as any[];
           if (cachedPosts.length > 0) setPostsState(cachedPosts);
-          const cachedConns = offlineCache.getConnections() as any[];
-          if (cachedConns.length > 0) setConnectionsState(cachedConns);
+          const cachedConns = offlineCache.getConnections() as Connection[];
+          const acceptedCachedConns = cachedConns.filter(connection => connection.friendshipStatus === 'accepted');
+          setConnectionsState(acceptedCachedConns);
+          setFriendUsernamesState(new Set(acceptedCachedConns.map(connection => connection.username).filter(Boolean)));
           setIsOffline(true);
           setIsLoadingState(false);
           return;
@@ -1916,9 +1931,10 @@ export function PostProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (selectedChatId && currentUser) {
       const isCluster = clusters.some(cl => cl.$id === selectedChatId);
+      if (!isCluster && !friendUsernames.has(selectedChatId)) return;
       loadChatMessages(currentUser.$id, selectedChatId, currentUser.username, isCluster);
     }
-  }, [selectedChatId, currentUser, loadChatMessages, clusters]);
+  }, [selectedChatId, currentUser, loadChatMessages, clusters, friendUsernames]);
 
   // Mark incoming messages as read when a chat is opened or new messages arrive
   useEffect(() => {
@@ -2931,26 +2947,8 @@ export function PostProvider({ children }: { children: ReactNode }) {
   }, [currentUser, followingUsernames, toast]);
 
   const confirmFriendRequest = useCallback(async (username: string) => {
-    if (!currentUser) return;
-
-    // Optimistic UI updates.
-    setFriendUsernamesState(p => new Set(p).add(username));
-    setReceivedRequestUsernamesState(p => { const n = new Set(p); n.delete(username); return n; });
-    setFollowingUsernamesState(prev => new Set(prev).add(username));
-
+    if (!currentUser) return false;
     const senderDoc = allUsers.find(u => u.username === username);
-    if (senderDoc) {
-      setConnectionsState(prev => {
-        if (prev.find(c => c.username === senderDoc.username)) return prev;
-        const newConn: Connection = {
-          ...senderDoc,
-          isGroup: false,
-          lastMessage: '',
-          lastTime: '',
-        };
-        return [...prev, newConn];
-      });
-    }
 
     try {
       const res = await authFetch('/api/friends/action', {
@@ -2962,25 +2960,60 @@ export function PostProvider({ children }: { children: ReactNode }) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data?.error || 'Could not confirm request.');
       }
+      setReceivedRequestUsernamesState(prev => { const next = new Set(prev); next.delete(username); return next; });
+      setFollowingUsernamesState(prev => new Set(prev).add(username));
+      await loadConnections(currentUser.$id, currentUser.username);
+      if (senderDoc) {
+        setConnectionsState(prev => prev.some(connection => connection.username === username)
+          ? prev
+          : [...prev, { ...senderDoc, isGroup: false, friendshipStatus: 'accepted', lastMessage: '', lastTime: '' }]);
+        setFriendUsernamesState(prev => new Set(prev).add(username));
+      }
+      return true;
     } catch (err: any) {
-      // Roll back optimistic membership on failure.
-      setFriendUsernamesState(p => { const n = new Set(p); n.delete(username); return n; });
-      setReceivedRequestUsernamesState(p => new Set(p).add(username));
       logAppwriteError('confirmFriendRequest', err);
       toast({ variant: 'destructive', title: 'Failed to confirm request', description: formatErrorDescription(err, currentUser?.role) });
+      return false;
     }
-  }, [currentUser, allUsers, toast]);
+  }, [currentUser, allUsers, loadConnections, toast]);
+
+  const declineFriendRequest = useCallback(async (username: string) => {
+    if (!currentUser) return false;
+    setReceivedRequestUsernamesState(prev => { const next = new Set(prev); next.delete(username); return next; });
+    setConnectionsState(prev => prev.filter(connection => connection.username !== username));
+
+    try {
+      const response = await authFetch('/api/friends/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'decline', targetUsername: username }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.error || 'Could not decline request.');
+      }
+      return true;
+    } catch (error: any) {
+      setReceivedRequestUsernamesState(prev => new Set(prev).add(username));
+      logAppwriteError('declineFriendRequest', error);
+      toast({ variant: 'destructive', title: 'Could not decline request', description: error?.message || 'Please try again.' });
+      return false;
+    }
+  }, [currentUser, toast]);
 
   const cancelFriendRequest = useCallback(async (username: string) => {
-    if (!currentUser) return;
+    if (!currentUser) return false;
     const prevFollowing = currentUser.following as number || 0;
     const wasFollowing = followingUsernames.has(username);
-    const targetDoc: any = allUsers.find(u => u.username === username) || null;
+    const targetDoc: any = allUsers.find(u => u.username === username)
+      || connections.find(connection => connection.username === username)
+      || null;
 
     // Optimistic UI updates.
     setSentRequestUsernamesState(p => { const n = new Set(p); n.delete(username); return n; });
     setFollowingUsernamesState(prev => { const n = new Set(prev); n.delete(username); return n; });
     if (targetDoc) setFollowingUserIdsState(prev => { const n = new Set(prev); n.delete(targetDoc.$id); return n; });
+    setConnectionsState(prev => prev.filter(connection => connection.username !== username));
     const newFollowing = Math.max(0, prevFollowing - 1);
     setCurrentUserState(prev => prev ? { ...prev, following: newFollowing } : null);
 
@@ -2994,26 +3027,31 @@ export function PostProvider({ children }: { children: ReactNode }) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data?.error || 'Could not cancel request.');
       }
+      return true;
     } catch (err) {
       // Roll back optimistic state on failure.
       setSentRequestUsernamesState(p => new Set(p).add(username));
       if (wasFollowing) setFollowingUsernamesState(prev => new Set(prev).add(username));
       setCurrentUserState(prev => prev ? { ...prev, following: prevFollowing } : null);
       logAppwriteError('cancelFriendRequest', err);
+      toast({ variant: 'destructive', title: 'Could not cancel request', description: err instanceof Error ? err.message : 'Please try again.' });
+      return false;
     }
-  }, [currentUser, allUsers, followingUsernames]);
+  }, [currentUser, allUsers, connections, followingUsernames, toast]);
 
   const unfriendUser = useCallback(async (username: string) => {
     if (!currentUser) return;
     const prevFollowing = currentUser.following as number || 0;
     const prevFollowers = currentUser.followers as number || 0;
     const wasFollowing = followingUsernames.has(username);
-    const targetUser = allUsers.find(u => u.username === username);
+    const targetUser = allUsers.find(u => u.username === username)
+      || connections.find(connection => connection.username === username);
 
     // Optimistic UI updates.
     setFriendUsernamesState(p => { const n = new Set(p); n.delete(username); return n; });
     setFollowingUsernamesState(prev => { const n = new Set(prev); n.delete(username); return n; });
     if (targetUser) setFollowingUserIdsState(prev => { const n = new Set(prev); n.delete(targetUser.$id); return n; });
+    setConnectionsState(prev => prev.filter(connection => connection.username !== username));
     const newFollowing = Math.max(0, prevFollowing - 1);
     const newFollowers = Math.max(0, prevFollowers - 1);
     setCurrentUserState(prev => prev ? { ...prev, following: newFollowing, followers: newFollowers } : null);
@@ -3033,14 +3071,23 @@ export function PostProvider({ children }: { children: ReactNode }) {
       // Roll back optimistic state on failure.
       setFriendUsernamesState(p => new Set(p).add(username));
       if (wasFollowing) setFollowingUsernamesState(prev => new Set(prev).add(username));
+      if (targetUser) {
+        setConnectionsState(prev => prev.some(connection => connection.username === username)
+          ? prev
+          : [...prev, { ...targetUser, isGroup: false, friendshipStatus: 'accepted' }]);
+      }
       setCurrentUserState(prev => prev ? { ...prev, following: prevFollowing, followers: prevFollowers } : null);
       logAppwriteError('unfriendUser', err);
       toast({ variant: "destructive", title: "Unfriend failed" });
     }
-  }, [currentUser, allUsers, followingUsernames, toast]);
+  }, [currentUser, allUsers, connections, followingUsernames, toast]);
 
   const sendChatMessage = useCallback(async (recipientId: string, message: Partial<ChatMessage>) => {
     if (!currentUser) return;
+    const isClusterMsg = clusters.some(cl => cl.$id === recipientId);
+    if (!isClusterMsg && !friendUsernames.has(recipientId)) {
+      throw new Error('You can only message an accepted friend.');
+    }
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const optimistic: ChatMessage = {
       $id: 'msg_' + Date.now(),
@@ -3064,7 +3111,6 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
     let pushSourceId: string | undefined;
     try {
-      const isClusterMsg = clusters.some(cl => cl.$id === recipientId);
       const clusterId = isClusterMsg ? recipientId : [currentUser.username, recipientId].sort().join('_');
       const docData: Record<string, any> = {
         cluster_id: clusterId,
@@ -3172,7 +3218,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       toast({ variant: 'destructive', title: 'Message Failed', description: err?.message || 'Could not deliver your message. Please try again.' });
       throw err;
     }
-  }, [currentUser, toast, clusters, connections]);
+  }, [currentUser, toast, clusters, connections, friendUsernames]);
 
   const markChatMessageViewed = useCallback(async (messageId: string, chatId: string) => {
     if (!currentUser || !messageId || !chatId) return;
@@ -3199,34 +3245,6 @@ export function PostProvider({ children }: { children: ReactNode }) {
       logAppwriteError('markChatMessageViewed', err);
     }
   }, [currentUser, logAppwriteError]);
-
-  const sendMessageRequest = useCallback(async (targetUserId: string, targetUser: User, text: string) => {
-    if (!currentUser || !text.trim()) return;
-    await sendChatMessage(targetUserId, { text: text.trim() });
-    // Inject target into local connections so sender sees the chat immediately
-    setConnectionsState(prev => {
-      if (prev.find(c => c.username === targetUser.username)) return prev;
-      const tempConn: Connection = {
-        ...targetUser,
-        isGroup: false,
-        lastMessage: text.trim(),
-        lastTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-      return [tempConn, ...prev];
-    });
-    // Notify the recipient about the message request
-    try {
-      await databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
-        user_id: targetUserId,
-        from_user_id: currentUser.$id,
-        from_user_name: currentUser.name || currentUser.username,
-        from_user_avatar: currentUser.avatar || '',
-        type: 'MESSAGE',
-        message: `${currentUser.name} (@${currentUser.username}) sent you a message: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`,
-        is_read: false,
-      });
-    } catch { /* ignore notification failure */ }
-  }, [currentUser, sendChatMessage]);
 
   const unlockPost = useCallback(async (postId: string, _ignoredCost: number) => {
     if (!currentUser) return;
@@ -4104,7 +4122,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
     currentUser, isAuthenticated: !!currentUser, posts, hasMoreFeed, isFeedLoading, loadMoreFeed, appendRealtimePost, activeComments, isLoading, initError, isOffline,
     likedPostIds, unlikedPostIds, savedPostIds, unlockedPostIds, seenPostIds, viewedPostIds,
     followingUsernames, followingUserIds, followerUsernames, friendUsernames, sentRequestUsernames,
-    receivedRequestUsernames, acceptedStrangerUsernames,
+    receivedRequestUsernames,
     postCountOverrides, applyPostCountUpdate,
     streamedComments, addStreamedComment, clearStreamedComments,
     activeStoryIndex, selectedChatId, selectedPostId, selectedImageUrl, selectedVideoUrl,
@@ -4241,8 +4259,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
     isRequestReceived: (u: string) => receivedRequestUsernames.has(u),
     isSubscribed: (u: string) => activeSubscriptions.has(u),
     sendFriendRequest, confirmFriendRequest, cancelFriendRequest, unfriendUser,
-    acceptMessageRequest: async () => {},
-    declineMessageRequest: async () => {},
+    declineFriendRequest,
     addComment, addReply, addStory, deleteStory,
     voteOnStoryPoll: async () => {},
     voteOnPostPoll: async (postId: string, optionIndex: number) => {
@@ -4371,7 +4388,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
     recordView, recordStoryView,
     updateUserIdentity,
     handleReportAction, handleTicketAction, replyToTicket,
-    sendChatMessage, sendMessageRequest,
+    sendChatMessage,
     fetchAllUsersForDiscovery, allUsers, refreshAllUsers, banUser, suspendUser, warnUser, sendAdminBroadcast, broadcastHistory,
     addIncomingMessage: (clusterId: string, message: ChatMessage, preview: string, timeStr: string) => {
       // For DMs, chatMessages is keyed by the other user's username (matching loadChatMessages).

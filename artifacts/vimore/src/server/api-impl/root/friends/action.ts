@@ -11,7 +11,47 @@ const FOLLOWS = 'follows';
 const FRIEND_REQUESTS = 'friend_requests';
 const NOTIFICATIONS = 'notifications';
 
-type FriendAction = 'send' | 'confirm' | 'cancel' | 'unfriend';
+async function listAllDocuments(db: ReturnType<typeof getAdminDatabases>, collectionId: string, queries: string[]) {
+  const documents: any[] = [];
+  let cursor: string | undefined;
+
+  while (true) {
+    const page = await db.listDocuments(DATABASE_ID, collectionId, [
+      ...queries,
+      Query.limit(100),
+      ...(cursor ? [Query.cursorAfter(cursor)] : []),
+    ]);
+    documents.push(...page.documents);
+    if (page.documents.length < 100) return documents;
+    cursor = page.documents[page.documents.length - 1]?.$id;
+    if (!cursor) return documents;
+  }
+}
+
+async function deleteUnacceptedConversation(db: ReturnType<typeof getAdminDatabases>, left: any, right: any) {
+  const [acceptedSent, acceptedReceived] = await Promise.all([
+    db.listDocuments(DATABASE_ID, FRIEND_REQUESTS, [
+      Query.equal('from_user_id', left.$id),
+      Query.equal('to_user_id', right.$id),
+      Query.equal('status', 'ACCEPTED'),
+      Query.limit(1),
+    ]),
+    db.listDocuments(DATABASE_ID, FRIEND_REQUESTS, [
+      Query.equal('from_user_id', right.$id),
+      Query.equal('to_user_id', left.$id),
+      Query.equal('status', 'ACCEPTED'),
+      Query.limit(1),
+    ]),
+  ]);
+  if (acceptedSent.documents.length || acceptedReceived.documents.length) return 0;
+
+  const clusterId = [left.username, right.username].sort().join('_');
+  const messages = await listAllDocuments(db, 'messages', [Query.equal('cluster_id', clusterId)]);
+  await Promise.all(messages.map(message => db.deleteDocument(DATABASE_ID, 'messages', message.$id)));
+  return messages.length;
+}
+
+type FriendAction = 'send' | 'confirm' | 'decline' | 'cancel' | 'unfriend' | 'cleanup';
 
 /**
  * Admin-backed friend-request actions.
@@ -42,24 +82,67 @@ export async function POST(req: NextRequest) {
     const action = body?.action as FriendAction;
     const targetUsername = typeof body?.targetUsername === 'string' ? body.targetUsername.trim() : '';
 
-    if (!action || !['send', 'confirm', 'cancel', 'unfriend'].includes(action)) {
+    if (!action || !['send', 'confirm', 'decline', 'cancel', 'unfriend', 'cleanup'].includes(action)) {
       return NextResponse.json({ error: 'Invalid action.' }, { status: 400 });
-    }
-    if (!targetUsername) {
-      return NextResponse.json({ error: 'targetUsername is required.' }, { status: 400 });
     }
 
     const db = getAdminDatabases();
     const meId = session.userId;
-
-    // Resolve identities from the DB.
-    const [meRes, targetRes] = await Promise.all([
-      db.getDocument(DATABASE_ID, USERS, meId).catch(() => null as any),
-      db.listDocuments(DATABASE_ID, USERS, [Query.equal('username', targetUsername), Query.limit(1)]),
-    ]);
-    const me: any = meRes;
-    const target: any = targetRes.documents[0];
+    const me: any = await db.getDocument(DATABASE_ID, USERS, meId).catch(() => null);
     if (!me) return NextResponse.json({ error: 'Session user not found.' }, { status: 404 });
+
+    if (action === 'cleanup') {
+      const [sentAccepted, receivedAccepted] = await Promise.all([
+        listAllDocuments(db, FRIEND_REQUESTS, [
+          Query.equal('from_user_id', meId),
+          Query.equal('status', 'ACCEPTED'),
+        ]),
+        listAllDocuments(db, FRIEND_REQUESTS, [
+          Query.equal('to_user_id', meId),
+          Query.equal('status', 'ACCEPTED'),
+        ]),
+      ]);
+      const acceptedIds = new Set<string>();
+      sentAccepted.forEach(request => request.to_user_id && acceptedIds.add(request.to_user_id));
+      receivedAccepted.forEach(request => request.from_user_id && acceptedIds.add(request.from_user_id));
+
+      const acceptedUsers: any[] = [];
+      for (let offset = 0; offset < acceptedIds.size; offset += 100) {
+        const ids = [...acceptedIds].slice(offset, offset + 100);
+        const users = await db.listDocuments(DATABASE_ID, USERS, [
+          Query.equal('$id', ids),
+          Query.limit(100),
+        ]);
+        acceptedUsers.push(...users.documents);
+      }
+      const acceptedClusterIds = new Set(
+        acceptedUsers.map(user => [me.username, user.username].sort().join('_')),
+      );
+
+      const [sentMessages, receivedMessages] = await Promise.all([
+        listAllDocuments(db, 'messages', [Query.equal('sender_id', meId)]),
+        listAllDocuments(db, 'messages', [Query.equal('receiver_id', meId)]),
+      ]);
+      const messages = [...new Map([...sentMessages, ...receivedMessages].map(message => [message.$id, message])).values()];
+      const staleMessages = messages.filter(message => {
+        if (message.sender_id === meId && message.receiver_id) return !acceptedIds.has(message.receiver_id);
+        if (message.receiver_id === meId && message.sender_id) return !acceptedIds.has(message.sender_id);
+        return typeof message.cluster_id === 'string'
+          && (message.cluster_id.startsWith(`${me.username}_`) || message.cluster_id.endsWith(`_${me.username}`))
+          && !acceptedClusterIds.has(message.cluster_id);
+      });
+      await Promise.all(staleMessages.map(message => db.deleteDocument(DATABASE_ID, 'messages', message.$id)));
+      return NextResponse.json({ ok: true, deletedCount: staleMessages.length });
+    }
+
+    if (!targetUsername) {
+      return NextResponse.json({ error: 'targetUsername is required.' }, { status: 400 });
+    }
+    const targetRes = await db.listDocuments(DATABASE_ID, USERS, [
+      Query.equal('username', targetUsername),
+      Query.limit(1),
+    ]);
+    const target: any = targetRes.documents[0];
     if (!target) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
     if (target.$id === meId) {
       return NextResponse.json({ error: 'Cannot perform this action on yourself.' }, { status: 400 });
@@ -162,8 +245,11 @@ export async function POST(req: NextRequest) {
         Query.equal('to_user_id', meId),
         Query.equal('status', 'PENDING'),
       ]);
+      if (pending.documents.length === 0) {
+        return NextResponse.json({ error: 'Friend request is no longer pending.' }, { status: 409 });
+      }
       for (const doc of pending.documents) {
-        await db.updateDocument(DATABASE_ID, FRIEND_REQUESTS, doc.$id, { status: 'ACCEPTED' }).catch(() => {});
+        await db.updateDocument(DATABASE_ID, FRIEND_REQUESTS, doc.$id, { status: 'ACCEPTED' });
       }
 
       // Ensure mutual follows exist.
@@ -185,6 +271,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
+    if (action === 'decline') {
+      const pending = await db.listDocuments(DATABASE_ID, FRIEND_REQUESTS, [
+        Query.equal('from_user_id', target.$id),
+        Query.equal('to_user_id', meId),
+        Query.equal('status', 'PENDING'),
+      ]);
+      for (const doc of pending.documents) {
+        await db.deleteDocument(DATABASE_ID, FRIEND_REQUESTS, doc.$id);
+      }
+      await deleteFollow(target, me);
+      const deletedCount = await deleteUnacceptedConversation(db, me, target);
+      return NextResponse.json({ ok: true, deletedCount });
+    }
+
     if (action === 'cancel') {
       const pending = await db.listDocuments(DATABASE_ID, FRIEND_REQUESTS, [
         Query.equal('from_user_id', meId),
@@ -195,7 +295,8 @@ export async function POST(req: NextRequest) {
         await db.deleteDocument(DATABASE_ID, FRIEND_REQUESTS, doc.$id).catch(() => {});
       }
       await deleteFollow(me, target);
-      return NextResponse.json({ ok: true });
+      const deletedCount = await deleteUnacceptedConversation(db, me, target);
+      return NextResponse.json({ ok: true, deletedCount });
     }
 
     // action === 'unfriend'
@@ -216,8 +317,9 @@ export async function POST(req: NextRequest) {
     }
     await deleteFollow(me, target);
     await deleteFollow(target, me);
+    const deletedCount = await deleteUnacceptedConversation(db, me, target);
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, deletedCount });
   } catch (err: any) {
     console.error('[friends/action] error:', err?.message ?? err);
     return NextResponse.json({ error: err?.message || 'Bad request' }, { status: 400 });

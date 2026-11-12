@@ -50,6 +50,7 @@ const ROUTES = [
   // root dispatcher
   { path: '/api/calls', method: 'POST' },
   { path: '/api/calls', method: 'PATCH' },
+  { path: '/api/auth/me', method: 'GET' },
   { path: '/api/advertise/submit', method: 'POST' },
   { path: '/api/cron/cleanup', method: 'GET' },
   { path: '/api/cron/expiry-alerts', method: 'GET' },
@@ -103,7 +104,6 @@ const NEGATIVE_ROUTES = [
   { path: '/api/oauth/does-not-exist', method: 'GET' },
   { path: '/api/file/not-an-allowed-bucket/xyz', method: 'GET' },
   { path: '/api/auth/login', method: 'POST' },
-  { path: '/api/auth/me', method: 'GET' },
 ];
 
 // The file proxy route is special-cased: it validates fileId format itself
@@ -147,10 +147,25 @@ async function main() {
     results.push({ kind: 'route', path, method, status, routed, error });
   }
 
+  {
+    const path = '/api/auth/me';
+    const method = 'GET';
+    try {
+      const response = await fetch(`${BASE_URL}${path}`, { method });
+      const body = await response.json();
+      const routed = response.status === 200 && body?.loggedIn === false;
+      if (!routed) failures++;
+      results.push({ kind: 'contract', path, method, status: response.status, routed });
+    } catch (error) {
+      failures++;
+      results.push({ kind: 'contract', path, method, status: null, routed: false, error: error.message });
+    }
+  }
+
   const width = Math.max(...results.map((r) => `${r.method} ${r.path}`.length)) + 2;
   for (const r of results) {
     const label = `${r.method} ${r.path}`.padEnd(width);
-    const tag = r.kind === 'negative' ? '[404-expected]' : '[routed]      ';
+    const tag = r.kind === 'negative' ? '[404-expected]' : r.kind === 'contract' ? '[contract]    ' : '[routed]      ';
     const mark = r.routed ? 'PASS' : 'FAIL';
     console.log(`${mark}  ${tag}  ${label} -> ${r.status ?? r.error}`);
   }

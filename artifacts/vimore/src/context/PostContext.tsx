@@ -1971,40 +1971,39 @@ export function PostProvider({ children }: { children: ReactNode }) {
         authUser = null;
       }
       if (!authUser) {
-        // Use server-side login to avoid client-SDK platform/CORS restrictions.
-        // The Next.js server proxies the credential check directly to Appwrite
-        // (server-to-server), then returns the session secret for us to hydrate.
-        const loginUrl = new URL('/api/auth/login', window.location.origin).href;
-        const loginRes = await fetch(loginUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ identifier: trimmed, password }),
-        }).catch((err: unknown) => {
-          console.error('[auth/login] Browser request failed', {
-            url: loginUrl,
-            error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
+        const isPhoneLogin = !trimmed.includes('@') && /^[+\d][\d\s\-().]{5,}$/.test(trimmed);
+        if (isPhoneLogin) {
+          const loginUrl = new URL('/api/auth/login', window.location.origin).href;
+          const loginRes = await fetch(loginUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ identifier: trimmed, password }),
+          }).catch((err: unknown) => {
+            console.error('[auth/login] Browser request failed', {
+              url: loginUrl,
+              error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
+            });
+            throw err;
           });
-          throw err;
-        });
-        const loginData = await loginRes.json();
-        if (!loginRes.ok) {
-          throw new Error(loginData.error || 'Invalid credentials.');
+          const loginData = await loginRes.json();
+          if (!loginRes.ok) {
+            throw new Error(loginData.error || 'Invalid credentials.');
+          }
+          persistAppwriteSession(loginData.secret);
+          if (typeof loginData.email === 'string' && loginData.email) vimoreId = loginData.email;
+          client.setSession(loginData.secret);
+          authUser = {
+            $id: loginData.userId,
+            email: loginData.email || vimoreId,
+            name: '',
+            emailVerification: false,
+            $createdAt: loginData.expire ?? new Date().toISOString(),
+          } as any;
+        } else {
+          const email = trimmed.includes('@') ? trimmed : `${trimmed}@vimore.cfd`;
+          await account.createEmailPasswordSession(email, password);
+          authUser = await account.get();
         }
-        // Persist the session before treating this browser as signed in.
-        persistAppwriteSession(loginData.secret);
-        if (typeof loginData.email === 'string' && loginData.email) vimoreId = loginData.email;
-        const { client } = await import('@/lib/appwrite');
-        client.setSession(loginData.secret);
-        // Skip account.get() — client-side account ops fail when the domain
-        // isn't registered as an Appwrite platform (general_unauthorized_scope).
-        // The server already gave us the userId we need.
-        authUser = {
-          $id: loginData.userId,
-          email: loginData.email || vimoreId,
-          name: '',
-          emailVerification: false,
-          $createdAt: loginData.expire ?? new Date().toISOString(),
-        } as any;
       }
       if (typeof authUser.email === 'string' && authUser.email) vimoreId = authUser.email;
       const profileUrl = new URL('/api/auth/me', window.location.origin).href;

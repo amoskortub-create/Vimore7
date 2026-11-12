@@ -48,37 +48,36 @@ export async function POST(req: NextRequest) {
       : typeof body.email === 'string' ? body.email.trim() : '';
     const password = body.password;
 
-    if (!rawIdentifier || !password) {
+    if (typeof rawIdentifier !== 'string' || typeof password !== 'string' || !rawIdentifier || !password) {
       return NextResponse.json({ error: 'identifier and password are required' }, { status: 400 });
     }
 
     const isPhone = !rawIdentifier.includes('@') && /^[+\d][\d\s\-().]{5,}$/.test(rawIdentifier);
-    let email: string;
-    if (isPhone) {
-      const normalizedPhone = rawIdentifier.replace(/[\s\-().]/g, '');
-      let matchedEmail: unknown;
-      try {
-        const result = await getAdminDatabases().listDocuments(DATABASE_ID, 'users', [
-          Query.equal('phone', normalizedPhone),
-          Query.limit(1),
-        ]);
-        matchedEmail = result.documents[0]?.email;
-      } catch (err: any) {
-        const diagnostic = getSafeDiagnostic(err);
-        console.error('[auth/login:phone-lookup]', diagnostic);
-        return NextResponse.json(
-          { error: 'Phone lookup failed.', diagnostic },
-          { status: 500 },
-        );
-      }
-
-      if (typeof matchedEmail !== 'string' || !matchedEmail.includes('@')) {
-        return NextResponse.json({ error: 'No account found with that phone number.' }, { status: 404 });
-      }
-      email = matchedEmail;
-    } else {
-      email = rawIdentifier.includes('@') ? rawIdentifier : `${rawIdentifier}@vimore.cfd`;
+    if (!isPhone) {
+      return NextResponse.json({ error: 'Only phone-number sign in is handled by this endpoint.' }, { status: 400 });
     }
+
+    const normalizedPhone = rawIdentifier.replace(/[\s\-().]/g, '');
+    let matchedEmail: unknown;
+    try {
+      const result = await getAdminDatabases().listDocuments(DATABASE_ID, 'users', [
+        Query.equal('phone', normalizedPhone),
+        Query.limit(1),
+      ]);
+      matchedEmail = result.documents[0]?.email;
+    } catch (err: any) {
+      const diagnostic = getSafeDiagnostic(err);
+      console.error('[auth/login:phone-lookup]', diagnostic);
+      return NextResponse.json(
+        { error: 'Phone lookup failed.', diagnostic },
+        { status: 500 },
+      );
+    }
+
+    if (typeof matchedEmail !== 'string' || !matchedEmail.includes('@')) {
+      return NextResponse.json({ error: 'No account found with that phone number.' }, { status: 404 });
+    }
+    const email = matchedEmail;
 
     // Direct server → Appwrite call — no platform check, no CORS.
     // Note: do NOT send X-Appwrite-Response-Format: 1.0.0 — that header

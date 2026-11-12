@@ -1,16 +1,13 @@
 import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDatabases, getAdminUsers, DATABASE_ID } from '@/lib/appwrite-server';
+import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
 import { getSessionUser } from '@/lib/session';
 
 /**
  * GET /api/auth/me
- *
- * Verifies the caller's Appwrite session (via X-Appwrite-Session or
- * Authorization: Bearer JWT headers sent by authFetch) and returns
- * the authUser shape + profile document needed by checkSession in
- * PostContext. Using the admin SDK means this works regardless of
- * whether the Replit domain is registered as an Appwrite platform.
+ * Verifies the caller's Appwrite session and returns the authenticated account
+ * plus the user's profile document. The account identity comes from the
+ * validated session, not a separate admin Users API lookup.
  */
 export async function GET(req: NextRequest) {
   try {
@@ -19,24 +16,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { userId } = sessionUser;
-
-    const [adminUser, profileDoc] = await Promise.all([
-      getAdminUsers().get(userId),
-      getAdminDatabases().getDocument(DATABASE_ID, 'users', userId),
-    ]);
-
-    // Return only the fields mapDocToUser reads from authUser
-    const authUser = {
-      $id: adminUser.$id,
-      email: adminUser.email,
-      name: adminUser.name,
-      emailVerification: adminUser.emailVerification,
-      $createdAt: adminUser.$createdAt,
-    };
+    const profileDoc = await getAdminDatabases().getDocument(DATABASE_ID, 'users', sessionUser.userId);
 
     return NextResponse.json(
-      { authUser, profileDoc },
+      { authUser: sessionUser.authUser, profileDoc },
       {
         headers: {
           'Cache-Control': 'no-store, no-cache, must-revalidate',

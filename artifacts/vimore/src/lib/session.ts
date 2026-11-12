@@ -1,96 +1,81 @@
-import 'server-only';
-import { Client, Account } from 'node-appwrite';
 import { getAdminDatabases, DATABASE_ID } from './appwrite-server';
 import type { NextRequest } from 'next/server';
 
-const ENDPOINT =
-  process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || 'https://appwrite.mediatechliberia.online/v1';
-const PROJECT_ID =
-  process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || 'vimore123';
+const ENDPOINT = (process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || 'https://appwrite.mediatechliberia.online/v1').replace(/\/$/, '');
+const PROJECT_ID = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || 'vimore123';
 
 export interface SessionUser {
   userId: string;
   role: string | null;
+  authUser: {
+    $id: string;
+    email: string;
+    name: string;
+    emailVerification: boolean;
+    $createdAt: string;
+  };
 }
 
-// ─── credential extractors ─────────────────────────────────────────────────
-
-/** Primary: direct session value sent by authFetch from localStorage. */
-function extractSessionHeader(req: NextRequest): string | null {
-  return req.headers.get('x-appwrite-session');
-}
-
-/** Secondary: Appwrite JWT sent as Authorization: Bearer <jwt>. */
-function extractJwt(req: NextRequest): string | null {
-  const auth = req.headers.get('authorization') ?? req.headers.get('Authorization');
-  if (auth?.startsWith('Bearer ')) return auth.slice(7);
-  return null;
-}
-
-/** Legacy: cookie-based session (may work in some deployment setups). */
-function extractCookieSession(req: NextRequest): string | null {
-  return (
-    req.cookies.get(`a_session_${PROJECT_ID}`)?.value ||
-    req.cookies.get(`a_session_${PROJECT_ID}_legacy`)?.value ||
-    null
-  );
-}
-
-// ─── user resolution ───────────────────────────────────────────────────────
-
-async function resolveUser(client: Client): Promise<SessionUser | null> {
+/** Validate the browser session with Appwrite's REST endpoint. */
+async function resolveUser(authHeader: Record<string, string>): Promise<SessionUser | null> {
   try {
-    const account = new Account(client);
-    const appwriteUser = await account.get();
-    const db = getAdminDatabases();
+    const response = await fetch(ENDPOINT + '/account', {
+      method: 'GET',
+      headers: { 'X-Appwrite-Project': PROJECT_ID, ...authHeader },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) {
+      console.warn('[session] Appwrite rejected the supplied session (HTTP ' + response.status + ')');
+      return null;
+    }
+
+    const accountUser = await response.json();
+    if (typeof accountUser?.$id !== 'string' || !accountUser.$id) return null;
+
     let role: string | null = null;
     try {
-      const userDoc = await db.getDocument(DATABASE_ID, 'users', appwriteUser.$id);
+      const userDoc = await getAdminDatabases().getDocument(DATABASE_ID, 'users', accountUser.$id);
       role = userDoc?.role ?? null;
     } catch {
-      /* user doc not found — treat as no role */
+      // Session validity must not depend on the optional admin role lookup.
     }
-    return { userId: appwriteUser.$id, role };
+
+    return {
+      userId: accountUser.$id,
+      role,
+      authUser: {
+        $id: accountUser.$id,
+        email: typeof accountUser.email === 'string' ? accountUser.email : '',
+        name: typeof accountUser.name === 'string' ? accountUser.name : '',
+        emailVerification: Boolean(accountUser.emailVerification),
+        $createdAt: typeof accountUser.$createdAt === 'string' ? accountUser.$createdAt : '',
+      },
+    };
   } catch (err: any) {
-    console.error('[session] resolveUser failed:', err?.message ?? err);
+    console.error('[session] Appwrite account validation failed:', err?.message ?? err);
     return null;
   }
 }
 
-// ─── main export ───────────────────────────────────────────────────────────
-
 export async function getSessionUser(req: NextRequest): Promise<SessionUser | null> {
-  // 1. Direct session from localStorage (sent by authFetch as X-Appwrite-Session).
-  //    This is the most reliable path — no network round-trip, always fresh.
-  const sessionHeader = extractSessionHeader(req);
+  const sessionHeader = req.headers.get('x-appwrite-session');
   if (sessionHeader) {
-    const client = new Client()
-      .setEndpoint(ENDPOINT)
-      .setProject(PROJECT_ID)
-      .setSession(sessionHeader);
-    const user = await resolveUser(client);
+    const user = await resolveUser({ 'X-Appwrite-Session': sessionHeader });
     if (user) return user;
   }
 
-  // 2. Appwrite JWT from Authorization: Bearer header.
-  const jwt = extractJwt(req);
-  if (jwt) {
-    const client = new Client()
-      .setEndpoint(ENDPOINT)
-      .setProject(PROJECT_ID)
-      .setJWT(jwt);
-    const user = await resolveUser(client);
+  const authorization = req.headers.get('authorization');
+  if (authorization?.startsWith('Bearer ')) {
+    const user = await resolveUser({ Authorization: authorization });
     if (user) return user;
   }
 
-  // 3. Legacy cookie (works if browser sets same-domain cookie).
-  const cookieSession = extractCookieSession(req);
+  const projectId = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || 'vimore123';
+  const cookieSession = req.cookies.get('a_session_' + projectId)?.value
+    || req.cookies.get('a_session_' + projectId + '_legacy')?.value;
   if (cookieSession) {
-    const client = new Client()
-      .setEndpoint(ENDPOINT)
-      .setProject(PROJECT_ID)
-      .setSession(cookieSession);
-    const user = await resolveUser(client);
+    const user = await resolveUser({ 'X-Appwrite-Session': cookieSession });
     if (user) return user;
   }
 

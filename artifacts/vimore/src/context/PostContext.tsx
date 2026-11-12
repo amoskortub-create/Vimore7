@@ -1974,10 +1974,17 @@ export function PostProvider({ children }: { children: ReactNode }) {
         // Use server-side login to avoid client-SDK platform/CORS restrictions.
         // The Next.js server proxies the credential check directly to Appwrite
         // (server-to-server), then returns the session secret for us to hydrate.
-        const loginRes = await fetch('/api/auth/login', {
+        const loginUrl = new URL('/api/auth/login', window.location.origin).href;
+        const loginRes = await fetch(loginUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ identifier: trimmed, password }),
+        }).catch((err: unknown) => {
+          console.error('[auth/login] Browser request failed', {
+            url: loginUrl,
+            error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
+          });
+          throw err;
         });
         const loginData = await loginRes.json();
         if (!loginRes.ok) {
@@ -2000,7 +2007,14 @@ export function PostProvider({ children }: { children: ReactNode }) {
         } as any;
       }
       if (typeof authUser.email === 'string' && authUser.email) vimoreId = authUser.email;
-      const profileRes = await authFetch('/api/auth/me', { cache: 'no-store' });
+      const profileUrl = new URL('/api/auth/me', window.location.origin).href;
+      const profileRes = await authFetch(profileUrl, { cache: 'no-store' }).catch((err: unknown) => {
+        console.error('[auth/login] Profile request failed', {
+          url: profileUrl,
+          error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
+        });
+        throw err;
+      });
       const profileData = await profileRes.json();
       if (!profileRes.ok) {
         throw new Error(profileData.error || 'Could not load your account profile.');

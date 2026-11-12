@@ -83,14 +83,24 @@ export async function POST(req: NextRequest) {
     // Direct server → Appwrite call — no platform check, no CORS.
     // Note: do NOT send X-Appwrite-Response-Format: 1.0.0 — that header
     // causes Appwrite to omit the Set-Cookie header we need to extract the session.
-    const res = await fetch(`${ENDPOINT}/account/sessions/email`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Appwrite-Project': PROJECT_ID,
-      },
-      body: JSON.stringify({ email, password }),
-    });
+    const appwriteLoginUrl = `${ENDPOINT}/account/sessions/email`;
+    let res: Response;
+    try {
+      res = await fetch(appwriteLoginUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Appwrite-Project': PROJECT_ID,
+        },
+        body: JSON.stringify({ email, password }),
+      });
+    } catch (err: unknown) {
+      console.error('[auth/login] Appwrite request failed', {
+        url: appwriteLoginUrl,
+        error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
+      });
+      throw err;
+    }
 
     const data = await res.json();
 

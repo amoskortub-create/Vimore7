@@ -89,11 +89,13 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { getCreatorOrangeMoneyNumber, submitCreatorPayment } from "@/lib/orange-money-payments";
 
 interface Comment {
   $id: string;
@@ -261,7 +263,7 @@ export function PostCard(props: PostCardProps) {
   } = props;
 
   const { 
-    currentUser, connections, isPostLiked, isPostUnliked, isPostSaved, isPostUnlocked, toggleLikePost, toggleUnlikePost, toggleSavePost, archivePost, togglePinPost, deletePost, openCommentHub, setSelectedPostId, setSelectedImageUrl, openGiftHub, unlockPost, voteOnPostPoll, settings, recordCampaignClick, recordCampaignImpression, recordView, isFriend, isRequestSent, isRequestReceived, sendFriendRequest, confirmFriendRequest, cancelFriendRequest, unfriendUser, submitReport,
+    currentUser, connections, isPostLiked, isPostUnliked, isPostSaved, isPostUnlocked, toggleLikePost, toggleUnlikePost, toggleSavePost, archivePost, togglePinPost, deletePost, openCommentHub, setSelectedPostId, setSelectedImageUrl, openGiftHub, voteOnPostPoll, settings, recordCampaignClick, recordCampaignImpression, recordView, isFriend, isRequestSent, isRequestReceived, sendFriendRequest, confirmFriendRequest, cancelFriendRequest, unfriendUser, submitReport,
     postCountOverrides,
   } = usePosts();
 
@@ -302,6 +304,11 @@ export function PostCard(props: PostCardProps) {
   const [isReportSubmitting, setIsReportSubmitting] = useState(false);
   const [isShareHubOpen, setIsShareHubOpen] = useState(false);
   const [isUnlocking, setIsUnlocking] = useState(false);
+  const [isUnlockPaymentOpen, setIsUnlockPaymentOpen] = useState(false);
+  const [creatorOrangeNumber, setCreatorOrangeNumber] = useState("");
+  const [senderOrangeNumber, setSenderOrangeNumber] = useState("");
+  const [orangeTransactionId, setOrangeTransactionId] = useState("");
+  const [paymentScreenshot, setPaymentScreenshot] = useState<File | null>(null);
   const [currentSlide, setCurrentSlide] = useState(0);
 
   const cardRef = useRef<HTMLDivElement>(null);
@@ -313,6 +320,54 @@ export function PostCard(props: PostCardProps) {
   const { toast } = useToast();
 
   const override = postCountOverrides[$id] ?? {};
+
+  const openUnlockPayment = async () => {
+    if (!user.$id) {
+      toast({ variant: "destructive", title: "Payment unavailable", description: "The creator account could not be identified." });
+      return;
+    }
+    setIsUnlocking(true);
+    try {
+      const number = await getCreatorOrangeMoneyNumber(user.$id);
+      if (!number) {
+        toast({ variant: "destructive", title: "Payment unavailable", description: "This creator has not added an Orange Money number." });
+        return;
+      }
+      setCreatorOrangeNumber(number);
+      setIsUnlockPaymentOpen(true);
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Payment unavailable", description: error?.message || "Could not load the creator's Orange Money number." });
+    } finally {
+      setIsUnlocking(false);
+    }
+  };
+
+  const submitUnlockPayment = async () => {
+    if (!currentUser || !user.$id || !unlockPrice) return;
+    setIsUnlocking(true);
+    try {
+      await submitCreatorPayment({
+        kind: "lockedPost",
+        buyerId: currentUser.$id,
+        buyerName: currentUser.name || currentUser.username,
+        creatorId: user.$id,
+        amountLRD: unlockPrice,
+        senderNumber: senderOrangeNumber,
+        transactionId: orangeTransactionId,
+        screenshot: paymentScreenshot,
+        postId: $id,
+      });
+      toast({ title: "Payment submitted", description: "The creator will verify your Orange Money transfer before unlocking the post." });
+      setIsUnlockPaymentOpen(false);
+      setSenderOrangeNumber("");
+      setOrangeTransactionId("");
+      setPaymentScreenshot(null);
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Payment submission failed", description: error?.message || "Please try again." });
+    } finally {
+      setIsUnlocking(false);
+    }
+  };
   const [liveCounts, setLiveCounts] = useState({
     likes:    override.likes    ?? likes,
     unlikes:  override.unlikes  ?? unlikes,
@@ -545,7 +600,7 @@ export function PostCard(props: PostCardProps) {
               <div className="relative z-10 flex flex-col items-center text-center space-y-5">
                 <div className="h-16 w-16 bg-cyan-500 rounded-[2rem] flex items-center justify-center text-white shadow-2xl shadow-cyan-500/30"><Lock className="h-8 w-8" /></div>
                 <div className="space-y-2"><h3 className="text-2xl font-black italic uppercase tracking-tighter">{t('post_locked_node')}</h3><p className="text-xs font-bold text-muted-foreground uppercase tracking-widest max-w-[240px]">Unlock this vibe to access the hub.</p></div>
-                <Button className="bg-cyan-500 hover:bg-cyan-600 text-white rounded-2xl h-14 px-10 font-black italic uppercase tracking-widest text-sm shadow-xl shadow-cyan-500/20 active:scale-95 gap-3" onClick={async () => { setIsUnlocking(true); try { await unlockPost($id, unlockPrice!); } catch (e: any) { toast({ variant: "destructive", title: "Unlock Failed", description: e.message }); } finally { setIsUnlocking(false); } }} disabled={isUnlocking}>{isUnlocking ? <Loader2 className="h-5 w-5 animate-spin" /> : <Zap className="h-5 w-5 fill-current" />}{t('post_unlock_for')} {unlockPrice} LD</Button>
+                <Button className="bg-orange-500 hover:bg-orange-600 text-white rounded-2xl h-14 px-10 font-black italic uppercase tracking-widest text-sm shadow-xl shadow-orange-500/20 active:scale-95 gap-3" onClick={openUnlockPayment} disabled={isUnlocking}>{isUnlocking ? <Loader2 className="h-5 w-5 animate-spin" /> : <Zap className="h-5 w-5 fill-current" />}Unlock with Orange Money · {unlockPrice} LRD</Button>
               </div>
             </div>
           ) : (
@@ -598,7 +653,7 @@ export function PostCard(props: PostCardProps) {
               {allImages.length > 0 && (
                   <div className={cn("relative mt-2", isShared ? "-mx-1" : "-mx-3 sm:mx-0")}>
                     {allImages.length > 1 && <div className="absolute top-3 right-3 z-20 bg-black/40 backdrop-blur-md px-2 py-1 rounded-xl border border-white/10 text-white text-[10px] font-black">{currentSlide + 1}/{allImages.length}</div>}
-                    <Carousel className="w-full" setApi={(api) => api?.on("select", () => setCurrentSlide(api.selectedScrollSnap()))}><CarouselContent>{allImages.map((img, i) => (<CarouselItem key={i}><div className="relative aspect-[4/5] overflow-hidden rounded-lg cursor-pointer" onClick={() => setSelectedImageUrl(img)}><IOSImage src={getAdaptivePreview(img, 'feed', tier) || img} alt="Post" className="w-full h-full object-cover" /></div></CarouselItem>))}</CarouselContent></Carousel>
+                    <Carousel className="w-full" setApi={(api) => api?.on("select", () => setCurrentSlide(api.selectedScrollSnap()))}><CarouselContent>{allImages.map((img, i) => (<CarouselItem key={i}><div className="relative aspect-[4/5] overflow-hidden rounded-lg cursor-pointer" onClick={() => setSelectedImageUrl(img)}><IOSImage src={getAdaptivePreview(img, 'feed', tier) || img} alt="Post" loading="lazy" decoding="async" className="w-full h-full object-cover" /></div></CarouselItem>))}</CarouselContent></Carousel>
                   </div>
               )}
               {videoUrl && (
@@ -760,6 +815,39 @@ export function PostCard(props: PostCardProps) {
           </CardFooter>
         )}
       </Card>
+      <Dialog open={isUnlockPaymentOpen} onOpenChange={setIsUnlockPaymentOpen}>
+        <DialogContent className="rounded-[2rem] sm:max-w-[460px]">
+          <DialogHeader>
+            <DialogTitle>Unlock with Orange Money</DialogTitle>
+            <DialogDescription>
+              Send {unlockPrice} LRD directly to {user.name} at {creatorOrangeNumber}. ViMore does not receive or hold this payment.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="rounded-xl bg-orange-500/10 p-3 text-sm font-medium">
+              Send {unlockPrice} LRD via Orange Money to {creatorOrangeNumber} ({user.name}). Then enter your sender number and transaction reference below.
+            </p>
+            <div className="space-y-2">
+              <label className="text-xs font-bold">Orange Money Sender Number</label>
+              <Input value={senderOrangeNumber} onChange={event => setSenderOrangeNumber(event.target.value)} placeholder="077XXXXXXX" inputMode="tel" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-bold">Transaction ID / Reference</label>
+              <Input value={orangeTransactionId} onChange={event => setOrangeTransactionId(event.target.value)} placeholder="Transaction reference" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-bold">Payment screenshot (required)</label>
+              <Input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={event => setPaymentScreenshot(event.target.files?.[0] || null)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={submitUnlockPayment} disabled={isUnlocking}>
+              {isUnlocking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              I Have Paid — Submit for Verification
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <ShareHub isOpen={isShareHubOpen} onClose={() => setIsShareHubOpen(false)} post={props} />
 
       <Dialog open={isReportDialogOpen} onOpenChange={(open) => { setIsReportDialogOpen(open); if (!open) { setReportReason(''); setReportDetails(''); } }}>

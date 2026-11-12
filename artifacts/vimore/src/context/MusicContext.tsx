@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback, useRef } from 'react';
 import { usePosts } from './PostContext';
 import { databases, ID, Query, Permission, Role, BUCKET, DATABASE_ID, COL, getFileUrl, extractFileId } from '@/lib/appwrite';
-import { saveCache, loadCache, pinMediaInSW, OFFLINE_KEYS } from '@/lib/offline-cache';
+import { saveCache, loadCache, loadKeyValue, saveKeyValue, isCacheFresh, pinMediaInSW, OFFLINE_KEYS } from '@/lib/offline-cache';
 
 
 export interface Track {
@@ -61,6 +61,12 @@ export interface MusicReaction {
   id: number;
   emoji: string;
   x: number;
+}
+
+interface MusicCatalogCache {
+  songs: Track[];
+  albums: Album[];
+  playlists: Playlist[];
 }
 
 interface MusicContextType {
@@ -197,9 +203,9 @@ export function MusicProvider({ children }: { children: ReactNode }) {
   const { currentUser, campaigns } = usePosts();
 
   const [currentTrack, setCurrentTrackState] = useState<Track | null>(null);
-  const [globalSongs, setGlobalSongsState] = useState<Track[]>([]);
-  const [globalAlbums, setGlobalAlbumsState] = useState<Album[]>([]);
-  const [globalPlaylists, setGlobalPlaylistsState] = useState<Playlist[]>([]);
+  const [globalSongs, setGlobalSongsState] = useState<Track[]>(() => loadKeyValue<MusicCatalogCache>(OFFLINE_KEYS.MUSIC)?.songs || []);
+  const [globalAlbums, setGlobalAlbumsState] = useState<Album[]>(() => loadKeyValue<MusicCatalogCache>(OFFLINE_KEYS.MUSIC)?.albums || []);
+  const [globalPlaylists, setGlobalPlaylistsState] = useState<Playlist[]>(() => loadKeyValue<MusicCatalogCache>(OFFLINE_KEYS.MUSIC)?.playlists || []);
   const [queue, setQueueState] = useState<Track[]>([]);
   const [isPlaying, setIsPlayingState] = useState(false);
   const [isExpanded, setIsExpandedState] = useState(false);
@@ -228,11 +234,21 @@ export function MusicProvider({ children }: { children: ReactNode }) {
   const [userAlbums, setUserAlbumsState] = useState<Album[]>([]);
   const [unlockedMusicIds, setUnlockedMusicIdsState] = useState<Set<string | number>>(new Set());
   const [audioDuration, setAudioDurationState] = useState(0);
-  const [isMusicLoading, setIsMusicLoadingState] = useState(true);
+  const [isMusicLoading, setIsMusicLoadingState] = useState(() => !isCacheFresh(OFFLINE_KEYS.MUSIC));
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const loadMusicData = useCallback(async () => {
+  const loadMusicData = useCallback(async (force = false) => {
+    const cachedCatalog = loadKeyValue<MusicCatalogCache>(OFFLINE_KEYS.MUSIC);
+    if (!force && cachedCatalog && isCacheFresh(OFFLINE_KEYS.MUSIC)) {
+      setGlobalSongsState(cachedCatalog.songs || []);
+      setGlobalAlbumsState(cachedCatalog.albums || []);
+      setGlobalPlaylistsState(cachedCatalog.playlists || []);
+      setQueueState(cachedCatalog.songs || []);
+      setIsMusicLoadingState(false);
+      return;
+    }
+
     try {
       // Use the server-side catalog route so music loads regardless of
       // client-side Appwrite collection permissions.
@@ -291,11 +307,18 @@ export function MusicProvider({ children }: { children: ReactNode }) {
         mapDocToPlaylist(doc, playlistTracksMap[doc.$id] || [])
       );
       setGlobalPlaylistsState(playlists);
+      saveKeyValue(OFFLINE_KEYS.MUSIC, { songs: tracks, albums, playlists });
 
     } catch (err) {
       console.error('[MusicContext] loadMusicData error:', err);
       // Fallback: try reading offline cache
       try {
+        const cached = loadKeyValue<MusicCatalogCache>(OFFLINE_KEYS.MUSIC);
+        if (cached) {
+          setGlobalSongsState(cached.songs || []);
+          setGlobalAlbumsState(cached.albums || []);
+          setGlobalPlaylistsState(cached.playlists || []);
+        }
         const cachedSongs = localStorage.getItem('vm_offline_songs');
         if (cachedSongs) setGlobalSongsState(JSON.parse(cachedSongs));
         const cachedAlbums = localStorage.getItem('vm_offline_albums');
@@ -788,7 +811,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     confirmCreatePlaylist,
     addTrackToPlaylist,
     triggerHaptic,
-    refreshMusicVault: loadMusicData,
+    refreshMusicVault: () => loadMusicData(true),
     recordSongStream,
     unlockedMusicIds,
     unlockMusic,

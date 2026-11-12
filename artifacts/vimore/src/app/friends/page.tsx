@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef, useCallback, Suspense } from "react";
-import { saveCache, loadCache, OFFLINE_KEYS } from "@/lib/offline-cache";
+import { saveCache, loadCache, isCacheFresh, OFFLINE_KEYS } from "@/lib/offline-cache";
 import { Header } from "@/components/layout/header";
 import { SubHeader } from "@/components/layout/sub-header";
 import { MainNav } from "@/components/layout/main-nav";
@@ -63,7 +63,7 @@ function FriendsPageContent() {
   const pageMultiplier = tier === 'lite' ? 4 : tier === 'standard' ? 6 : 10;
   const friendsPageLimit = adaptiveFeedPageSize(tier) * pageMultiplier;
   const requestsPageLimit = Math.max(10, Math.floor(friendsPageLimit / 2));
-  const { connections = [], isFriend, isRequestSent, isRequestReceived, sendFriendRequest, confirmFriendRequest, cancelFriendRequest, unfriendUser, currentUser, friendUsernames, followerUsernames, isLoading, isOffline, posts } = usePosts();
+  const { connections = [], isFriend, isRequestSent, isRequestReceived, sendFriendRequest, confirmFriendRequest, declineFriendRequest, cancelFriendRequest, unfriendUser, currentUser, friendUsernames, followerUsernames, isLoading, isOffline, posts } = usePosts();
   const { currentTrack, isExpanded, triggerHaptic } = useMusic();
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -101,6 +101,7 @@ function FriendsPageContent() {
 
   const fetchDiscoveryBatch = useCallback(async () => {
     if (!currentUser) return;
+    if (isCacheFresh(OFFLINE_KEYS.FRIENDS_DISCOVERY)) return;
     try {
       const result = await databases.listDocuments(DATABASE_ID, COL.USERS, [Query.limit(friendsPageLimit)]);
       const mapped = result.documents.map((doc: any) => ({
@@ -120,6 +121,7 @@ function FriendsPageContent() {
 
   const fetchPendingRequests = useCallback(async () => {
     if (!currentUser) return;
+    if (isCacheFresh(OFFLINE_KEYS.FRIENDS_PENDING)) return;
     try {
       const reqResult = await databases.listDocuments(DATABASE_ID, COL.FRIEND_REQUESTS, [
         Query.equal('from_user_id', currentUser.$id),
@@ -141,6 +143,7 @@ function FriendsPageContent() {
 
   const fetchConfirmRequests = useCallback(async () => {
     if (!currentUser) return;
+    if (isCacheFresh(OFFLINE_KEYS.FRIENDS_CONFIRM)) return;
     try {
       const reqResult = await databases.listDocuments(DATABASE_ID, COL.FRIEND_REQUESTS, [
         Query.equal('to_user_id', currentUser.$id),
@@ -162,25 +165,28 @@ function FriendsPageContent() {
 
   useEffect(() => {
     if (activeTab !== 'add') { if (discoveryIntervalRef.current) { clearInterval(discoveryIntervalRef.current); discoveryIntervalRef.current = null; } return; }
+    if (isCacheFresh(OFFLINE_KEYS.FRIENDS_DISCOVERY)) return;
     setIsLoadingDiscovery(true);
     fetchDiscoveryBatch().finally(() => setIsLoadingDiscovery(false));
-    discoveryIntervalRef.current = setInterval(() => { fetchDiscoveryBatch(); }, 90000);
+    discoveryIntervalRef.current = setInterval(() => { fetchDiscoveryBatch(); }, 5 * 60 * 1000);
     return () => { if (discoveryIntervalRef.current) { clearInterval(discoveryIntervalRef.current); discoveryIntervalRef.current = null; } };
   }, [activeTab, fetchDiscoveryBatch]);
 
   useEffect(() => {
     if (activeTab !== 'confirm') { if (confirmIntervalRef.current) { clearInterval(confirmIntervalRef.current); confirmIntervalRef.current = null; } return; }
+    if (isCacheFresh(OFFLINE_KEYS.FRIENDS_CONFIRM)) return;
     setIsLoadingConfirm(true);
     fetchConfirmRequests().finally(() => setIsLoadingConfirm(false));
-    confirmIntervalRef.current = setInterval(() => { fetchConfirmRequests(); }, 5000);
+    confirmIntervalRef.current = setInterval(() => { fetchConfirmRequests(); }, 5 * 60 * 1000);
     return () => { if (confirmIntervalRef.current) { clearInterval(confirmIntervalRef.current); confirmIntervalRef.current = null; } };
   }, [activeTab, fetchConfirmRequests]);
 
   useEffect(() => {
     if (activeTab !== 'pending') { if (pendingIntervalRef.current) { clearInterval(pendingIntervalRef.current); pendingIntervalRef.current = null; } return; }
+    if (isCacheFresh(OFFLINE_KEYS.FRIENDS_PENDING)) return;
     setIsLoadingPending(true);
     fetchPendingRequests().finally(() => setIsLoadingPending(false));
-    pendingIntervalRef.current = setInterval(() => { fetchPendingRequests(); }, 90000);
+    pendingIntervalRef.current = setInterval(() => { fetchPendingRequests(); }, 5 * 60 * 1000);
     return () => { if (pendingIntervalRef.current) { clearInterval(pendingIntervalRef.current); pendingIntervalRef.current = null; } };
   }, [activeTab, fetchPendingRequests]);
 
@@ -271,13 +277,18 @@ function FriendsPageContent() {
     }
   };
 
-  const handleAction = (user: any) => {
+  const handleAction = async (user: any) => {
     const friend = isFriend(user.username);
     const sent = isRequestSent(user.username);
     const received = isRequestReceived(user.username);
     if (friend) { triggerHaptic(15); setConfirmType("unfriend"); setConfirmUser(user); }
     else if (sent) { triggerHaptic(10); setConfirmType("cancel"); setConfirmUser(user); }
-    else if (received) { triggerHaptic(25); confirmFriendRequest(user.username); setConfirmReceivedUsers(prev => prev.filter(u => u.username !== user.username)); }
+    else if (received) {
+      triggerHaptic(25);
+      if (await confirmFriendRequest(user.username)) {
+        setConfirmReceivedUsers(prev => prev.filter(u => u.username !== user.username));
+      }
+    }
     else { triggerHaptic(20); sendFriendRequest(user.username); }
   };
 
@@ -286,7 +297,7 @@ function FriendsPageContent() {
     triggerHaptic(15);
     setCancellingUser(user.username);
     try {
-      await cancelFriendRequest(user.username);
+      if (!await cancelFriendRequest(user.username)) return;
       setPendingUsers(prev => prev.filter(u => u.username !== user.username));
       toast({ title: "Request cancelled", description: `Request to @${user.username} cancelled.`, duration: 2500 });
     } catch {
@@ -461,13 +472,8 @@ function FriendsPageContent() {
                         onClick={() => handleCancelPending(user)}
                         disabled={cancellingUser === user.username}
                       >
-                        {cancellingUser === user.username ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><X className="h-3 w-3 mr-1" />Cancel</>}
+                        {cancellingUser === user.username ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><X className="h-3 w-3 mr-1" />Cancel Request</>}
                       </Button>
-                      <Link href={`/messages?open=${user.username}`}>
-                        <Button size="sm" variant="ghost" className="w-full h-9 px-4 rounded-xl font-bold text-[9px] uppercase text-muted-foreground hover:text-primary">
-                          <MessageCircle className="h-3 w-3 mr-1" />Msg
-                        </Button>
-                      </Link>
                     </div>
                   </div>
                 </div>
@@ -567,11 +573,30 @@ function FriendsPageContent() {
                             <><UserPlus className="h-3 w-3 mr-1" />{t('friends_add_friend')}</>
                           )}
                         </Button>
-                        <Link href={`/messages?open=${user.username}`} className="w-full">
-                          <Button size="sm" variant="ghost" className="w-full h-9 px-4 rounded-xl font-bold text-[9px] uppercase text-muted-foreground hover:text-primary">
-                            <MessageCircle className="h-3 w-3 mr-1" />Message
+                        {isConfirmTab && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-9 px-4 rounded-xl font-bold text-[9px] uppercase text-destructive"
+                            onClick={() => {
+                              triggerHaptic(15);
+                              void declineFriendRequest(user.username).then(declined => {
+                                if (declined) {
+                                  setConfirmReceivedUsers(prev => prev.filter(request => request.username !== user.username));
+                                }
+                              });
+                            }}
+                          >
+                            <X className="h-3 w-3 mr-1" />Decline
                           </Button>
-                        </Link>
+                        )}
+                        {friend && (
+                          <Link href={`/messages?open=${user.username}`} className="w-full">
+                            <Button size="sm" variant="ghost" className="w-full h-9 px-4 rounded-xl font-bold text-[9px] uppercase text-muted-foreground hover:text-primary">
+                              <MessageCircle className="h-3 w-3 mr-1" />Message
+                            </Button>
+                          </Link>
+                        )}
                       </div>
                     </div>
                   </div>

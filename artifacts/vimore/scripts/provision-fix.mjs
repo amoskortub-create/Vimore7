@@ -2,7 +2,7 @@
  * ViMore — Fix pass: re-create failed attributes, failed indexes, and buckets.
  */
 
-import { Client, Databases, Storage } from 'node-appwrite';
+import { Client, Databases, Storage, Permission, Role } from 'node-appwrite';
 import 'dotenv/config';
 
 const ENDPOINT   = process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT  || 'https://appwrite.mediatechliberia.online/v1';
@@ -125,19 +125,51 @@ const BUCKETS = [
   { id: 'store_logos',         name: 'Store Logos'         },
   { id: 'sounds',              name: 'Sounds'              },
 ];
+const CLIENT_UPLOAD_BUCKETS = new Set([
+  'post_media',
+  'reel_media',
+  'story_media',
+  'music_tracks',
+  'album_covers',
+  'Marketplace_Images',
+]);
+const ALLOWED_FILE_EXTENSIONS = ['jpg','jpeg','png','webp','gif','mp4','mov','webm','mp3','m4a','ogg','wav','pdf','heic'];
 
 async function ensureBucket(id, name) {
   await safeCreate(async () => {
+    const userUploadBucket = CLIENT_UPLOAD_BUCKETS.has(id);
+    const permissions = userUploadBucket ? [Permission.create(Role.users())] : undefined;
     await storage.createBucket(
       id, name,
-      undefined, // permissions
+      permissions,
       undefined, // fileSecurity
       true,      // enabled
       undefined, // maxFileSize
-      ['jpg','jpeg','png','webp','gif','mp4','mov','mp3','ogg','wav','pdf','heic','m4a']
+      ALLOWED_FILE_EXTENSIONS
     );
     console.log(`  ✅  Bucket: ${id}`);
   });
+
+  if (!CLIENT_UPLOAD_BUCKETS.has(id)) return;
+  const bucket = await storage.getBucket(id);
+  const nextPermissions = [...new Set([...bucket.$permissions, Permission.create(Role.users())])];
+  const nextExtensions = [...new Set([...bucket.allowedFileExtensions, ...ALLOWED_FILE_EXTENSIONS])];
+  if (
+    nextPermissions.length === bucket.$permissions.length
+    && nextExtensions.length === bucket.allowedFileExtensions.length
+  ) return;
+  await storage.updateBucket(
+    id,
+    bucket.name,
+    nextPermissions,
+    bucket.fileSecurity,
+    bucket.enabled,
+    bucket.maximumFileSize,
+    nextExtensions,
+    bucket.compression,
+    bucket.encryption,
+    bucket.antivirus,
+  );
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────

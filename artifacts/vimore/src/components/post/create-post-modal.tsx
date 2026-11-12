@@ -79,6 +79,7 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Progress } from "@/components/ui/progress";
 import { BUCKET_IMAGES } from "@/lib/appwrite";
+import { getCreatorOrangeMoneyNumber } from "@/lib/orange-money-payments";
 
 interface CreatePostModalProps {
   children: React.ReactNode;
@@ -407,6 +408,22 @@ export function CreatePostModal({ children, sharedPost, initialContent, onOpen }
 
   const handlePost = async () => {
     if (!currentUser || isPosting) return;
+    if (isLocked) {
+      try {
+        const orangeMoneyNumber = await getCreatorOrangeMoneyNumber(currentUser.$id);
+        if (!orangeMoneyNumber) {
+          toast({
+            variant: "destructive",
+            title: "Orange Money number required",
+            description: "Add your Orange Money number in Profile to sell locked posts.",
+          });
+          return;
+        }
+      } catch (error: any) {
+        toast({ variant: "destructive", title: "Could not check Orange Money number", description: error?.message || "Please retry." });
+        return;
+      }
+    }
     triggerHaptic(30);
     setIsPosting(true);
 

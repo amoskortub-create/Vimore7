@@ -13,10 +13,10 @@ export const GIFT_CATEGORIES = [
 
 export const GIFT_ITEMS = [
   { id: 'gift-01', name: 'Blush Bloom', emoji: '🌷', priceLD: 50, category: 'love' },
-  { id: 'gift-02', name: 'Sweet Heart', emoji: '💗', priceLD: 60, category: 'love' },
-  { id: 'gift-03', name: 'Rose Aura', emoji: '🌹', priceLD: 80, category: 'love' },
+  { id: 'gift-02', name: 'Sweet Heart', emoji: '💗', priceLD: 250, category: 'love' },
+  { id: 'gift-03', name: 'Rose Aura', emoji: '🌹', priceLD: 100, category: 'love' },
   { id: 'gift-04', name: 'Love Letter', emoji: '💌', priceLD: 90, category: 'love' },
-  { id: 'gift-05', name: 'Cupid Crown', emoji: '👑', priceLD: 100, category: 'love' },
+  { id: 'gift-05', name: 'Cupid Crown', emoji: '👑', priceLD: 1000, category: 'love' },
   { id: 'gift-06', name: 'Hope Basket', emoji: '🧺', priceLD: 120, category: 'support' },
   { id: 'gift-07', name: 'Kindness Pack', emoji: '🤝', priceLD: 140, category: 'support' },
   { id: 'gift-08', name: 'Village Blessing', emoji: '🙏', priceLD: 160, category: 'support' },

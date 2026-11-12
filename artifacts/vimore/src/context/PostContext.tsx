@@ -4,16 +4,17 @@ import { createContext, useContext, useState, useRef, startTransition, ReactNode
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
 import {
-  account, databases, client, ID, Query, Models,
+  account, databases, client, ID, Query, Models, Permission, Role,
   COL, BUCKET, DATABASE_ID,
   getFileUrl, extractFileId, formatTimeAgo, avatarFallback, toProxyUrl,
 } from '@/lib/appwrite';
 import { BUCKET_STORIES, storage } from '@/lib/appwrite';
 
 import { formatErrorDescription, logAppwriteError } from '@/lib/appwrite-error';
-import { authFetch, clearAuthRedirectState, getSessionFromStorage, redirectToLoginOnce, storeSessionInStorage } from '@/lib/auth-fetch';
+import { authFetch, clearAuthRedirectState, redirectToLoginOnce } from '@/lib/auth-fetch';
+import { signInWithIdentifier } from '@/lib/client-auth';
 import { clearApiResponseCache } from '@/lib/api-response-cache';
-import { offlineCache } from '@/lib/offline-cache';
+import { loadFeedCache, loadFeedCacheAsync, offlineCache, saveFeedCache } from '@/lib/offline-cache';
 import { firePush } from '@/lib/push-fire';
 import { CREDIT_PRICES } from '@/lib/credit-pricing';
 
@@ -30,14 +31,6 @@ function isSessionExpiredError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
   const { code, status } = err as { code?: unknown; status?: unknown };
   return code === 401 || status === 401;
-}
-
-function persistAppwriteSession(session: string): void {
-  storeSessionInStorage(session);
-  if (getSessionFromStorage() !== session) {
-    throw new Error('Your sign-in session could not be saved. Enable site storage and try again.');
-  }
-  clearAuthRedirectState();
 }
 
 export interface AppSettings {
@@ -193,6 +186,7 @@ export interface Cluster {
 export interface Connection extends User {
   followsYou?: boolean;
   isGroup: false;
+  friendshipStatus?: 'accepted';
   isOnline?: boolean;
   lastSeenAt?: string | null;
   lastMessage?: string;
@@ -242,6 +236,8 @@ interface PostContextType {
   posts: Post[];
   hasMoreFeed: boolean;
   isFeedLoading: boolean;
+  hasLoadedFeed: boolean;
+  feedRefreshStatus: 'idle' | 'refreshing' | 'server-error';
   loadMoreFeed: () => Promise<void>;
   appendRealtimePost: (document: any) => Promise<void>;
   activeComments: PostComment[];
@@ -264,7 +260,6 @@ interface PostContextType {
   clearStreamedComments: () => void;
   sentRequestUsernames: Set<string>;
   receivedRequestUsernames: Set<string>;
-  acceptedStrangerUsernames: Set<string>;
   activeStoryIndex: number | null;
   selectedPostId: string | null;
   selectedChatId: string | null;
@@ -330,11 +325,10 @@ interface PostContextType {
   isRequestSent: (username: string) => boolean;
   isRequestReceived: (username: string) => boolean;
   sendFriendRequest: (username: string) => Promise<void>;
-  confirmFriendRequest: (username: string) => Promise<void>;
-  cancelFriendRequest: (username: string) => Promise<void>;
+  confirmFriendRequest: (username: string) => Promise<boolean>;
+  declineFriendRequest: (username: string) => Promise<boolean>;
+  cancelFriendRequest: (username: string) => Promise<boolean>;
   unfriendUser: (username: string) => Promise<void>;
-  acceptMessageRequest: (username: string) => Promise<void>;
-  declineMessageRequest: (username: string) => Promise<void>;
   isSubscribed: (username: string) => boolean;
   addComment: (postId: string, text: string) => Promise<void>;
   addReply: (postId: string, parentId: string, text: string) => Promise<void>;
@@ -354,8 +348,6 @@ interface PostContextType {
   recordWithdrawal: (node: any) => Promise<void>;
   processWithdrawal: (id: string, status: 'APPROVED' | 'REJECTED', adminMessage?: string, proofImageUrl?: string) => Promise<void>;
   verifyUser: (cost: number, currency: 'DIAMOND' | 'STAR') => Promise<void>;
-  processGiftTransaction: (cost: number, currency: 'GOLD' | 'DIAMOND') => Promise<void>;
-  unlockPost: (postId: string, cost: number) => Promise<void>;
   subscribeToCreator: (username: string, cost: number) => Promise<void>;
   cancelSubscription: (username: string) => Promise<void>;
   incrementShareCount: (postId: string) => Promise<void>;
@@ -389,7 +381,6 @@ interface PostContextType {
   submitTicket: (data: { subject: string; message: string; category: string; priority?: string }) => Promise<void>;
   sendChatMessage: (recipientId: string, message: Partial<ChatMessage>) => Promise<void>;
   markChatMessageViewed: (messageId: string, chatId: string) => Promise<void>;
-  sendMessageRequest: (targetUserId: string, targetUser: User, text: string) => Promise<void>;
   purgeVibeCache: () => Promise<void>;
   archiveIdentityNode: () => Promise<void>;
   boostNode: (nodeId: string, duration: number, currency: 'CREDIT', type: 'POST' | 'SONIC') => Promise<void>;
@@ -617,33 +608,73 @@ function getChatMessagePreview(message: Partial<ChatMessage> & { type?: string }
   return '';
 }
 
-const FEED_PAGE_SIZE = 30;
+const FEED_PAGE_SIZE = 10;
 
 export function PostProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
   const router = useRouter();
 
-  const [currentUser, setCurrentUserState] = useState<User | null>(null);
-  const [posts, setPostsState] = useState<Post[]>([]);
+  const [currentUser, setCurrentUserState] = useState<User | null>(() =>
+    typeof window === 'undefined' ? null : offlineCache.getUser() as User | null
+  );
+  const [posts, setPostsState] = useState<Post[]>(() => {
+    if (typeof window === 'undefined') return [];
+    const savedFeed = loadFeedCache<Post>().posts;
+    return savedFeed.length > 0 ? savedFeed : offlineCache.getPosts() as Post[];
+  });
+  const skipInitialFeedCacheWrite = useRef(true);
   const [hasMoreFeed, setHasMoreFeed] = useState(true);
   const [isFeedLoading, setIsFeedLoading] = useState(false);
+  const [hasLoadedFeed, setHasLoadedFeed] = useState(false);
+  const [feedRefreshStatus, setFeedRefreshStatus] = useState<'idle' | 'refreshing' | 'server-error'>('idle');
   const feedCursorRef = useRef<string | null>(null);
   const feedPhaseRef = useRef<'connections' | 'global'>('connections');
   const feedConnCursorRef = useRef<string | null>(null);
   const feedGlobalCursorRef = useRef<string | null>(null);
   const feedHasLoadedRef = useRef(false);
   const pendingRealtimePostsRef = useRef(new Map<string, Post>());
+  useEffect(() => {
+    let active = true;
+    void loadFeedCacheAsync<Post>().then(cache => {
+      if (active && cache.indexedDB && cache.posts.length > 0 && !feedHasLoadedRef.current) {
+        setPostsState(cache.posts);
+      }
+    });
+    return () => { active = false; };
+  }, []);
   const [activeComments, setActiveComments] = useState<PostComment[]>([]);
   const [isLoading, setIsLoadingState] = useState(true);
   const [initError] = useState<string | null>(null);
-  const [isOffline, setIsOffline] = useState(false);
+  const [isOffline, setIsOffline] = useState(() =>
+    typeof navigator !== 'undefined' && !navigator.onLine
+  );
   const sessionCheckInFlightRef = useRef(false);
   const [settings, setSettingsState] = useState<AppSettings>(INITIAL_SETTINGS);
+
+  useEffect(() => {
+    const updateOfflineState = () => setIsOffline(!navigator.onLine);
+    window.addEventListener('online', updateOfflineState);
+    window.addEventListener('offline', updateOfflineState);
+    return () => {
+      window.removeEventListener('online', updateOfflineState);
+      window.removeEventListener('offline', updateOfflineState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (skipInitialFeedCacheWrite.current) {
+      skipInitialFeedCacheWrite.current = false;
+      return;
+    }
+    saveFeedCache(posts);
+    offlineCache.savePosts(posts);
+  }, [posts]);
 
   const [clusters, setClustersState] = useState<Cluster[]>([]);
   const clustersRef = useRef<Cluster[]>([]);
   useEffect(() => { clustersRef.current = clusters; }, [clusters]);
   const [connections, setConnectionsState] = useState<Connection[]>([]);
+  const conversationCleanupUsersRef = useRef(new Set<string>());
   const [stories, setStoriesState] = useState<any[]>([]);
   const [chatMessages, setChatMessages] = useState<Record<string, ChatMessage[]>>({});
   const [campaigns, setCampaignsState] = useState<any[]>([]);
@@ -678,7 +709,6 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const [friendUsernames, setFriendUsernamesState] = useState<Set<string>>(new Set());
   const [sentRequestUsernames, setSentRequestUsernamesState] = useState<Set<string>>(new Set());
   const [receivedRequestUsernames, setReceivedRequestUsernamesState] = useState<Set<string>>(new Set());
-  const [acceptedStrangerUsernames] = useState<Set<string>>(new Set());
   const [activeSubscriptions, setActiveSubscriptionsState] = useState<Set<string>>(new Set());
   const [chatLastMessageAt, setChatLastMessageAt] = useState<Record<string, number>>({});
   const [chatLastIncomingAt, setChatLastIncomingAt] = useState<Record<string, number>>({});
@@ -731,7 +761,17 @@ export function PostProvider({ children }: { children: ReactNode }) {
     return docs.map((doc: any) => mapDocToPost(doc, authorsMap[doc.user_id]));
   }, []);
 
-  const loadFeed = useCallback(async () => {
+  const loadFeed = useCallback(async (force = false) => {
+    const cachedFeed = loadFeedCache<Post>();
+    if (!force && cachedFeed.savedAt && Date.now() - cachedFeed.savedAt < 5 * 60 * 1000) {
+      if (cachedFeed.posts.length > 0) setPostsState(cachedFeed.posts);
+      feedHasLoadedRef.current = true;
+      setHasLoadedFeed(true);
+      setFeedRefreshStatus('idle');
+      return;
+    }
+
+    setFeedRefreshStatus('refreshing');
     const PAGE = FEED_PAGE_SIZE;
     feedHasLoadedRef.current = false;
     feedPhaseRef.current = 'connections';
@@ -739,6 +779,8 @@ export function PostProvider({ children }: { children: ReactNode }) {
     feedGlobalCursorRef.current = null;
     feedCursorRef.current = null;
     setHasMoreFeed(true);
+    let querySucceeded = false;
+    let queryError: unknown;
     try {
       const connIds = [...followingUserIdsRef.current].slice(0, 100);
       let connDocs: any[] = [];
@@ -752,9 +794,11 @@ export function PostProvider({ children }: { children: ReactNode }) {
             Query.limit(PAGE),
           ]);
           connDocs = r.documents;
+          querySucceeded = true;
           if (connDocs.length > 0) feedConnCursorRef.current = connDocs[connDocs.length - 1].$id;
           if (connDocs.length < PAGE) feedPhaseRef.current = 'global';
-        } catch {
+        } catch (error) {
+          queryError = error;
           feedPhaseRef.current = 'global';
         }
       } else {
@@ -769,6 +813,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
             Query.orderDesc('$createdAt'),
             Query.limit(PAGE),
           ]);
+          querySucceeded = true;
           const existingIds = new Set(connDocs.map((doc: any) => doc.$id));
           let lastScannedIndex = -1;
           for (let index = 0; index < r.documents.length && connDocs.length + globalDocs.length < PAGE; index++) {
@@ -783,13 +828,15 @@ export function PostProvider({ children }: { children: ReactNode }) {
             feedGlobalCursorRef.current = r.documents[lastScannedIndex].$id;
           }
           setHasMoreFeed(r.documents.length === PAGE || lastScannedIndex < r.documents.length - 1);
-        } catch {
+        } catch (error) {
+          queryError = error;
           setHasMoreFeed(false);
         }
       } else {
         setHasMoreFeed(true);
       }
 
+      if (!querySucceeded) throw queryError || new Error('Feed could not be refreshed.');
       const mapped = await withAuthors([...connDocs, ...globalDocs]);
       const loadedIds = new Set(mapped.map(post => post.$id));
       const nextPosts = [...mapped];
@@ -801,11 +848,22 @@ export function PostProvider({ children }: { children: ReactNode }) {
       }
       pendingRealtimePostsRef.current.clear();
       feedHasLoadedRef.current = true;
-      setPostsState(nextPosts);
-      offlineCache.savePosts(nextPosts);
+      const cachedPosts = nextPosts.length === 0 ? loadFeedCache<Post>().posts : [];
+      const visiblePosts = nextPosts.length === 0 && cachedPosts.length > 0 ? cachedPosts : nextPosts;
+      setPostsState(visiblePosts);
+      setIsOffline(typeof navigator !== 'undefined' && !navigator.onLine);
+      setHasLoadedFeed(true);
+      setFeedRefreshStatus('idle');
+      if (nextPosts.length > 0 || cachedPosts.length === 0) {
+        saveFeedCache(nextPosts);
+        offlineCache.savePosts(nextPosts);
+      }
     } catch (err) {
       logAppwriteError('loadFeed', err);
-      const cachedPosts = offlineCache.getPosts() as any[];
+      setIsOffline(typeof navigator !== 'undefined' && !navigator.onLine);
+      setFeedRefreshStatus('server-error');
+      const savedFeed = loadFeedCache<Post>().posts;
+      const cachedPosts = savedFeed.length > 0 ? savedFeed : offlineCache.getPosts() as Post[];
       const loadedIds = new Set(cachedPosts.map((post: any) => post.$id));
       const nextPosts = [...cachedPosts];
       for (const post of pendingRealtimePostsRef.current.values()) {
@@ -998,68 +1056,61 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
   const loadConnections = useCallback(async (userId: string, currentUsername?: string) => {
     try {
-      const [followsResult, friendsSentResult, friendsReceivedResult] = await Promise.allSettled([
-        databases.listDocuments(DATABASE_ID, COL.FOLLOWS, [
-          Query.equal('follower_id', userId),
-          Query.limit(200),
-        ]),
-        databases.listDocuments(DATABASE_ID, COL.FRIEND_REQUESTS, [
-          Query.equal('from_user_id', userId),
-          Query.equal('status', 'ACCEPTED'),
-          Query.limit(200),
-        ]),
-        databases.listDocuments(DATABASE_ID, COL.FRIEND_REQUESTS, [
-          Query.equal('to_user_id', userId),
-          Query.equal('status', 'ACCEPTED'),
-          Query.limit(200),
-        ]),
+      if (!conversationCleanupUsersRef.current.has(userId)) {
+        const response = await authFetch('/api/friends/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'cleanup' }),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data?.error || 'Could not clean up unaccepted conversations.');
+        }
+        conversationCleanupUsersRef.current.add(userId);
+      }
+
+      const listAll = async (queries: string[]) => {
+        const documents: any[] = [];
+        let cursor: string | undefined;
+        while (true) {
+          const page = await databases.listDocuments(DATABASE_ID, COL.FRIEND_REQUESTS, [
+            ...queries,
+            Query.limit(100),
+            ...(cursor ? [Query.cursorAfter(cursor)] : []),
+          ]);
+          documents.push(...page.documents);
+          if (page.documents.length < 100) return documents;
+          cursor = page.documents[page.documents.length - 1]?.$id;
+          if (!cursor) return documents;
+        }
+      };
+      const [sentAccepted, receivedAccepted] = await Promise.all([
+        listAll([Query.equal('from_user_id', userId), Query.equal('status', 'ACCEPTED')]),
+        listAll([Query.equal('to_user_id', userId), Query.equal('status', 'ACCEPTED')]),
       ]);
-
-      const allUserIds = new Set<string>();
-
-      if (followsResult.status === 'fulfilled') {
-        followsResult.value.documents.forEach((f: any) => { if (f.following_id) allUserIds.add(f.following_id); });
-      }
-      if (friendsSentResult.status === 'fulfilled') {
-        friendsSentResult.value.documents.forEach((f: any) => { if (f.to_user_id) allUserIds.add(f.to_user_id); });
-      }
-      if (friendsReceivedResult.status === 'fulfilled') {
-        friendsReceivedResult.value.documents.forEach((f: any) => { if (f.from_user_id) allUserIds.add(f.from_user_id); });
+      const friendIds = new Set<string>();
+      sentAccepted.forEach((request: any) => request.to_user_id && friendIds.add(request.to_user_id));
+      receivedAccepted.forEach((request: any) => request.from_user_id && friendIds.add(request.from_user_id));
+      const friendIdList = [...friendIds];
+      if (friendIdList.length === 0) {
+        setFriendUsernamesState(new Set());
+        setConnectionsState([]);
+        offlineCache.saveConnections([]);
+        return;
       }
 
-      // Open inbox: also include anyone who has ever exchanged DMs with this user,
-      // so non-friends still show up in the conversation list.
-      try {
-        const [sentMsgs, recvMsgs] = await Promise.allSettled([
-          databases.listDocuments(DATABASE_ID, COL.MESSAGES, [
-            Query.equal('sender_id', userId),
-            Query.orderDesc('$createdAt'),
-            Query.limit(500),
-          ]),
-          databases.listDocuments(DATABASE_ID, COL.MESSAGES, [
-            Query.equal('receiver_id', userId),
-            Query.orderDesc('$createdAt'),
-            Query.limit(500),
-          ]),
+      const friendUsers: any[] = [];
+      for (let offset = 0; offset < friendIdList.length; offset += 100) {
+        const ids = friendIdList.slice(offset, offset + 100);
+        const result = await databases.listDocuments(DATABASE_ID, COL.USERS, [
+          Query.equal('$id', ids),
+          Query.limit(100),
         ]);
-        if (sentMsgs.status === 'fulfilled') {
-          sentMsgs.value.documents.forEach((m: any) => {
-            if (m.receiver_id && m.receiver_id !== userId) allUserIds.add(m.receiver_id);
-          });
-        }
-        if (recvMsgs.status === 'fulfilled') {
-          recvMsgs.value.documents.forEach((m: any) => {
-            if (m.sender_id && m.sender_id !== userId) allUserIds.add(m.sender_id);
-          });
-        }
-      } catch { /* ignore — friends/follows already loaded */ }
+        friendUsers.push(...result.documents);
+      }
+      setFriendUsernamesState(new Set(friendUsers.map(user => user.username).filter(Boolean)));
 
-      const userIdsArr = Array.from(allUserIds).filter(id => id !== userId);
-      if (userIdsArr.length === 0) { setConnectionsState([]); return; }
-
-      const usersResult = await databases.listDocuments(DATABASE_ID, COL.USERS, [Query.equal('$id', userIdsArr), Query.limit(200)]);
-
-      const conns: Connection[] = usersResult.documents.map((u: any) => ({
+      const conns: Connection[] = friendUsers.map((u: any) => ({
         $id: u.$id,
         name: u.name || '',
         username: u.username || '',
@@ -1073,39 +1124,61 @@ export function PostProvider({ children }: { children: ReactNode }) {
         followsYou: false,
       }));
 
-      if (currentUsername && conns.length > 0) {
-        try {
-          const recentMsgs = await databases.listDocuments(DATABASE_ID, COL.MESSAGES, [
-            Query.orderDesc('$createdAt'),
-            Query.limit(500),
+      const allMessages: any[] = [];
+      if (currentUsername) {
+        const listAcceptedMessages = async (queries: string[]) => {
+          const documents: any[] = [];
+          let cursor: string | undefined;
+          while (true) {
+            const page = await databases.listDocuments(DATABASE_ID, COL.MESSAGES, [
+              ...queries,
+              Query.orderDesc('$createdAt'),
+              Query.limit(100),
+              ...(cursor ? [Query.cursorAfter(cursor)] : []),
+            ]);
+            documents.push(...page.documents);
+            if (page.documents.length < 100) return documents;
+            cursor = page.documents[page.documents.length - 1]?.$id;
+            if (!cursor) return documents;
+          }
+        };
+        for (let offset = 0; offset < friendIdList.length; offset += 100) {
+          const ids = friendIdList.slice(offset, offset + 100);
+          const results = await Promise.all([
+            listAcceptedMessages([Query.equal('sender_id', userId), Query.equal('receiver_id', ids)]),
+            listAcceptedMessages([Query.equal('sender_id', ids), Query.equal('receiver_id', userId)]),
           ]);
-          const lastMsgMap: Record<string, { text?: string; type?: ChatMessage['type']; time?: string }> = {};
-          recentMsgs.documents.forEach((doc: any) => {
-            const cid = doc.cluster_id;
-            if (cid && !lastMsgMap[cid]) {
-              lastMsgMap[cid] = { text: doc.text, type: doc.type as ChatMessage['type'], time: formatTimeAgo(doc.$createdAt) };
-            }
-          });
-          const enriched = conns.map(c => {
-            const clusterId = [currentUsername, c.username].sort().join('_');
-            const lastMsg = lastMsgMap[clusterId];
-            if (!lastMsg) return c;
-            const preview = getChatMessagePreview(lastMsg);
-            return { ...c, lastMessage: preview, lastTime: lastMsg.time };
-          });
-          setConnectionsState(enriched);
-          offlineCache.saveConnections(enriched);
-        } catch {
-          setConnectionsState(conns);
-          offlineCache.saveConnections(conns);
+          allMessages.push(...results[0], ...results[1]);
         }
-      } else {
-        setConnectionsState(conns);
-        offlineCache.saveConnections(conns);
       }
-    } catch {
-      const cachedConns = offlineCache.getConnections() as any[];
-      if (cachedConns.length > 0) setConnectionsState(cachedConns);
+
+      const lastMessageByChat = new Map<string, any>();
+      for (const message of allMessages) {
+        const chatId = message.cluster_id;
+        const previous = chatId ? lastMessageByChat.get(chatId) : null;
+        if (!chatId || (previous && previous.$createdAt >= message.$createdAt)) continue;
+        lastMessageByChat.set(chatId, message);
+      }
+      const enriched = conns.map(connection => {
+        const chatId = [currentUsername, connection.username].sort().join('_');
+        const message = lastMessageByChat.get(chatId);
+        return message
+          ? {
+              ...connection,
+              friendshipStatus: 'accepted' as const,
+              lastMessage: getChatMessagePreview({ text: message.text, type: message.type }),
+              lastTime: formatTimeAgo(message.$createdAt),
+            }
+          : { ...connection, friendshipStatus: 'accepted' as const };
+      });
+      setConnectionsState(enriched);
+      offlineCache.saveConnections(enriched);
+    } catch (error) {
+      console.error('[connections] Could not load accepted conversations:', error);
+      const cachedConns = offlineCache.getConnections() as Connection[];
+      const acceptedCachedConns = cachedConns.filter(connection => connection.friendshipStatus === 'accepted');
+      setConnectionsState(acceptedCachedConns);
+      setFriendUsernamesState(new Set(acceptedCachedConns.map(connection => connection.username).filter(Boolean)));
     }
   }, []);
 
@@ -1193,7 +1266,13 @@ export function PostProvider({ children }: { children: ReactNode }) {
         const authorDoc = authorsMap[doc.user_id];
         const segments = (segmentsMap[doc.$id] || []).map(seg => ({
           $id: seg.$id,
-          type: seg.type || 'image',
+          type: seg.type || seg.media_type || (
+            String(seg.mime_type || seg.mimeType || '').startsWith('video/')
+            || /\.(mp4|mov|webm|m4v)(?:[?#]|$)/i.test(seg.story_url || '')
+              ? 'video'
+              : 'image'
+          ),
+          fileId: seg.media_id || undefined,
           mediaUrl: seg.media_id ? getFileUrl(BUCKET.STORY_MEDIA, seg.media_id) : (seg.story_url ? toProxyUrl(seg.story_url) : undefined),
           text: seg.text,
           duration: seg.duration || 5,
@@ -1642,13 +1721,13 @@ export function PostProvider({ children }: { children: ReactNode }) {
     } catch { /* ignore */ }
   }, []);
 
-  const withStartupTimeout = useCallback(async <T,>(task: Promise<T>, timeoutMs = 8000): Promise<T | null> => {
-    return await new Promise<T | null>((resolve) => {
+  const withStartupTimeout = useCallback(async <T,>(task: Promise<T>, timeoutMs = 8000): Promise<T> => {
+    return await new Promise<T>((resolve, reject) => {
       let settled = false;
       const timer = setTimeout(() => {
         if (!settled) {
           settled = true;
-          resolve(null);
+          reject(new Error('Appwrite startup check timed out'));
         }
       }, timeoutMs);
 
@@ -1658,11 +1737,11 @@ export function PostProvider({ children }: { children: ReactNode }) {
           clearTimeout(timer);
           resolve(value);
         }
-      }).catch(() => {
+      }).catch((error: unknown) => {
         if (!settled) {
           settled = true;
           clearTimeout(timer);
-          resolve(null);
+          reject(error);
         }
       });
     });
@@ -1680,7 +1759,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
         setCurrentUserState(cachedUser);
         const cachedPosts = offlineCache.getPosts() as any[];
         if (cachedPosts.length > 0) setPostsState(cachedPosts);
-        setIsOffline(true);
+        setIsOffline(typeof navigator !== 'undefined' && !navigator.onLine);
       } else {
         setCurrentUserState(null);
       }
@@ -1691,20 +1770,17 @@ export function PostProvider({ children }: { children: ReactNode }) {
       // Android WebView can briefly report navigator.onLine=false while the
       // network is already usable. Always try the live session first so that
       // a stale local snapshot is not shown during a normal reload.
-      const meRes = await withStartupTimeout(authFetch('/api/auth/me'), 5000);
-      if (!meRes) throw new Error('Session check timed out');
-      if (!meRes.ok) {
-        if (meRes.status === 401) throw new Error('Unauthorized');
-        throw new Error(`Session check unavailable (${meRes.status})`);
-      }
-      const meData = await meRes.json();
+      const authUser = await withStartupTimeout(account.get(), 5000);
+      const profileDoc = await withStartupTimeout(
+        databases.getDocument(DATABASE_ID, COL.USERS, authUser.$id),
+        5000,
+      );
       clearTimeout(timeoutId);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { authUser, profileDoc } = meData as any;
+      clearAuthRedirectState();
       const user = mapDocToUser(authUser, profileDoc);
       setCurrentUserState(user);
       offlineCache.saveUser(user);
-      setIsOffline(false);
+      setIsOffline(typeof navigator !== 'undefined' && !navigator.onLine);
 
       if (typeof window !== 'undefined') {
         try {
@@ -1737,13 +1813,15 @@ export function PostProvider({ children }: { children: ReactNode }) {
           setCurrentUserState(cachedUser);
           const cachedPosts = offlineCache.getPosts() as any[];
           if (cachedPosts.length > 0) setPostsState(cachedPosts);
-          const cachedConns = offlineCache.getConnections() as any[];
-          if (cachedConns.length > 0) setConnectionsState(cachedConns);
-          setIsOffline(true);
+          const cachedConns = offlineCache.getConnections() as Connection[];
+          const acceptedCachedConns = cachedConns.filter(connection => connection.friendshipStatus === 'accepted');
+          setConnectionsState(acceptedCachedConns);
+          setFriendUsernamesState(new Set(acceptedCachedConns.map(connection => connection.username).filter(Boolean)));
+          setIsOffline(typeof navigator !== 'undefined' && !navigator.onLine);
           setIsLoadingState(false);
           return;
         }
-        setIsOffline(true);
+        setIsOffline(typeof navigator !== 'undefined' && !navigator.onLine);
         return;
       }
       // Auth error or no cached session — redirect to login
@@ -1787,25 +1865,16 @@ export function PostProvider({ children }: { children: ReactNode }) {
         if (Date.now() - refreshedAt < SESSION_REFRESH_INTERVAL_MS) return;
       } catch {}
 
-      const session = getSessionFromStorage();
-      if (!session) return;
       refreshInFlight = true;
       try {
-        const response = await fetch('/api/auth/refresh', {
-          method: 'POST',
-          headers: { 'X-Appwrite-Session': session },
-          cache: 'no-store',
-        });
-        if (response.status === 401) {
-          void checkSession();
-          return;
-        }
-        if (!response.ok) return;
-
-        const data = await response.json();
-        if (typeof data.secret === 'string' && data.secret) {
-          client.setSession(data.secret);
-          storeSessionInStorage(data.secret);
+        try {
+          await account.updateSession('current');
+        } catch (error: any) {
+          if (error?.code === 401 || error?.type === 'user_session_not_found') {
+            void checkSession();
+            return;
+          }
+          throw error;
         }
         localStorage.setItem(refreshedAtKey, String(Date.now()));
       } catch {
@@ -1935,9 +2004,10 @@ export function PostProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (selectedChatId && currentUser) {
       const isCluster = clusters.some(cl => cl.$id === selectedChatId);
+      if (!isCluster && !friendUsernames.has(selectedChatId)) return;
       loadChatMessages(currentUser.$id, selectedChatId, currentUser.username, isCluster);
     }
-  }, [selectedChatId, currentUser, loadChatMessages, clusters]);
+  }, [selectedChatId, currentUser, loadChatMessages, clusters, friendUsernames]);
 
   // Mark incoming messages as read when a chat is opened or new messages arrive
   useEffect(() => {
@@ -1960,54 +2030,9 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (identifier: string, password: string) => {
     setIsLoadingState(true);
 
-    const trimmed = identifier.trim();
-    let vimoreId = trimmed.includes('@') ? trimmed : `${trimmed}@vimore.cfd`;
-
     try {
-      let authUser;
-      try {
-        authUser = await account.get();
-      } catch {
-        authUser = null;
-      }
-      if (!authUser) {
-        // Use server-side login to avoid client-SDK platform/CORS restrictions.
-        // The Next.js server proxies the credential check directly to Appwrite
-        // (server-to-server), then returns the session secret for us to hydrate.
-        const loginRes = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ identifier: trimmed, password }),
-        });
-        const loginData = await loginRes.json();
-        if (!loginRes.ok) {
-          throw new Error(loginData.error || 'Invalid credentials.');
-        }
-        // Persist the session before treating this browser as signed in.
-        persistAppwriteSession(loginData.secret);
-        if (typeof loginData.email === 'string' && loginData.email) vimoreId = loginData.email;
-        const { client } = await import('@/lib/appwrite');
-        client.setSession(loginData.secret);
-        // Skip account.get() — client-side account ops fail when the domain
-        // isn't registered as an Appwrite platform (general_unauthorized_scope).
-        // The server already gave us the userId we need.
-        authUser = {
-          $id: loginData.userId,
-          email: loginData.email || vimoreId,
-          name: '',
-          emailVerification: false,
-          $createdAt: loginData.expire ?? new Date().toISOString(),
-        } as any;
-      }
-      if (typeof authUser.email === 'string' && authUser.email) vimoreId = authUser.email;
-      const profileRes = await authFetch('/api/auth/me', { cache: 'no-store' });
-      const profileData = await profileRes.json();
-      if (!profileRes.ok) {
-        throw new Error(profileData.error || 'Could not load your account profile.');
-      }
-      authUser = profileData.authUser;
-      if (typeof authUser.email === 'string' && authUser.email) vimoreId = authUser.email;
-      const profileDoc = profileData.profileDoc;
+      const { authUser, profileDoc } = await signInWithIdentifier(identifier, password);
+      const vimoreId = authUser.email;
       const user = mapDocToUser(authUser, profileDoc);
       setCurrentUserState(user);
 
@@ -2046,8 +2071,10 @@ export function PostProvider({ children }: { children: ReactNode }) {
     } catch (err: any) {
       setIsLoadingState(false);
       logAppwriteError('login', err);
-      const msg = formatErrorDescription(err, null) || 'Invalid credentials. Please try again.';
-      return { success: false, message: msg };
+      return {
+        success: false,
+        message: err?.userMessage || formatErrorDescription(err, null) || 'Invalid credentials. Please try again.',
+      };
     }
   }, [toast, loadFeed, loadSocialGraph, loadConnections, loadStories, loadClusters, loadUserWithdrawals, loadCampaigns, loadChatReadReceipts, loadUnreadSignals, loadConversationMetadata]);
 
@@ -2056,62 +2083,50 @@ export function PostProvider({ children }: { children: ReactNode }) {
     try {
       const vimoreId = data.vimoreId.includes('@') ? data.vimoreId : `${data.vimoreId}@vimore.cfd`;
 
-      // Create account and session server-side — avoids client-SDK platform check
-      // that rejects requests from unregistered domains (general_unauthorized_scope).
-      const registerRes = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: vimoreId, password: data.password, name: data.name }),
-      });
-      const registerData = await registerRes.json();
-      if (!registerRes.ok) {
-        throw new Error(registerData.error || 'Failed to create account.');
-      }
-
-      // Persist the session before treating this browser as signed in.
-      persistAppwriteSession(registerData.secret);
-      const { client: appwriteClient } = await import('@/lib/appwrite');
-      appwriteClient.setSession(registerData.secret);
-
-      // Construct a minimal auth user object from the server response.
-      // We don't call account.get() here — that would fail on unregistered domains.
-      const authUser = {
-        $id: registerData.userId,
-        email: vimoreId,
-        name: data.name,
-        emailVerification: false,
-        $createdAt: new Date().toISOString(),
-      } as any;
+      await account.create(ID.unique(), vimoreId, data.password, data.name);
+      await account.createEmailPasswordSession(vimoreId, data.password);
+      const authUser = await account.get();
 
       const parts = data.name.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/);
       const username = parts.length >= 2 ? `${parts[0]}.${parts[parts.length - 1]}` : parts[0] || 'user';
       const referralCode = `VM${username.toUpperCase().slice(0, 6)}${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
 
-      // Create the user profile document server-side (admin key bypasses collection perms)
-      const { authFetch } = await import('@/lib/auth-fetch');
-      const profileRes = await authFetch('/api/auth/create-profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const newDoc = await databases.createDocument(
+        DATABASE_ID,
+        COL.USERS,
+        authUser.$id,
+        {
           name: data.name,
           username,
           email: vimoreId,
-          phone: data.phone || null,
+          bio: '',
+          category: '',
+          is_verified: false,
+          has_ever_been_verified: false,
+          followers_count: 0,
+          following_count: 0,
+          friends_count: 0,
+          posts_count: 0,
+          gold_balance: 0,
+          diamond_balance: 0,
+          credit_balance: 0,
+          star_balance: 0,
+          role: 'USER',
+          join_date: new Date().toISOString(),
           nationality: data.nationality || '',
-          dob: data.dob || '',
+          date_of_birth: data.dob || '',
           gender: data.gender || '',
-          referralCode,
-        }),
-      });
-      if (!profileRes.ok) {
-        const profileErr = await profileRes.json().catch(() => ({}));
-        throw new Error(profileErr.error || 'Failed to create user profile.');
-      }
-      const profileResult = await profileRes.json();
-      const assignedRole = profileResult.role || 'USER';
-
-      // Fetch the profile doc we just created to build the local user object
-      const newDoc = await databases.getDocument(DATABASE_ID, COL.USERS, authUser.$id);
+          referral_code: referralCode,
+          referral_count: 0,
+          language: 'en',
+          ...(data.phone ? { phone: data.phone.replace(/[\s\-().]/g, '') } : {}),
+        },
+        [
+          Permission.read(Role.any()),
+          Permission.update(Role.user(authUser.$id)),
+          Permission.delete(Role.user(authUser.$id)),
+        ],
+      );
       const user = mapDocToUser(authUser, newDoc);
       setCurrentUserState(user);
 
@@ -2181,18 +2196,14 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     try { await account.deleteSession('current'); } catch { /* ignore */ }
     await clearApiResponseCache();
-    // Clear the server-side persistent session backup even if the Appwrite
-    // client SDK has no in-memory session after an Android WebView restart.
-    try { await fetch('/api/auth/logout', { method: 'POST', cache: 'no-store' }); } catch { /* ignore */ }
     if (typeof window !== 'undefined') {
       try {
         const uid = currentUser?.$id;
         if (uid) localStorage.removeItem(`vimore_unread_signals_${uid}`);
-        localStorage.removeItem('cookieFallback');
       } catch { /* ignore */ }
     }
     offlineCache.clearUser();
-    setIsOffline(false);
+    setIsOffline(typeof navigator !== 'undefined' && !navigator.onLine);
     setCurrentUserState(null);
     setPostsState([]);
     setStoriesState([]);
@@ -2277,7 +2288,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
     setSettingsState(prev => ({ ...prev, ...data }));
   };
 
-  const refreshFeed = useCallback(async () => { await loadFeed(); }, [loadFeed]);
+  const refreshFeed = useCallback(async () => { await loadFeed(true); }, [loadFeed]);
   const refreshStories = useCallback(async () => { if (currentUser) await loadStories(); }, [currentUser, loadStories]);
 
   const refreshAdminData = useCallback(async () => {
@@ -2906,12 +2917,18 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
   const addStory = async (segment: any) => {
     if (!currentUser) return;
+    let storyId: string | undefined;
+    const mediaId: string | undefined = segment.fileId || undefined;
     try {
+      const segmentType = segment.type || 'image';
+      const isTextOnly = !!segment.background || !!segment.textOverlays?.length || !!segment.text;
+      if ((segmentType === 'image' || segmentType === 'video') && !mediaId && !isTextOnly) {
+        throw new Error('Story media upload did not complete.');
+      }
       const expires_at = new Date(Date.now() + 86400000).toISOString();
       const rawMediaUrl = segment.mediaUrl || segment.image || '';
       // Only use explicitly provided fileId (from story media uploads).
       // Do NOT extract from post/other media URLs — those belong to different buckets.
-      const mediaId: string | undefined = segment.fileId || undefined;
 
       const storyDoc = await databases.createDocument(DATABASE_ID, COL.STORIES, ID.unique(), {
         user_id: currentUser.$id,
@@ -2919,6 +2936,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
         views_count: 0,
         story_url: rawMediaUrl || '',
       });
+      storyId = storyDoc.$id;
 
       const segData: Record<string, any> = {
         story_id: storyDoc.$id,
@@ -2943,6 +2961,31 @@ export function PostProvider({ children }: { children: ReactNode }) {
         return [{ $id: storyDoc.$id, user: currentUser, segments: [newSegment], expires_at, viewCount: 0 }, ...prev];
       });
     } catch (err: any) {
+      if (storyId) {
+        try {
+          const partialSegments = await databases.listDocuments(DATABASE_ID, COL.STORY_SEGMENTS, [
+            Query.equal('story_id', storyId),
+            Query.limit(50),
+          ]);
+          await Promise.all(partialSegments.documents.map(seg =>
+            databases.deleteDocument(DATABASE_ID, COL.STORY_SEGMENTS, seg.$id)
+          ));
+        } catch (cleanupError) {
+          logAppwriteError('addStory:cleanupSegments', cleanupError);
+        }
+        try {
+          await databases.deleteDocument(DATABASE_ID, COL.STORIES, storyId);
+        } catch (cleanupError) {
+          logAppwriteError('addStory:cleanupDocument', cleanupError);
+        }
+      }
+      if (mediaId) {
+        try {
+          await storage.deleteFile(BUCKET_STORIES, mediaId);
+        } catch (cleanupError) {
+          logAppwriteError('addStory:cleanupMedia', cleanupError);
+        }
+      }
       logAppwriteError('addStory', err);
       throw err;
     }
@@ -3009,26 +3052,8 @@ export function PostProvider({ children }: { children: ReactNode }) {
   }, [currentUser, followingUsernames, toast]);
 
   const confirmFriendRequest = useCallback(async (username: string) => {
-    if (!currentUser) return;
-
-    // Optimistic UI updates.
-    setFriendUsernamesState(p => new Set(p).add(username));
-    setReceivedRequestUsernamesState(p => { const n = new Set(p); n.delete(username); return n; });
-    setFollowingUsernamesState(prev => new Set(prev).add(username));
-
+    if (!currentUser) return false;
     const senderDoc = allUsers.find(u => u.username === username);
-    if (senderDoc) {
-      setConnectionsState(prev => {
-        if (prev.find(c => c.username === senderDoc.username)) return prev;
-        const newConn: Connection = {
-          ...senderDoc,
-          isGroup: false,
-          lastMessage: '',
-          lastTime: '',
-        };
-        return [...prev, newConn];
-      });
-    }
 
     try {
       const res = await authFetch('/api/friends/action', {
@@ -3040,25 +3065,60 @@ export function PostProvider({ children }: { children: ReactNode }) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data?.error || 'Could not confirm request.');
       }
+      setReceivedRequestUsernamesState(prev => { const next = new Set(prev); next.delete(username); return next; });
+      setFollowingUsernamesState(prev => new Set(prev).add(username));
+      await loadConnections(currentUser.$id, currentUser.username);
+      if (senderDoc) {
+        setConnectionsState(prev => prev.some(connection => connection.username === username)
+          ? prev
+          : [...prev, { ...senderDoc, isGroup: false, friendshipStatus: 'accepted', lastMessage: '', lastTime: '' }]);
+        setFriendUsernamesState(prev => new Set(prev).add(username));
+      }
+      return true;
     } catch (err: any) {
-      // Roll back optimistic membership on failure.
-      setFriendUsernamesState(p => { const n = new Set(p); n.delete(username); return n; });
-      setReceivedRequestUsernamesState(p => new Set(p).add(username));
       logAppwriteError('confirmFriendRequest', err);
       toast({ variant: 'destructive', title: 'Failed to confirm request', description: formatErrorDescription(err, currentUser?.role) });
+      return false;
     }
-  }, [currentUser, allUsers, toast]);
+  }, [currentUser, allUsers, loadConnections, toast]);
+
+  const declineFriendRequest = useCallback(async (username: string) => {
+    if (!currentUser) return false;
+    setReceivedRequestUsernamesState(prev => { const next = new Set(prev); next.delete(username); return next; });
+    setConnectionsState(prev => prev.filter(connection => connection.username !== username));
+
+    try {
+      const response = await authFetch('/api/friends/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'decline', targetUsername: username }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.error || 'Could not decline request.');
+      }
+      return true;
+    } catch (error: any) {
+      setReceivedRequestUsernamesState(prev => new Set(prev).add(username));
+      logAppwriteError('declineFriendRequest', error);
+      toast({ variant: 'destructive', title: 'Could not decline request', description: error?.message || 'Please try again.' });
+      return false;
+    }
+  }, [currentUser, toast]);
 
   const cancelFriendRequest = useCallback(async (username: string) => {
-    if (!currentUser) return;
+    if (!currentUser) return false;
     const prevFollowing = currentUser.following as number || 0;
     const wasFollowing = followingUsernames.has(username);
-    const targetDoc: any = allUsers.find(u => u.username === username) || null;
+    const targetDoc: any = allUsers.find(u => u.username === username)
+      || connections.find(connection => connection.username === username)
+      || null;
 
     // Optimistic UI updates.
     setSentRequestUsernamesState(p => { const n = new Set(p); n.delete(username); return n; });
     setFollowingUsernamesState(prev => { const n = new Set(prev); n.delete(username); return n; });
     if (targetDoc) setFollowingUserIdsState(prev => { const n = new Set(prev); n.delete(targetDoc.$id); return n; });
+    setConnectionsState(prev => prev.filter(connection => connection.username !== username));
     const newFollowing = Math.max(0, prevFollowing - 1);
     setCurrentUserState(prev => prev ? { ...prev, following: newFollowing } : null);
 
@@ -3072,26 +3132,31 @@ export function PostProvider({ children }: { children: ReactNode }) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data?.error || 'Could not cancel request.');
       }
+      return true;
     } catch (err) {
       // Roll back optimistic state on failure.
       setSentRequestUsernamesState(p => new Set(p).add(username));
       if (wasFollowing) setFollowingUsernamesState(prev => new Set(prev).add(username));
       setCurrentUserState(prev => prev ? { ...prev, following: prevFollowing } : null);
       logAppwriteError('cancelFriendRequest', err);
+      toast({ variant: 'destructive', title: 'Could not cancel request', description: err instanceof Error ? err.message : 'Please try again.' });
+      return false;
     }
-  }, [currentUser, allUsers, followingUsernames]);
+  }, [currentUser, allUsers, connections, followingUsernames, toast]);
 
   const unfriendUser = useCallback(async (username: string) => {
     if (!currentUser) return;
     const prevFollowing = currentUser.following as number || 0;
     const prevFollowers = currentUser.followers as number || 0;
     const wasFollowing = followingUsernames.has(username);
-    const targetUser = allUsers.find(u => u.username === username);
+    const targetUser = allUsers.find(u => u.username === username)
+      || connections.find(connection => connection.username === username);
 
     // Optimistic UI updates.
     setFriendUsernamesState(p => { const n = new Set(p); n.delete(username); return n; });
     setFollowingUsernamesState(prev => { const n = new Set(prev); n.delete(username); return n; });
     if (targetUser) setFollowingUserIdsState(prev => { const n = new Set(prev); n.delete(targetUser.$id); return n; });
+    setConnectionsState(prev => prev.filter(connection => connection.username !== username));
     const newFollowing = Math.max(0, prevFollowing - 1);
     const newFollowers = Math.max(0, prevFollowers - 1);
     setCurrentUserState(prev => prev ? { ...prev, following: newFollowing, followers: newFollowers } : null);
@@ -3111,14 +3176,23 @@ export function PostProvider({ children }: { children: ReactNode }) {
       // Roll back optimistic state on failure.
       setFriendUsernamesState(p => new Set(p).add(username));
       if (wasFollowing) setFollowingUsernamesState(prev => new Set(prev).add(username));
+      if (targetUser) {
+        setConnectionsState(prev => prev.some(connection => connection.username === username)
+          ? prev
+          : [...prev, { ...targetUser, isGroup: false, friendshipStatus: 'accepted' }]);
+      }
       setCurrentUserState(prev => prev ? { ...prev, following: prevFollowing, followers: prevFollowers } : null);
       logAppwriteError('unfriendUser', err);
       toast({ variant: "destructive", title: "Unfriend failed" });
     }
-  }, [currentUser, allUsers, followingUsernames, toast]);
+  }, [currentUser, allUsers, connections, followingUsernames, toast]);
 
   const sendChatMessage = useCallback(async (recipientId: string, message: Partial<ChatMessage>) => {
     if (!currentUser) return;
+    const isClusterMsg = clusters.some(cl => cl.$id === recipientId);
+    if (!isClusterMsg && !friendUsernames.has(recipientId)) {
+      throw new Error('You can only message an accepted friend.');
+    }
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const optimistic: ChatMessage = {
       $id: 'msg_' + Date.now(),
@@ -3142,7 +3216,6 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
     let pushSourceId: string | undefined;
     try {
-      const isClusterMsg = clusters.some(cl => cl.$id === recipientId);
       const clusterId = isClusterMsg ? recipientId : [currentUser.username, recipientId].sort().join('_');
       const docData: Record<string, any> = {
         cluster_id: clusterId,
@@ -3250,7 +3323,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       toast({ variant: 'destructive', title: 'Message Failed', description: err?.message || 'Could not deliver your message. Please try again.' });
       throw err;
     }
-  }, [currentUser, toast, clusters, connections]);
+  }, [currentUser, toast, clusters, connections, friendUsernames]);
 
   const markChatMessageViewed = useCallback(async (messageId: string, chatId: string) => {
     if (!currentUser || !messageId || !chatId) return;
@@ -3277,49 +3350,6 @@ export function PostProvider({ children }: { children: ReactNode }) {
       logAppwriteError('markChatMessageViewed', err);
     }
   }, [currentUser, logAppwriteError]);
-
-  const sendMessageRequest = useCallback(async (targetUserId: string, targetUser: User, text: string) => {
-    if (!currentUser || !text.trim()) return;
-    await sendChatMessage(targetUserId, { text: text.trim() });
-    // Inject target into local connections so sender sees the chat immediately
-    setConnectionsState(prev => {
-      if (prev.find(c => c.username === targetUser.username)) return prev;
-      const tempConn: Connection = {
-        ...targetUser,
-        isGroup: false,
-        lastMessage: text.trim(),
-        lastTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-      return [tempConn, ...prev];
-    });
-    // Notify the recipient about the message request
-    try {
-      await databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
-        user_id: targetUserId,
-        from_user_id: currentUser.$id,
-        from_user_name: currentUser.name || currentUser.username,
-        from_user_avatar: currentUser.avatar || '',
-        type: 'MESSAGE',
-        message: `${currentUser.name} (@${currentUser.username}) sent you a message: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`,
-        is_read: false,
-      });
-    } catch { /* ignore notification failure */ }
-  }, [currentUser, sendChatMessage]);
-
-  const unlockPost = useCallback(async (postId: string, _ignoredCost: number) => {
-    if (!currentUser) return;
-    const res = await authFetch('/api/monetization/unlock-post', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ postId }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data?.error || 'Unlock failed');
-    }
-    window.location.href = data.dialerUri;
-    toast({ title: "Orange Money payment started", description: `Pay ${data.amountLD} LD to unlock this post.` });
-  }, [currentUser, toast]);
 
   const subscribeToCreator = useCallback(async (username: string, _ignoredCost: number) => {
     if (!currentUser) return;
@@ -3363,30 +3393,6 @@ export function PostProvider({ children }: { children: ReactNode }) {
     } catch { /* ignore */ }
     toast({ title: "Subscription cancelled" });
   }, [currentUser, allUsers, toast]);
-
-  const processGiftTransaction = useCallback(async (cost: number, _currency: 'GOLD' | 'DIAMOND' = 'DIAMOND') => {
-    if (!currentUser) throw new Error("Not logged in");
-    if (!targetUserForGift) throw new Error("No recipient selected");
-
-    // Optimistic balance deduction for snappy UI
-    setCurrentUserState(prev => prev ? { ...prev, diamondBalance: (prev.diamondBalance || 0) - cost } : null);
-
-    const res = await authFetch('/api/transaction/gift', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipientId: targetUserForGift.$id, amount: cost }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      // Rollback optimistic deduction
-      setCurrentUserState(prev => prev ? { ...prev, diamondBalance: (prev.diamondBalance || 0) + cost } : null);
-      throw new Error(data?.error || 'Gift failed');
-    }
-    if (typeof data.senderNewBalance === 'number') {
-      setCurrentUserState(prev => prev ? { ...prev, diamondBalance: data.senderNewBalance } : null);
-    }
-    toast({ title: "Gift sent!", description: `${data.creatorShare ?? ''} Credits sent to creator · ${data.platformFee ?? ''} Credits platform fee` });
-  }, [currentUser, targetUserForGift, toast]);
 
   const verifyUser = useCallback(async (cost: number, currency: 'DIAMOND' | 'STAR') => {
     if (!currentUser) return;
@@ -3628,8 +3634,9 @@ export function PostProvider({ children }: { children: ReactNode }) {
       } else {
         screenshotFileId = extractFileId(screenshotUrl) || screenshotUrl;
       }
-    } catch {
-      screenshotFileId = 'upload_failed';
+    } catch (error) {
+      logAppwriteError('createPaymentRequest.uploadScreenshot', error);
+      throw error;
     }
 
     const req: Record<string, any> = {
@@ -4170,6 +4177,12 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
   const applyPostCountUpdate = useCallback((postId: string, update: { likes?: number; unlikes?: number; comments?: number; shares?: number }) => {
     setPostCountOverrides(prev => ({ ...prev, [postId]: { ...(prev[postId] || {}), ...update } }));
+    setPostsState(previous => {
+      const next = previous.map(post => post.$id === postId ? { ...post, ...update } : post);
+      saveFeedCache(next);
+      offlineCache.savePosts(next);
+      return next;
+    });
   }, []);
 
   const addStreamedComment = useCallback((comment: PostComment) => {
@@ -4179,10 +4192,10 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const clearStreamedComments = useCallback(() => setStreamedComments([]), []);
 
   const value: PostContextType = {
-    currentUser, isAuthenticated: !!currentUser, posts, hasMoreFeed, isFeedLoading, loadMoreFeed, appendRealtimePost, activeComments, isLoading, initError, isOffline,
+    currentUser, isAuthenticated: !!currentUser, posts, hasMoreFeed, isFeedLoading, hasLoadedFeed, feedRefreshStatus, loadMoreFeed, appendRealtimePost, activeComments, isLoading, initError, isOffline,
     likedPostIds, unlikedPostIds, savedPostIds, unlockedPostIds, seenPostIds, viewedPostIds,
     followingUsernames, followingUserIds, followerUsernames, friendUsernames, sentRequestUsernames,
-    receivedRequestUsernames, acceptedStrangerUsernames,
+    receivedRequestUsernames,
     postCountOverrides, applyPostCountUpdate,
     streamedComments, addStreamedComment, clearStreamedComments,
     activeStoryIndex, selectedChatId, selectedPostId, selectedImageUrl, selectedVideoUrl,
@@ -4319,8 +4332,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
     isRequestReceived: (u: string) => receivedRequestUsernames.has(u),
     isSubscribed: (u: string) => activeSubscriptions.has(u),
     sendFriendRequest, confirmFriendRequest, cancelFriendRequest, unfriendUser,
-    acceptMessageRequest: async () => {},
-    declineMessageRequest: async () => {},
+    declineFriendRequest,
     addComment, addReply, addStory, deleteStory,
     voteOnStoryPoll: async () => {},
     voteOnPostPoll: async (postId: string, optionIndex: number) => {
@@ -4368,7 +4380,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
     cancelTransaction: () => setPendingTransactionState(null),
     createPaymentRequest, approvePaymentRequest, rejectPaymentRequest,
     recordWithdrawal, processWithdrawal,
-    verifyUser, processGiftTransaction, unlockPost, subscribeToCreator, cancelSubscription,
+    verifyUser, subscribeToCreator, cancelSubscription,
     incrementShareCount: async (id: string) => {
       setPostsState(prev => prev.map(p => p.$id === id ? { ...p, shares: p.shares + 1 } : p));
       try {
@@ -4449,7 +4461,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
     recordView, recordStoryView,
     updateUserIdentity,
     handleReportAction, handleTicketAction, replyToTicket,
-    sendChatMessage, sendMessageRequest,
+    sendChatMessage,
     fetchAllUsersForDiscovery, allUsers, refreshAllUsers, banUser, suspendUser, warnUser, sendAdminBroadcast, broadcastHistory,
     addIncomingMessage: (clusterId: string, message: ChatMessage, preview: string, timeStr: string) => {
       // For DMs, chatMessages is keyed by the other user's username (matching loadChatMessages).

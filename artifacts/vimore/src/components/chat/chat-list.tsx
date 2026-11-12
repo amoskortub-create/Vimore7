@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { saveCache, OFFLINE_KEYS } from "@/lib/offline-cache";
+import { loadCache, saveCache, OFFLINE_KEYS } from "@/lib/offline-cache";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { OnlineIndicator } from "@/components/ui/online-indicator";
 import {
@@ -32,11 +32,12 @@ interface ChatListProps {
 
 export function ChatList({ selectedId, onSelect }: ChatListProps) {
   const { tier } = useNetwork();
-  const { connections = [], clusters = [], triggerHaptic, settings, currentUser, friendUsernames, acceptedStrangerUsernames, chatMessages, markChatMessagesRead, chatLastMessageAt, chatLastIncomingAt, chatReadReceipts, chatUnreadCounts, onlineUserIds } = usePosts();
+  const { connections = [], clusters = [], triggerHaptic, settings, currentUser, friendUsernames, chatMessages, markChatMessagesRead, chatLastMessageAt, chatLastIncomingAt, chatReadReceipts, chatUnreadCounts, onlineUserIds } = usePosts();
   const { categoryPulses, clearPulse, messagePreviews } = useNotifications();
   const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<"all" | "unread" | "clusters">("all");
+  const [cachedChats] = useState<any[]>(() => loadCache<any>(OFFLINE_KEYS.MESSAGES_CONTACTS));
 
   const [pinnedUsernames] = useState(new Set<string>());
 
@@ -45,11 +46,20 @@ export function ChatList({ selectedId, onSelect }: ChatListProps) {
 
     const allItems = [
       ...(connections || [])
-        .filter(c => c && c.username && c.username !== currentUser.username)
+        .filter(c => c && c.username && c.username !== currentUser.username && c.friendshipStatus === 'accepted' && friendUsernames.has(c.username))
         .map(c => ({ ...c, isGroup: false })),
       ...(clusters || [])
         .filter(cl => cl.members && cl.members.some((m: any) => m.username === currentUser.username))
-        .map(cl => ({ ...cl, isGroup: true }))
+        .map(cl => ({ ...cl, isGroup: true })),
+      ...cachedChats
+        .filter((chat: any) => chat?.$id && (
+          chat.isGroup || (chat.username && chat.friendshipStatus === 'accepted')
+        ))
+        .map((chat: any) => ({
+          ...chat,
+          isCachedConversation: true,
+          members: chat.isGroup ? [{ username: currentUser.username }] : undefined,
+        })),
     ];
 
     const seen = new Set<string>();
@@ -102,7 +112,7 @@ export function ChatList({ selectedId, onSelect }: ChatListProps) {
     });
 
     return { sortedChats: sorted, requestCount: 0 };
-  }, [connections, clusters, searchQuery, activeFilter, pinnedUsernames, currentUser, friendUsernames, acceptedStrangerUsernames, chatMessages, chatLastMessageAt, chatLastIncomingAt, chatReadReceipts]);
+  }, [connections, clusters, cachedChats, searchQuery, activeFilter, pinnedUsernames, currentUser, friendUsernames, chatMessages, chatLastMessageAt, chatLastIncomingAt, chatReadReceipts]);
 
   // Persist the sorted conversation list to localStorage for offline access
   useEffect(() => {
@@ -113,6 +123,7 @@ export function ChatList({ selectedId, onSelect }: ChatListProps) {
       name: c.name,
       avatar: c.avatar,
       isGroup: c.isGroup || false,
+      friendshipStatus: c.isGroup ? undefined : c.friendshipStatus,
       isOnline: c.isOnline || false,
       isVerified: c.isVerified || false,
     }));

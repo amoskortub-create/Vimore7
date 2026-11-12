@@ -29,6 +29,7 @@ import { useMusic } from "@/context/MusicContext";
 import { useNetwork } from "@/context/NetworkContext";
 import { getAdaptivePreview, adaptiveDebounceMs } from "@/lib/adaptive-media";
 import { cn } from "@/lib/utils";
+import { isCacheFresh, loadKeyValue, saveKeyValue, OFFLINE_KEYS } from "@/lib/offline-cache";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 
@@ -73,16 +74,42 @@ export function SearchPortal() {
   // Live user search with adaptive debounce (Lite=600ms, Standard=350ms, Rich=200ms)
   useEffect(() => {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    if (!query.trim()) { setLiveUsers([]); return; }
-    setIsSearchingUsers(true);
+    if (!query.trim()) {
+      setLiveUsers([]);
+      setIsSearchingUsers(false);
+      return;
+    }
+    const cacheKey = `${OFFLINE_KEYS.SEARCH}_${encodeURIComponent(query.trim().toLowerCase())}`;
+    const cachedUsers = loadKeyValue<any[]>(cacheKey);
+    setLiveUsers(cachedUsers || []);
+    if (isCacheFresh(cacheKey)) {
+      setIsSearchingUsers(false);
+      return;
+    }
+    setIsSearchingUsers(!cachedUsers);
+    let requestTimeout: ReturnType<typeof setTimeout> | undefined;
     searchTimerRef.current = setTimeout(async () => {
       try {
-        const results = await searchAllUsers(query);
+        const results = await Promise.race([
+          searchAllUsers(query),
+          new Promise<never>((_, reject) => {
+            requestTimeout = setTimeout(() => reject(new Error('Search timed out after 5 seconds')), 5000);
+          }),
+        ]);
         setLiveUsers(results);
-      } catch { setLiveUsers([]); }
-      finally { setIsSearchingUsers(false); }
+        saveKeyValue(cacheKey, results);
+      } catch {
+        if (!cachedUsers) setLiveUsers([]);
+      }
+      finally {
+        if (requestTimeout) clearTimeout(requestTimeout);
+        setIsSearchingUsers(false);
+      }
     }, adaptiveDebounceMs(tier));
-    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+      if (requestTimeout) clearTimeout(requestTimeout);
+    };
   }, [query, searchAllUsers, tier]);
 
   const saveSearch = (term: string) => {

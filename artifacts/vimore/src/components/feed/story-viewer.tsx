@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { DiagnosticErrorBoundary } from "../layout/diagnostic-error-boundary";
+import { useToast } from "@/hooks/use-toast";
 
 const STORY_DURATION = 5000; // 5 seconds per segment
 const AD_DURATION = 30000; // 30 seconds for ads
@@ -32,6 +33,7 @@ interface FloatingReaction {
 
 export function StoryViewer() {
   const { stories, activeStoryIndex, mutedUserNames = [], setActiveStoryIndex, voteOnStoryPoll, toggleMuteUser, currentUser, settings, recordStoryView, campaigns, sendChatMessage, recordCampaignImpression, recordCampaignClick, deleteStory } = usePosts();
+  const { toast } = useToast();
   const { tier } = useNetwork();
   const [segmentIndex, setSegmentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
@@ -43,7 +45,11 @@ export function StoryViewer() {
   // AD Logic State
   const [isAdActive, setIsAdActive] = useState(false);
   const [storiesSeenInSession, setStoriesSeenInSession] = useState(0);
-  const [isVideoMuted, setIsVideoMuted] = useState(false);
+  const [isVideoMuted, setIsVideoMuted] = useState(true);
+  const [readyMediaKey, setReadyMediaKey] = useState<string | null>(null);
+  const [playingMediaKey, setPlayingMediaKey] = useState<string | null>(null);
+  const [failedMediaKey, setFailedMediaKey] = useState<string | null>(null);
+  const [mediaAttempt, setMediaAttempt] = useState(0);
   const [isAdMuted, setIsAdMuted] = useState(false);
   const [adProgress, setAdProgress] = useState(0);
   
@@ -65,6 +71,19 @@ export function StoryViewer() {
 
   const activeStory = activeStoryIndex !== null ? stories[activeStoryIndex] : null;
   const isOwner = activeStory?.user.username === currentUser?.username;
+  const currentSegment = activeStory?.segments[segmentIndex];
+  const mediaSource = currentSegment
+    ? (currentSegment.mediaUrl || (currentSegment as any).image || '')
+    : '';
+  const segmentType = currentSegment?.type
+    || (/\.(mp4|mov|webm|m4v)(?:[?#]|$)/i.test(mediaSource) ? 'video' : 'image');
+  const hasTextContent = !!currentSegment
+    && (!!currentSegment.background || !!currentSegment.text || !!currentSegment.textOverlays?.length);
+  const requiresMedia = !!currentSegment
+    && (segmentType === 'video' || !!mediaSource || (segmentType === 'image' && !hasTextContent));
+  const currentMediaKey = `${activeStory?.$id || ''}:${currentSegment?.$id || segmentIndex}:${mediaAttempt}`;
+  const isMediaLoaded = !requiresMedia || readyMediaKey === currentMediaKey;
+  const isMediaFailed = requiresMedia && (!mediaSource || failedMediaKey === currentMediaKey);
 
   const handleClose = useCallback(() => {
     setActiveStoryIndex(null);
@@ -163,11 +182,17 @@ export function StoryViewer() {
   }, [isAdActive, closeAd]);
 
   useEffect(() => {
-    if (activeStory && !isOwner && hasRecordedCurrentSegment.current !== activeStory.$id) {
+    if (activeStory && isMediaLoaded && !isMediaFailed && !isOwner && hasRecordedCurrentSegment.current !== activeStory.$id) {
       recordStoryView(activeStory.$id);
       hasRecordedCurrentSegment.current = activeStory.$id;
     }
-  }, [activeStory, isOwner, recordStoryView]);
+  }, [activeStory, isMediaLoaded, isMediaFailed, isOwner, recordStoryView]);
+
+  useEffect(() => {
+    if (!activeStory || !currentSegment || !requiresMedia || isMediaLoaded || isMediaFailed) return;
+    const timeout = window.setTimeout(() => setFailedMediaKey(currentMediaKey), 5000);
+    return () => window.clearTimeout(timeout);
+  }, [activeStory, currentSegment, currentMediaKey, requiresMedia, isMediaLoaded, isMediaFailed]);
 
   useEffect(() => {
     if (isAdActive && currentStoryCampaign && trackedAdImpressionRef.current !== currentStoryCampaign.$id) {
@@ -181,6 +206,7 @@ export function StoryViewer() {
 
   useEffect(() => {
     if (activeStoryIndex === null || isAdActive) return;
+    if (requiresMedia && (!isMediaLoaded || isMediaFailed || (segmentType === 'video' && playingMediaKey !== currentMediaKey))) return;
 
     if (isPaused) {
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
@@ -208,7 +234,7 @@ export function StoryViewer() {
     return () => {
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
-  }, [activeStoryIndex, segmentIndex, isPaused, nextSegment, isAdActive, progress]);
+  }, [activeStoryIndex, segmentIndex, isPaused, nextSegment, isAdActive, progress, requiresMedia, isMediaLoaded, isMediaFailed, segmentType, playingMediaKey, currentMediaKey]);
 
   const handleTap = (e: React.MouseEvent | React.TouchEvent) => {
     if (isPaused || isAdActive) return;
@@ -253,8 +279,6 @@ export function StoryViewer() {
       await sendChatMessage(activeStory.user.$id, { text, type: 'text' });
     } catch { /* ignore */ }
   };
-
-  const currentSegment = activeStory?.segments[segmentIndex];
 
   const handlePollVote = (e: React.MouseEvent, optionIndex: number) => {
     e.stopPropagation();
@@ -479,16 +503,26 @@ export function StoryViewer() {
               onClick={handleTap}
             >
               <>
-                  {currentSegment.type === 'video' ? (
+                  {segmentType === 'video' && mediaSource ? (
                     <>
                       <video
-                        src={(currentSegment as any).mediaUrl || (currentSegment as any).image}
-                        preload={tier === 'lite' ? 'none' : 'metadata'}
+                        key={currentMediaKey}
+                        src={mediaSource}
+                        preload="auto"
                         className="w-full h-full object-cover"
                         autoPlay
                         muted={isVideoMuted}
                         loop
                         playsInline
+                        controls
+                        onCanPlay={() => setReadyMediaKey(currentMediaKey)}
+                        onPlaying={() => {
+                          setReadyMediaKey(currentMediaKey);
+                          setPlayingMediaKey(currentMediaKey);
+                        }}
+                        onPause={() => setPlayingMediaKey(key => key === currentMediaKey ? null : key)}
+                        onEnded={() => setPlayingMediaKey(key => key === currentMediaKey ? null : key)}
+                        onError={() => setFailedMediaKey(currentMediaKey)}
                       />
                       <button
                         className="absolute bottom-24 right-4 z-30 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white"
@@ -497,16 +531,67 @@ export function StoryViewer() {
                         {isVideoMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
                       </button>
                     </>
-                  ) : ((currentSegment as any).mediaUrl || (currentSegment as any).image) ? (
+                  ) : mediaSource && segmentType !== 'video' ? (
                     <Image 
-                      src={getAdaptivePreview((currentSegment as any).mediaUrl || (currentSegment as any).image, 'story', tier) || (currentSegment as any).mediaUrl || (currentSegment as any).image} 
+                      key={currentMediaKey}
+                      src={getAdaptivePreview(mediaSource, 'story', tier) || mediaSource}
                       alt="Story Content" 
                       fill 
                       className={cn("object-cover", (currentSegment as any).filter)}
                       priority
+                      onLoad={() => setReadyMediaKey(currentMediaKey)}
+                      onError={() => setFailedMediaKey(currentMediaKey)}
                     />
                   ) : null}
                 </>
+
+              {requiresMedia && !isMediaLoaded && !isMediaFailed && (
+                <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/35">
+                  <Loader2 className="h-8 w-8 animate-spin text-white" aria-label="Loading story media" />
+                </div>
+              )}
+              {isMediaFailed && (
+                <div className="absolute inset-0 z-[55] flex flex-col items-center justify-center gap-3 bg-black/85 px-8 text-center text-white">
+                  <p className="text-sm font-bold">
+                    {!mediaSource
+                      ? "This story failed to upload."
+                      : "Could not load story media. Tap to retry."}
+                  </p>
+                  {mediaSource && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setFailedMediaKey(null);
+                        setReadyMediaKey(null);
+                        setPlayingMediaKey(null);
+                        setMediaAttempt(attempt => attempt + 1);
+                      }}
+                    >
+                      Retry
+                    </Button>
+                  )}
+                  {isOwner && (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={async (event) => {
+                        event.stopPropagation();
+                        try {
+                          await deleteStory(activeStory.$id);
+                          handleClose();
+                        } catch (error) {
+                          toast({ variant: "destructive", title: "Could not delete story", description: error instanceof Error ? error.message : "Please try again." });
+                        }
+                      }}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete Story
+                    </Button>
+                  )}
+                </div>
+              )}
 
               {currentSegment.textOverlays?.map((overlay: any, i: number) => (
                 <div 

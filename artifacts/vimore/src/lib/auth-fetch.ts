@@ -79,7 +79,7 @@ export async function authFetch(
 
   const requestUrl = typeof window !== 'undefined' ? new URL(url, window.location.origin) : null;
   const bypassPaths = [
-    '/api/auth/', '/api/presence', '/api/notifications', '/api/messages',
+    '/api/presence', '/api/notifications', '/api/messages',
     '/api/calls', '/api/admin/', '/api/payment/', '/api/withdraw',
     '/api/monetization/', '/api/push/', '/api/user/activity',
   ];
@@ -104,8 +104,6 @@ export async function authFetch(
     if (typeof window !== 'undefined' && requestUrl?.origin === window.location.origin) {
       if (response.status === 401) {
         redirectToLoginOnce();
-      } else if (response.ok && requestUrl.pathname === '/api/auth/me') {
-        clearAuthRedirectState();
       }
     }
 

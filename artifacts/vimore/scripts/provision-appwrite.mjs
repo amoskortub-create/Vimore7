@@ -5,13 +5,22 @@
  * Usage: node scripts/provision-appwrite.mjs
  */
 
-import { Client, Databases, Storage, ID } from 'node-appwrite';
+import { Client, Databases, Storage, ID, Permission, Role } from 'node-appwrite';
 import 'dotenv/config';
 
 const ENDPOINT = process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || 'https://appwrite.mediatechliberia.online/v1';
 const PROJECT_ID = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || 'vimore123';
 const API_KEY = process.env.APPWRITE_API_KEY || '';
 const DATABASE_ID = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID || 'vimoreprod';
+const CLIENT_UPLOAD_BUCKETS = new Set([
+  'post_media',
+  'reel_media',
+  'story_media',
+  'music_tracks',
+  'album_covers',
+  'Marketplace_Images',
+]);
+const MEDIA_FILE_EXTENSIONS = ['jpg','jpeg','png','webp','gif','mp4','mov','webm','mp3','m4a','ogg','wav','pdf','heic'];
 
 if (!API_KEY) { console.error('❌  APPWRITE_API_KEY is not set'); process.exit(1); }
 
@@ -104,12 +113,39 @@ async function createIndex(collectionId, key, type, attributes, orders) {
 }
 
 async function ensureBucket(bucketId, name) {
+  const permissions = CLIENT_UPLOAD_BUCKETS.has(bucketId) ? [Permission.create(Role.users())] : undefined;
+
   try {
-    await storage.createBucket(bucketId, name, undefined, undefined, true, undefined, ['jpg','jpeg','png','webp','gif','mp4','mp3','ogg','wav','pdf','heic']);
+    await storage.createBucket(bucketId, name, permissions, undefined, true, undefined, MEDIA_FILE_EXTENSIONS);
     console.log(`  ✅  Bucket: ${bucketId}`);
   } catch (e) {
-    if (e?.code === 409) console.log(`  ℹ️   Bucket exists: ${bucketId}`);
-    else console.error(`  ❌  Bucket ${bucketId}:`, e?.message);
+    if (e?.code !== 409) {
+      console.error(`  ❌  Bucket ${bucketId}:`, e?.message);
+      return;
+    }
+
+    console.log(`  ℹ️   Bucket exists: ${bucketId}`);
+    if (!permissions) return;
+
+    const bucket = await storage.getBucket(bucketId);
+    const nextPermissions = [...new Set([...bucket.$permissions, ...permissions])];
+    const nextExtensions = [...new Set([...bucket.allowedFileExtensions, ...MEDIA_FILE_EXTENSIONS])];
+    if (
+      nextPermissions.length === bucket.$permissions.length
+      && nextExtensions.length === bucket.allowedFileExtensions.length
+    ) return;
+    await storage.updateBucket(
+      bucketId,
+      bucket.name,
+      nextPermissions,
+      bucket.fileSecurity,
+      bucket.enabled,
+      bucket.maximumFileSize,
+      nextExtensions,
+      bucket.compression,
+      bucket.encryption,
+      bucket.antivirus,
+    );
   }
 }
 

@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
 import { getSessionUser } from '@/lib/session';
 import { rateLimit } from '@/lib/rate-limit';
-import { ID } from 'node-appwrite';
+import { ID, Query } from 'node-appwrite';
 
 export const maxDuration = 20;
 
 const MESSAGES_COLLECTION = 'messages';
 const USERS_COLLECTION = 'users';
+const FRIEND_REQUESTS_COLLECTION = 'friend_requests';
 
 /**
  * Send a chat message.
@@ -63,15 +64,33 @@ export async function POST(req: NextRequest) {
     }
 
     const db = getAdminDatabases();
+    const [sender, receiver, sentRequests, receivedRequests] = await Promise.all([
+      db.getDocument(DATABASE_ID, USERS_COLLECTION, session.userId),
+      db.getDocument(DATABASE_ID, USERS_COLLECTION, receiverId),
+      db.listDocuments(DATABASE_ID, FRIEND_REQUESTS_COLLECTION, [
+        Query.equal('from_user_id', session.userId),
+        Query.equal('to_user_id', receiverId),
+        Query.equal('status', 'ACCEPTED'),
+        Query.limit(1),
+      ]),
+      db.listDocuments(DATABASE_ID, FRIEND_REQUESTS_COLLECTION, [
+        Query.equal('from_user_id', receiverId),
+        Query.equal('to_user_id', session.userId),
+        Query.equal('status', 'ACCEPTED'),
+        Query.limit(1),
+      ]),
+    ]);
+    if (sentRequests.documents.length === 0 && receivedRequests.documents.length === 0) {
+      return NextResponse.json({ error: 'You can only message an accepted friend.' }, { status: 403 });
+    }
+    const expectedClusterId = [sender.username, receiver.username].sort().join('_');
+    if (clusterId !== expectedClusterId) {
+      return NextResponse.json({ error: 'Conversation does not match the accepted friendship.' }, { status: 403 });
+    }
 
     // Look up sender's display info from DB — not from the request body
-    let senderName = '';
-    let senderAvatar = '';
-    try {
-      const sender: any = await db.getDocument(DATABASE_ID, USERS_COLLECTION, session.userId);
-      senderName = sender?.name || sender?.username || '';
-      senderAvatar = sender?.avatar || sender?.avatar_id || '';
-    } catch { /* best-effort */ }
+    const senderName = sender?.name || sender?.username || '';
+    const senderAvatar = sender?.avatar || sender?.avatar_id || '';
 
     const messageData: Record<string, unknown> = {
       cluster_id: clusterId,

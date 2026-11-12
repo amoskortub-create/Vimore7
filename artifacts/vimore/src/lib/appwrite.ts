@@ -32,6 +32,8 @@ export const COL = {
   NOTIFICATIONS: 'notifications',
   TRANSACTIONS: 'transactions',
   CREATOR_ORANGE_MONEY_ACCOUNTS: 'creator_orange_money_accounts',
+  LOCKED_POST_PAYMENTS: 'lockedPostPayments',
+  GIFTS: 'gifts',
   CREATOR_EARNINGS: 'creator_earnings',
   LOCKED_CONTENT: 'locked_content',
   GIFT_ITEMS: 'gift_items',

@@ -90,6 +90,7 @@ import {
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { client, databases, DATABASE_ID, COL, BUCKET_IMAGES, BUCKET, Query, getFileUrl } from "@/lib/appwrite";
+import { getCreatorOrangeMoneyNumber, saveCreatorOrangeMoneyNumber } from "@/lib/orange-money-payments";
 import ProfileLoading from "./loading";
 
 const NATIONALITIES = [
@@ -132,7 +133,8 @@ export default function MyProfilePage() {
     bio: "",
     dateOfBirth: "",
     nationality: "Liberian",
-    gender: 'Male' as 'Male' | 'Female'
+    gender: 'Male' as 'Male' | 'Female',
+    orangeMoneyNumber: "",
   });
 
   const [ownProfilePosts, setOwnProfilePosts] = useState<Post[]>([]);
@@ -203,8 +205,12 @@ export default function MyProfilePage() {
         bio: currentUser.bio || "",
         dateOfBirth: currentUser.dateOfBirth || "",
         nationality: currentUser.nationality || "Liberian",
-        gender: currentUser.gender || 'Male'
+        gender: currentUser.gender || 'Male',
+        orangeMoneyNumber: "",
       });
+      getCreatorOrangeMoneyNumber(currentUser.$id)
+        .then(number => setEditData(prev => ({ ...prev, orangeMoneyNumber: number || "" })))
+        .catch(() => {});
     }
   }, [currentUser]);
 
@@ -325,7 +331,11 @@ export default function MyProfilePage() {
     setIsSavingProfile(true);
     triggerHaptic(25);
     try {
-      await updateCurrentUser(editData);
+      if (editData.orangeMoneyNumber.trim()) {
+        await saveCreatorOrangeMoneyNumber(currentUser.$id, editData.name || currentUser.name, editData.orangeMoneyNumber);
+      }
+      const { orangeMoneyNumber: _orangeMoneyNumber, ...profileData } = editData;
+      await updateCurrentUser(profileData);
       setIsEditModalOpen(false);
       toast({ title: "Identity Re-calibrated" });
     } catch (e: any) {
@@ -753,6 +763,17 @@ export default function MyProfilePage() {
                 </div>
                 <div className="space-y-2"><Label className="text-[10px] font-black uppercase text-muted-foreground ml-1">Role Node</Label><Select value={editData.category} onValueChange={(val) => setEditData({ ...editData, category: val })}><SelectTrigger className="h-12 rounded-xl bg-secondary/20 border-none px-4 font-bold"><SelectValue /></SelectTrigger><SelectContent className="rounded-xl">{["Digital Creator", "Product Architect", "Visual Storyteller", "Fullstack Developer", "Sonic Producer"].map(cat => <SelectItem key={cat} value={cat} className="font-bold">{cat}</SelectItem>)}</SelectContent></Select></div>
                 <div className="space-y-2"><Label className="text-[10px] font-black uppercase text-muted-foreground ml-1">Bio</Label><Textarea value={editData.bio} onChange={(e) => setEditData({ ...editData, bio: e.target.value })} className="rounded-xl bg-secondary/20 border-none min-h-[100px] resize-none" /></div>
+                <div className="space-y-2">
+                  <Label className="text-[10px] font-black uppercase text-muted-foreground ml-1">Orange Money Number (for Locked Posts &amp; Gifts)</Label>
+                  <Input
+                    inputMode="tel"
+                    placeholder="077XXXXXXX or 088XXXXXXX"
+                    value={editData.orangeMoneyNumber}
+                    onChange={(e) => setEditData({ ...editData, orangeMoneyNumber: e.target.value })}
+                    className="rounded-xl bg-secondary/20 border-none h-12"
+                  />
+                  <p className="text-[10px] text-muted-foreground">Only shown to buyers during payment. Required to sell locked posts and receive gifts.</p>
+                </div>
               </div>
             </div>
           </ScrollArea>

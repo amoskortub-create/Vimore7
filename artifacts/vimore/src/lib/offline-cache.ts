@@ -59,8 +59,10 @@ export const offlineCache = {
 
 export const OFFLINE_KEYS = {
   // Feeds
-  REELS:                'vimore_reels_cache_v1',
+  REELS:                'vimore_videos_cache_v1',
+  VIDEOS:               'vimore_videos_cache_v1',
   HOME_FEED:            'vimore_feed_cache_v1',
+  MUSIC:                'vimore_music_cache_v1',
   MUSIC_PLAYED:         'vimore_music_played_v1',
 
   // Conversations
@@ -75,6 +77,9 @@ export const OFFLINE_KEYS = {
 
   // Pages / hubs
   PROFILE:              'vimore_profile_cache_v1',
+  ACTIVITY:             'vimore_activity_cache_v1',
+  SEARCH:               'vimore_search_cache_v1',
+  MENU:                 'vimore_menu_cache_v1',
   CURRENCY_DATA:        'vimore_currency_data_v1',
   EARNINGS_DATA:        'vimore_earnings_data_v1',
   MARKETPLACE_STORES:   'vimore_marketplace_stores_v1',
@@ -83,13 +88,164 @@ export const OFFLINE_KEYS = {
   TICKETS:              'vimore_tickets_cache_v1',
 };
 
+export const FEED_CACHE_TIME_KEY = 'vimore_feed_cache_time';
+
+export interface FeedCache<T> {
+  posts: T[];
+  savedAt: number | null;
+  indexedDB?: boolean;
+}
+
+const FEED_CACHE_DB = 'vimore-device-cache-v1';
+const FEED_CACHE_STORE = 'feed';
+
+function openFeedCacheDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(FEED_CACHE_DB, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(FEED_CACHE_STORE)) {
+        request.result.createObjectStore(FEED_CACHE_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('Could not open feed cache database'));
+  });
+}
+
+function writeFeedCacheToIndexedDB<T>(posts: T[], savedAt: number): Promise<void> {
+  return openFeedCacheDatabase().then(database => new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(FEED_CACHE_STORE, 'readwrite');
+    transaction.objectStore(FEED_CACHE_STORE).put({ posts, savedAt }, 'home');
+    transaction.oncomplete = () => { database.close(); resolve(); };
+    transaction.onerror = () => { database.close(); reject(transaction.error || new Error('Could not save feed cache')); };
+  }));
+}
+
+function readFeedCacheFromIndexedDB<T>(): Promise<FeedCache<T> | null> {
+  return openFeedCacheDatabase().then(database => new Promise<FeedCache<T> | null>((resolve, reject) => {
+    const transaction = database.transaction(FEED_CACHE_STORE, 'readonly');
+    const request = transaction.objectStore(FEED_CACHE_STORE).get('home');
+    request.onsuccess = () => {
+      const saved = request.result;
+      resolve(saved && Array.isArray(saved.posts)
+        ? { posts: saved.posts as T[], savedAt: Number(saved.savedAt) || null, indexedDB: true }
+        : null);
+    };
+    request.onerror = () => reject(request.error || new Error('Could not read feed cache'));
+    transaction.oncomplete = () => database.close();
+  }));
+}
+
+export function loadFeedCache<T>(): FeedCache<T> {
+  if (typeof window === 'undefined') return { posts: [], savedAt: null };
+  try {
+    const raw = localStorage.getItem(OFFLINE_KEYS.HOME_FEED);
+    if (!raw) return { posts: [], savedAt: null };
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return { posts: parsed as T[], savedAt: null };
+    if (parsed && Array.isArray(parsed.posts)) {
+      return {
+        posts: parsed.posts as T[],
+        savedAt: Number(parsed.savedAt) || Number(localStorage.getItem(FEED_CACHE_TIME_KEY)) || null,
+        indexedDB: parsed.indexedDB === true,
+      };
+    }
+    if (parsed && Array.isArray(parsed.data)) {
+      return {
+        posts: parsed.data as T[],
+        savedAt: Number(parsed.savedAt) || Number(localStorage.getItem(FEED_CACHE_TIME_KEY)) || null,
+      };
+    }
+  } catch {}
+  return { posts: [], savedAt: null };
+}
+
+export async function loadFeedCacheAsync<T>(): Promise<FeedCache<T>> {
+  const cached = loadFeedCache<T>();
+  if (!cached.indexedDB) return cached;
+  try {
+    return await readFeedCacheFromIndexedDB<T>() || cached;
+  } catch (error) {
+    console.warn('[offline-cache] IndexedDB feed read failed; using local preview.', error);
+    return cached;
+  }
+}
+
+export function saveFeedCache<T>(posts: T[]): void {
+  if (typeof window === 'undefined') return;
+  const savedAt = Date.now();
+  try {
+    const persistentUrl = (value: unknown) =>
+      typeof value === 'string' && !value.startsWith('data:') && !value.startsWith('blob:') ? value : undefined;
+    const compactPosts = posts.slice(0, 30).map((post: any) => ({
+      $id: post.$id,
+      $createdAt: post.$createdAt,
+      user: post.user ? {
+        $id: post.user.$id,
+        name: post.user.name,
+        username: post.user.username,
+        avatar: persistentUrl(post.user.avatar),
+        cover: persistentUrl(post.user.cover),
+        isVerified: post.user.isVerified,
+        followers: post.user.followers,
+        role: post.user.role,
+      } : post.user,
+      content: typeof post.content === 'string' ? post.content.slice(0, 2000) : '',
+      image: persistentUrl(post.image),
+      images: Array.isArray(post.images) ? post.images.map(persistentUrl).filter(Boolean) : undefined,
+      videoUrl: persistentUrl(post.videoUrl),
+      likes: post.likes,
+      unlikes: post.unlikes,
+      comments: post.comments,
+      shares: post.shares,
+      views: post.views,
+      time: post.time,
+      type: post.type,
+      isBoosted: post.isBoosted,
+      isLocked: post.isLocked,
+      unlockPrice: post.unlockPrice,
+      linkPreview: post.linkPreview ? {
+        ...post.linkPreview,
+        image: persistentUrl(post.linkPreview.image),
+        favicon: persistentUrl(post.linkPreview.favicon),
+      } : post.linkPreview,
+    }));
+    const entry = JSON.stringify({ posts: compactPosts, savedAt });
+    if (new Blob([entry]).size > 5 * 1024 * 1024) {
+      const localPreview = JSON.stringify({ posts: compactPosts.slice(0, 5), savedAt, indexedDB: true });
+      localStorage.setItem(OFFLINE_KEYS.HOME_FEED, localPreview);
+      void writeFeedCacheToIndexedDB(compactPosts, savedAt).catch(error => {
+        console.warn('[offline-cache] IndexedDB feed write failed; retaining local preview.', error);
+      });
+    } else {
+      localStorage.setItem(OFFLINE_KEYS.HOME_FEED, entry);
+    }
+    localStorage.setItem(FEED_CACHE_TIME_KEY, String(savedAt));
+  } catch {}
+}
+
 /** Save up to maxItems items to localStorage with a timestamp. */
 export function saveCache<T>(key: string, items: T[], maxItems = 15): void {
   if (typeof window === 'undefined') return;
   try {
-    const entry: TimestampedEntry<T[]> = { data: items.slice(0, maxItems), savedAt: Date.now() };
+    const savedAt = Date.now();
+    const entry: TimestampedEntry<T[]> = { data: items.slice(0, maxItems), savedAt };
     localStorage.setItem(key, JSON.stringify(entry));
+    localStorage.setItem(`${key}_time`, String(savedAt));
   } catch {}
+}
+
+export function isCacheFresh(key: string, maxAgeMs = 5 * 60 * 1000): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    const savedAt = Number(parsed?.savedAt) || Number(localStorage.getItem(`${key}_time`)) || 0;
+    return savedAt > 0 && Date.now() - savedAt < maxAgeMs;
+  } catch {
+    return false;
+  }
 }
 
 /** Load items saved with saveCache. Returns [] on any failure or expiry. */
@@ -120,8 +276,10 @@ export function loadCache<T>(key: string): T[] {
 export function saveKeyValue<T>(key: string, value: T): void {
   if (typeof window === 'undefined') return;
   try {
-    const entry: TimestampedEntry<T> = { data: value, savedAt: Date.now() };
+    const savedAt = Date.now();
+    const entry: TimestampedEntry<T> = { data: value, savedAt };
     localStorage.setItem(key, JSON.stringify(entry));
+    localStorage.setItem(`${key}_time`, String(savedAt));
   } catch {}
 }
 
@@ -231,7 +389,8 @@ export function clearAllLocalCaches(): Promise<void> {
 
     const allKeys = [
       ...Object.values(KEYS),
-      ...Object.values(OFFLINE_KEYS),
+      ...Object.values(OFFLINE_KEYS).flatMap(key => [key, `${key}_time`]),
+      FEED_CACHE_TIME_KEY,
       OUTBOX_KEY,
       'vimore_marketplace_dir_v1',
       'vimore_product_grid_v1',

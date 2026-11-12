@@ -50,7 +50,9 @@ const ROUTES = [
   // root dispatcher
   { path: '/api/calls', method: 'POST' },
   { path: '/api/calls', method: 'PATCH' },
+  { path: '/api/auth/me', method: 'GET' },
   { path: '/api/advertise/submit', method: 'POST' },
+  { path: '/api/friends/action', method: 'POST' },
   { path: '/api/cron/cleanup', method: 'GET' },
   { path: '/api/cron/expiry-alerts', method: 'GET' },
   // Note: the file proxy legitimately 404s for a non-existent fileId even
@@ -83,17 +85,11 @@ const ROUTES = [
   { path: '/api/push/native-subscribe', method: 'POST' },
   { path: '/api/push/web-subscribe', method: 'POST' },
   { path: '/api/push/web-unsubscribe', method: 'POST' },
-  { path: '/api/transaction/gift', method: 'POST' },
-  { path: '/api/transaction/lock-post', method: 'POST' },
-  { path: '/api/transaction/lock-post', method: 'DELETE' },
   { path: '/api/transaction/subscribe', method: 'POST' },
-  { path: '/api/transaction/unlock-post', method: 'POST' },
   { path: '/api/transaction/verify', method: 'POST' },
-  { path: '/api/upload/reel', method: 'POST' },
   { path: '/api/user/activity', method: 'POST' },
   { path: '/api/user/profile', method: 'POST' },
   { path: '/api/withdraw', method: 'POST' },
-  { path: '/api/auth/refresh', method: 'POST' },
 ];
 
 // Paths that must NOT resolve (i.e. must 404) — guards against the dispatcher
@@ -103,6 +99,16 @@ const NEGATIVE_ROUTES = [
   { path: '/api/admin/does-not-exist', method: 'GET' },
   { path: '/api/oauth/does-not-exist', method: 'GET' },
   { path: '/api/file/not-an-allowed-bucket/xyz', method: 'GET' },
+  { path: '/api/auth/login', method: 'POST' },
+  { path: '/api/transaction/gift', method: 'POST' },
+  { path: '/api/transaction/lock-post', method: 'POST' },
+  { path: '/api/transaction/lock-post', method: 'DELETE' },
+  { path: '/api/transaction/unlock-post', method: 'POST' },
+  { path: '/api/upload/reel', method: 'POST' },
+  { path: '/api/upload/voice', method: 'POST' },
+  { path: '/api/monetization/generate-ussd', method: 'POST' },
+  { path: '/api/monetization/log-transaction', method: 'POST' },
+  { path: '/api/monetization/unlock-post', method: 'POST' },
 ];
 
 // The file proxy route is special-cased: it validates fileId format itself
@@ -146,10 +152,25 @@ async function main() {
     results.push({ kind: 'route', path, method, status, routed, error });
   }
 
+  {
+    const path = '/api/auth/me';
+    const method = 'GET';
+    try {
+      const response = await fetch(`${BASE_URL}${path}`, { method });
+      const body = await response.json();
+      const routed = response.status === 200 && body?.loggedIn === false;
+      if (!routed) failures++;
+      results.push({ kind: 'contract', path, method, status: response.status, routed });
+    } catch (error) {
+      failures++;
+      results.push({ kind: 'contract', path, method, status: null, routed: false, error: error.message });
+    }
+  }
+
   const width = Math.max(...results.map((r) => `${r.method} ${r.path}`.length)) + 2;
   for (const r of results) {
     const label = `${r.method} ${r.path}`.padEnd(width);
-    const tag = r.kind === 'negative' ? '[404-expected]' : '[routed]      ';
+    const tag = r.kind === 'negative' ? '[404-expected]' : r.kind === 'contract' ? '[contract]    ' : '[routed]      ';
     const mark = r.routed ? 'PASS' : 'FAIL';
     console.log(`${mark}  ${tag}  ${label} -> ${r.status ?? r.error}`);
   }

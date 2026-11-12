@@ -8,6 +8,7 @@ import Image from "next/image";
 import { Header } from "@/components/layout/header";
 import { SubHeader } from "@/components/layout/sub-header";
 import { PostCard } from "@/components/post/post-card";
+import { CreatePostModal } from "@/components/post/create-post-modal";
 import { Stories } from "@/components/feed/stories";
 import { SuggestedFollows } from "@/components/feed/suggested-follows";
 import { RightSidebar } from "@/components/layout/right-sidebar";
@@ -22,9 +23,11 @@ import { account } from "@/lib/appwrite";
 import { Button } from "@/components/ui/button";
 import { CreateStoryModal } from "@/components/feed/create-story-modal";
 import { useFeedSignal } from "@/context/FeedSignalContext";
+import { useNetwork } from "@/context/NetworkContext";
 import { AcronymRibbon } from "@/components/branding/acronym-meaning";
 import { listAllStores, isStoreBoosted, getStoreLogoUrl } from "@/lib/stores";
 import { cached } from "@/lib/client-cache";
+import { loadFeedCache } from "@/lib/offline-cache";
 
 function seededShuffle<T>(arr: T[], seed: number): T[] {
   const result = [...arr];
@@ -245,25 +248,18 @@ function EmailVerificationGate({ email }: { email?: string }) {
   );
 }
 
-const FEED_CACHE_KEY = 'vimore_feed_cache_v1';
 const MAX_CACHED_POSTS = 30;
 
 export default function Home() {
   const router = useRouter();
   const { t } = useTranslation();
-  const { posts, campaigns, isLoading, initError, followingUsernames, friendUsernames, seenPostIds, isAuthenticated, isOffline, currentUser, triggerHaptic, loadMoreFeed, hasMoreFeed, isFeedLoading } = usePosts();
+  const { posts, campaigns, isLoading, initError, followingUsernames, friendUsernames, seenPostIds, isAuthenticated, isOffline, currentUser, triggerHaptic, loadMoreFeed, hasMoreFeed, isFeedLoading, hasLoadedFeed, feedRefreshStatus, refreshFeed } = usePosts();
+  const { networkWarning } = useNetwork();
   const { currentTrack, isExpanded } = useMusic();
   const { newFollowingPostsCount, clearNewPosts, uploadProgress } = useFeedSignal();
   const [isStoryModalOpen, setIsStoryModalOpen] = useState(false);
 
-  const [cachedPosts, setCachedPosts] = useState<any[]>(() => {
-    if (typeof window === 'undefined') return [];
-    try {
-      const saved = localStorage.getItem(FEED_CACHE_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
-
+  const [cachedPosts, setCachedPosts] = useState<any[]>(() => loadFeedCache<any>().posts);
   const loadTriggerRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const weights = useRef<Record<string, number>>({});
@@ -300,29 +296,9 @@ export default function Home() {
   }, [isLoading, seenPostIds]);
 
   useEffect(() => {
-    if (posts.length === 0 || isOffline) return;
-    try {
-      const toCache = posts.slice(0, MAX_CACHED_POSTS).map((p: any) => ({
-        $id: p.$id,
-        user: p.user,
-        content: p.content,
-        image: p.image,
-        videoUrl: p.videoUrl,
-        likes: p.likes,
-        unlikes: p.unlikes,
-        comments: p.comments,
-        views: p.views,
-        time: p.time,
-        type: p.type,
-        isBoosted: p.isBoosted,
-        isLocked: p.isLocked,
-        unlockPrice: p.unlockPrice,
-        linkPreview: p.linkPreview,
-      }));
-      localStorage.setItem(FEED_CACHE_KEY, JSON.stringify(toCache));
-      setCachedPosts(toCache);
-    } catch {}
-  }, [posts, isOffline]);
+    if (posts.length === 0) return;
+    setCachedPosts(posts.slice(0, MAX_CACHED_POSTS));
+  }, [posts]);
 
   const shuffledBoostedRegular = useMemo(() => {
     const boosted = posts.filter(p => p.isBoosted && p.type !== 'reel' && !p.isFeedAppend);
@@ -476,7 +452,7 @@ export default function Home() {
   }, [isLoading, isAuthenticated, isOffline, router]);
 
   // MANDATORY HANDSHAKE: Do not materialize feed if profile fetch is pending or failed
-  if (isLoading) {
+  if (isLoading && !(cachedPosts.length > 0 && currentUser)) {
     return null; // Let the AppLoadingGate handle the kinetic splash
   }
 
@@ -495,14 +471,14 @@ export default function Home() {
       <Header />
       <SubHeader />
 
-      {isOffline && (
-        <div className="w-full bg-amber-500/10 border-b border-amber-500/20 px-4 py-3 flex items-center justify-center gap-2">
-          <WifiOff className="h-4 w-4 text-amber-500 shrink-0" />
-          <span className="text-[11px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400">
-            {cachedPosts.length > 0
-              ? `No internet access — showing ${cachedPosts.length} cached posts`
-              : t('home_offline')}
-          </span>
+      {networkWarning && (
+        <div
+          role="status"
+          className="pointer-events-none fixed inset-x-0 top-0 z-[90] flex h-9 items-center justify-center bg-amber-500/95 px-4 text-center text-[11px] font-bold text-black shadow-sm"
+        >
+          {networkWarning === 'offline'
+            ? 'No internet - showing saved posts'
+            : 'Connection is very weak - showing saved posts'}
         </div>
       )}
       
@@ -624,19 +600,38 @@ export default function Home() {
                   <AcronymRibbon className="mt-4 rounded-[1.5rem]" />
                 )}
               </>
-            ) : isOffline && cachedPosts.length > 0 ? (
+            ) : cachedPosts.length > 0 ? (
               <>
                 {cachedPosts.map((post: any) => (
                   <PostCard key={`cached-${post.$id}`} {...post} />
                 ))}
                 <div className="py-6 flex flex-col items-center gap-2 text-center">
-                  <WifiOff className="h-6 w-6 text-amber-500/50" />
-                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/40">
-                    End of cached feed — connect to load more
-                  </p>
+                  {isOffline && <WifiOff className="h-6 w-6 text-amber-500/50" />}
+                  {isOffline && (
+                    <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/40">
+                      End of cached feed — connect to load more
+                    </p>
+                  )}
                 </div>
               </>
-            ) : !isLoading && (
+            ) : !hasLoadedFeed && feedRefreshStatus === 'refreshing' ? (
+              <div className="space-y-3" aria-label="Loading feed">
+                {[0, 1].map(item => (
+                  <div key={item} className="h-72 animate-pulse rounded-[2rem] bg-white dark:bg-card">
+                    <div className="flex items-center gap-3 p-4">
+                      <div className="h-10 w-10 rounded-full bg-secondary/50" />
+                      <div className="h-3 w-32 rounded-full bg-secondary/50" />
+                    </div>
+                    <div className="mx-4 h-48 rounded-2xl bg-secondary/30" />
+                  </div>
+                ))}
+              </div>
+            ) : feedRefreshStatus === 'server-error' && posts.length === 0 && cachedPosts.length === 0 ? (
+              <div className="py-16 text-center text-sm text-muted-foreground">
+                The feed could not be refreshed.
+                <Button type="button" variant="link" onClick={() => void refreshFeed()}>Tap to retry</Button>
+              </div>
+            ) : hasLoadedFeed && !isLoading && (
               <div className="py-32 text-center bg-white dark:bg-card rounded-[2.5rem] border border-dashed border-primary/10 shadow-sm flex flex-col items-center justify-center space-y-6 px-12 animate-in fade-in zoom-in duration-700">
                 <div className="h-24 w-24 bg-primary/5 rounded-[2rem] flex items-center justify-center border-2 border-dashed border-primary/20">
                   <Rocket className="h-10 w-10 text-primary/40 animate-pulse" />
@@ -645,6 +640,9 @@ export default function Home() {
                   <h3 className="text-2xl font-black italic uppercase tracking-tighter">{t('home_empty_title')}</h3>
                   <p className="text-muted-foreground text-sm font-medium uppercase tracking-widest">{t('home_empty_desc')}</p>
                 </div>
+                <CreatePostModal>
+                  <Button type="button" className="rounded-full font-bold">Create Post</Button>
+                </CreatePostModal>
               </div>
             )}
           </div>

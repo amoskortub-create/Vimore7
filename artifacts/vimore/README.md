@@ -12,9 +12,30 @@ then run `pnpm dev` from this directory. Run `pnpm exec tsc --noEmit` and
 ## Required Configuration
 
 Configure `NEXT_PUBLIC_APPWRITE_ENDPOINT`, `NEXT_PUBLIC_APPWRITE_PROJECT_ID`,
-`NEXT_PUBLIC_APPWRITE_DATABASE_ID`, and the server-only `APPWRITE_API_KEY` in
-the deployment environment. Never expose `APPWRITE_API_KEY` through a
-`NEXT_PUBLIC_` variable.
+and `NEXT_PUBLIC_APPWRITE_DATABASE_ID` in the deployment environment. The
+server-only `APPWRITE_API_KEY` is still used by unrelated server endpoints; it
+is not used by browser login and must never be exposed through a `NEXT_PUBLIC_`
+variable.
+
+### Browser authentication
+
+Login, session validation/refresh, signup, and logout use the Appwrite Web SDK
+directly. Register each browser hostname as a Web platform in Appwrite Project
+Settings: `vimore0.vercel.app`, `s-projects.vercel.app`, and `vimore.cfd`.
+For client auth, use `NEXT_PUBLIC_APPWRITE_ENDPOINT=https://appwrite.mediatechliberia.online/v1`
+and `NEXT_PUBLIC_APPWRITE_PROJECT_ID=vimore123`; the login database defaults to
+`vimoreprod`.
+
+The client looks up IDs in database `vimoreprod`, collection `users`, using its
+`username`, `email`, and `phone` attributes. Logged-out lookup requires the
+collection/document `Read: Any` permission, and direct client signup requires
+collection `Create: Users`. New profile documents grant `Read: Any` plus
+owner-only update/delete. This exposes user documents to unauthenticated
+clients: Appwrite permissions do not restrict reads to only the lookup fields,
+even though the app requests only those fields. Review the collection's
+attributes and document-security settings before enabling public read access.
+With document security enabled, existing user documents also need an `Any`
+read permission.
 
 Configure the server-only `MTL_ACCOUNT_SECRET` in the production deployment
 environment for audio and video calls. The calls API reads this variable at
@@ -36,9 +57,9 @@ it does not cache call API requests. Since the APK loads the site remotely, it
 must first load online and install the worker before offline fallback is
 available.
 
-Set `SUPER_ADMIN_USER_ID` to the Appwrite user ID that should receive the
-initial `SUPER` role. New registrations are not granted administrative access
-based on signup order.
+The former auth endpoint's `SUPER_ADMIN_USER_ID` signup bootstrap was removed
+with server-side auth. Grant initial administrative roles through a trusted
+administrative process; browser signup always creates a `USER`.
 
 Set the Appwrite project's authentication session duration to at least 30 days
 for the desired Android idle-login period. While the app is active, ViMore

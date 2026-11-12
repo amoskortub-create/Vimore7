@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useState, useMemo, useCallback } from "react";
-import { saveCache, loadCache, pinMediaInSW, OFFLINE_KEYS } from "@/lib/offline-cache";
+import { saveCache, loadCache, isCacheFresh, pinMediaInSW, OFFLINE_KEYS } from "@/lib/offline-cache";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
@@ -951,7 +951,7 @@ export default function ReelsPage() {
   const { tier: pageTier } = useNetwork();
 
   const [cachedReels] = useState<Post[]>(() => loadCache<Post>(OFFLINE_KEYS.REELS));
-  const [reelsList, setReelsList] = useState<Post[]>([]);
+  const [reelsList, setReelsList] = useState<Post[]>(() => cachedReels);
   const [reelsPhase, setReelsPhase] = useState<'connections' | 'global'>('connections');
   const [reelsConnCursor, setReelsConnCursor] = useState<string | null>(null);
   const [reelsGlobalCursor, setReelsGlobalCursor] = useState<string | null>(null);
@@ -972,6 +972,7 @@ export default function ReelsPage() {
   }, []);
 
   useEffect(() => {
+    if (isCacheFresh(OFFLINE_KEYS.REELS)) return;
     if (isLoadingReelsRef.current) return;
     isLoadingReelsRef.current = true;
     setIsLoadingReels(true);

@@ -17,10 +17,18 @@ import { Button } from "@/components/ui/button";
 import { usePosts } from "@/context/PostContext";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import Link from "next/link";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { GIFT_ITEMS } from "@/lib/ld-monetization";
-import { authFetch } from "@/lib/auth-fetch";
+import { getCreatorOrangeMoneyNumber, submitCreatorPayment } from "@/lib/orange-money-payments";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface GiftItem {
   id: string;
@@ -229,6 +237,11 @@ export function GiftHub() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [paymentFormOpen, setPaymentFormOpen] = useState(false);
+  const [creatorOrangeNumber, setCreatorOrangeNumber] = useState("");
+  const [senderOrangeNumber, setSenderOrangeNumber] = useState("");
+  const [orangeTransactionId, setOrangeTransactionId] = useState("");
+  const [paymentScreenshot, setPaymentScreenshot] = useState<File | null>(null);
   const categoryScrollRef = useRef<HTMLDivElement>(null);
 
   const filteredGifts = ALL_GIFTS.filter((g) => {
@@ -248,31 +261,47 @@ export function GiftHub() {
     setIsSyncing(true);
     triggerHaptic(30);
     try {
-      const creatorUserId = targetUserForGift.$id;
-      if (!window.confirm(`Pay ${selectedGift.cost} LD to ${targetUserForGift.name} via Orange Money?`)) return;
-      const ussdResponse = await authFetch('/api/monetization/generate-ussd', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ creatorUserId, amountLD: selectedGift.cost }),
+      if (!targetUserForGift.$id) throw new Error("The creator account could not be identified.");
+      const number = await getCreatorOrangeMoneyNumber(targetUserForGift.$id);
+      if (!number) throw new Error("This creator has not added an Orange Money number.");
+      setCreatorOrangeNumber(number);
+      setPaymentFormOpen(true);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Gift Failed", description: e.message });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const submitGiftPayment = async () => {
+    if (!selectedGift || !targetUserForGift?.$id || !currentUser) return;
+    setIsSyncing(true);
+    try {
+      await submitCreatorPayment({
+        kind: "gift",
+        buyerId: currentUser.$id,
+        buyerName: currentUser.name || currentUser.username,
+        creatorId: targetUserForGift.$id,
+        amountLRD: selectedGift.cost,
+        senderNumber: senderOrangeNumber,
+        transactionId: orangeTransactionId,
+        screenshot: paymentScreenshot,
+        giftType: `${selectedGift.name} (${selectedGift.emoji})`,
       });
-      if (!ussdResponse.ok) throw new Error((await ussdResponse.json()).error || 'Orange Money account unavailable.');
-      const { dialerUri } = await ussdResponse.json();
-      const transactionResponse = await authFetch('/api/monetization/log-transaction', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ receiverUserId: creatorUserId, transactionType: 'gift', amountLD: selectedGift.cost, itemId: selectedGift.id, itemType: 'gift_item' }),
-      });
-      if (!transactionResponse.ok) throw new Error((await transactionResponse.json()).error || 'Could not create payment record.');
-      window.location.href = dialerUri;
       setIsSuccess(true);
+      setPaymentFormOpen(false);
       triggerHaptic(100);
+      toast({ title: "Gift payment submitted", description: "The creator will confirm your Orange Money transfer." });
       setTimeout(() => {
         setIsSuccess(false);
         setSelectedGift(null);
+        setSenderOrangeNumber("");
+        setOrangeTransactionId("");
+        setPaymentScreenshot(null);
         closeGiftHub();
       }, 2800);
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "Gift Failed", description: e.message });
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Gift submission failed", description: error?.message || "Please try again." });
     } finally {
       setIsSyncing(false);
     }
@@ -309,7 +338,7 @@ export function GiftHub() {
             </div>
             <div className="text-center space-y-2 px-8">
               <h3 className="text-3xl font-black italic uppercase tracking-tighter text-white">
-                Gift Sent!
+                Gift payment submitted
               </h3>
               <p className="text-sm font-bold text-white/50 uppercase tracking-widest">
                 {selectedGift?.emoji} {selectedGift?.name} → @{targetUserForGift?.username}
@@ -317,7 +346,7 @@ export function GiftHub() {
             </div>
             <div className="flex items-center gap-2 bg-cyan-500/10 border border-cyan-500/20 rounded-2xl px-5 py-3">
               <Gem className="h-4 w-4 text-cyan-400" />
-              <span className="text-sm font-black text-cyan-400">{selectedGift?.cost} LD payment started</span>
+              <span className="text-sm font-black text-cyan-400">Awaiting creator verification · {selectedGift?.cost} LRD</span>
             </div>
           </div>
         ) : (
@@ -333,12 +362,12 @@ export function GiftHub() {
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
-                  {/* Credit balance */}
+                  {/* Amount is sent directly to the creator via Orange Money. */}
                   <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-2xl px-4 py-2">
                     <div className="h-5 w-5 bg-cyan-500/20 rounded-lg flex items-center justify-center">
                       <Gem className="h-3 w-3 text-cyan-400" />
                     </div>
-                    <span className="text-sm font-black text-white tabular-nums">LD</span>
+                    <span className="text-sm font-black text-white tabular-nums">LRD</span>
                     <span className="text-[9px] font-bold text-white/30 uppercase">Orange Money</span>
                   </div>
                   <button
@@ -483,7 +512,7 @@ export function GiftHub() {
                       ) : !canAfford ? (
                         "Unavailable"
                       ) : (
-                        "Send"
+                        "Continue"
                       )}
                     </Button>
                   </div>
@@ -492,12 +521,6 @@ export function GiftHub() {
                     <p className="text-[10px] font-bold text-white/25 uppercase tracking-widest">
                       Tap a gift to select it
                     </p>
-                    <Link href="/currency" onClick={closeGiftHub}>
-                      <button className="flex items-center gap-1.5 bg-cyan-500/10 border border-cyan-500/20 rounded-xl px-3 py-2">
-                        <Gem className="h-3 w-3 text-cyan-400" />
-                        <span className="text-[9px] font-black text-cyan-400 uppercase tracking-widest">Top Up</span>
-                      </button>
-                    </Link>
                   </div>
                 )}
               </div>
@@ -505,6 +528,39 @@ export function GiftHub() {
           </div>
         )}
       </SheetContent>
+      <Dialog open={paymentFormOpen} onOpenChange={setPaymentFormOpen}>
+        <DialogContent className="rounded-[2rem] sm:max-w-[460px]">
+          <DialogHeader>
+            <DialogTitle>Send Gift with Orange Money</DialogTitle>
+            <DialogDescription>
+              Send {selectedGift?.cost} LRD directly to {targetUserForGift?.name} at {creatorOrangeNumber}. ViMore does not receive or hold this payment.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="rounded-xl bg-orange-500/10 p-3 text-sm font-medium">
+              Send {selectedGift?.cost} LRD to {creatorOrangeNumber} ({targetUserForGift?.name}) for {selectedGift?.name}. Enter your sender number and transaction reference.
+            </p>
+            <div className="space-y-2">
+              <label className="text-xs font-bold">Orange Money Sender Number</label>
+              <Input value={senderOrangeNumber} onChange={event => setSenderOrangeNumber(event.target.value)} placeholder="077XXXXXXX" inputMode="tel" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-bold">Transaction ID / Reference</label>
+              <Input value={orangeTransactionId} onChange={event => setOrangeTransactionId(event.target.value)} placeholder="Transaction reference" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-bold">Payment screenshot (optional)</label>
+              <Input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={event => setPaymentScreenshot(event.target.files?.[0] || null)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={submitGiftPayment} disabled={isSyncing}>
+              {isSyncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              I Have Paid — Submit Gift
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Sheet>
   );
 }

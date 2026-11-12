@@ -1,6 +1,8 @@
 import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionCookieMaxAge } from '@/lib/session-cookie';
+import { Query } from 'node-appwrite';
+import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
 
 const ENDPOINT = (
   process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || 'https://appwrite.mediatechliberia.online/v1'
@@ -25,6 +27,12 @@ const PROJECT_ID = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || 'vimore123';
  * The cookie value is a base64-encoded JSON { id, secret } that Appwrite
  * accepts as X-Appwrite-Session for subsequent requests.
  */
+function getSafeDiagnostic(err: any): { code: number | null; type: string | null } {
+  const code = Number.isInteger(err?.code) ? err.code : null;
+  const type = typeof err?.type === 'string' && /^[a-z0-9_]{1,64}$/.test(err.type) ? err.type : null;
+  return { code, type };
+}
+
 function extractSessionCookie(setCookieHeader: string | null, projectId: string): string {
   if (!setCookieHeader) return '';
   const pattern = new RegExp(`a_session_${projectId}=([^;,\\s]+)`);
@@ -34,10 +42,42 @@ function extractSessionCookie(setCookieHeader: string | null, projectId: string)
 
 export async function POST(req: NextRequest) {
   try {
-    const { email, password } = await req.json();
+    const body = await req.json();
+    const rawIdentifier = typeof body.identifier === 'string'
+      ? body.identifier.trim()
+      : typeof body.email === 'string' ? body.email.trim() : '';
+    const password = body.password;
 
-    if (!email || !password) {
-      return NextResponse.json({ error: 'email and password are required' }, { status: 400 });
+    if (!rawIdentifier || !password) {
+      return NextResponse.json({ error: 'identifier and password are required' }, { status: 400 });
+    }
+
+    const isPhone = !rawIdentifier.includes('@') && /^[+\d][\d\s\-().]{5,}$/.test(rawIdentifier);
+    let email: string;
+    if (isPhone) {
+      const normalizedPhone = rawIdentifier.replace(/[\s\-().]/g, '');
+      let matchedEmail: unknown;
+      try {
+        const result = await getAdminDatabases().listDocuments(DATABASE_ID, 'users', [
+          Query.equal('phone', normalizedPhone),
+          Query.limit(1),
+        ]);
+        matchedEmail = result.documents[0]?.email;
+      } catch (err: any) {
+        const diagnostic = getSafeDiagnostic(err);
+        console.error('[auth/login:phone-lookup]', diagnostic);
+        return NextResponse.json(
+          { error: 'Phone lookup failed.', diagnostic },
+          { status: 500 },
+        );
+      }
+
+      if (typeof matchedEmail !== 'string' || !matchedEmail.includes('@')) {
+        return NextResponse.json({ error: 'No account found with that phone number.' }, { status: 404 });
+      }
+      email = matchedEmail;
+    } else {
+      email = rawIdentifier.includes('@') ? rawIdentifier : `${rawIdentifier}@vimore.cfd`;
     }
 
     // Direct server → Appwrite call — no platform check, no CORS.
@@ -79,6 +119,7 @@ export async function POST(req: NextRequest) {
       sessionId: data.$id,
       secret,
       userId: data.userId,
+      email,
       expire: data.expire,
     });
     // The Android WebView may recreate its JavaScript context or lose

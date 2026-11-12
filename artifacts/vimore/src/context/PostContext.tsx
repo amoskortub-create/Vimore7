@@ -11,7 +11,7 @@ import {
 import { BUCKET_STORIES, storage } from '@/lib/appwrite';
 
 import { formatErrorDescription, logAppwriteError } from '@/lib/appwrite-error';
-import { authFetch, getSessionFromStorage, storeSessionInStorage } from '@/lib/auth-fetch';
+import { authFetch, clearAuthRedirectState, getSessionFromStorage, redirectToLoginOnce, storeSessionInStorage } from '@/lib/auth-fetch';
 import { clearApiResponseCache } from '@/lib/api-response-cache';
 import { offlineCache } from '@/lib/offline-cache';
 import { firePush } from '@/lib/push-fire';
@@ -26,10 +26,10 @@ function hasFreshPresence(isOnline: unknown, lastSeenAt: unknown): boolean {
   return Number.isFinite(lastSeenMs) && Date.now() - lastSeenMs <= PRESENCE_TTL_MS;
 }
 
-function isAuthorizationError(err: unknown): boolean {
+function isSessionExpiredError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
   const { code, status } = err as { code?: unknown; status?: unknown };
-  return code === 401 || code === 403 || status === 401 || status === 403;
+  return code === 401 || status === 401;
 }
 
 function persistAppwriteSession(session: string): void {
@@ -37,6 +37,7 @@ function persistAppwriteSession(session: string): void {
   if (getSessionFromStorage() !== session) {
     throw new Error('Your sign-in session could not be saved. Enable site storage and try again.');
   }
+  clearAuthRedirectState();
 }
 
 export interface AppSettings {
@@ -1960,29 +1961,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
     setIsLoadingState(true);
 
     const trimmed = identifier.trim();
-    const isPhone = !trimmed.includes('@') && /^[+\d][\d\s\-().]{5,}$/.test(trimmed);
-    let vimoreId: string;
-
-    if (isPhone) {
-      try {
-        const lookupRes = await fetch('/api/auth/lookup-phone', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phone: trimmed }),
-        });
-        const lookupData = await lookupRes.json();
-        if (!lookupRes.ok) {
-          setIsLoadingState(false);
-          return { success: false, message: lookupData.error || "No account found with that phone number." };
-        }
-        vimoreId = lookupData.email;
-      } catch {
-        setIsLoadingState(false);
-        return { success: false, message: "Could not look up that phone number. Please try your ViMore ID." };
-      }
-    } else {
-      vimoreId = trimmed.includes('@') ? trimmed : `${trimmed}@vimore.cfd`;
-    }
+    let vimoreId = trimmed.includes('@') ? trimmed : `${trimmed}@vimore.cfd`;
 
     try {
       let authUser;
@@ -1998,7 +1977,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
         const loginRes = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: vimoreId, password }),
+          body: JSON.stringify({ identifier: trimmed, password }),
         });
         const loginData = await loginRes.json();
         if (!loginRes.ok) {
@@ -2006,6 +1985,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
         }
         // Persist the session before treating this browser as signed in.
         persistAppwriteSession(loginData.secret);
+        if (typeof loginData.email === 'string' && loginData.email) vimoreId = loginData.email;
         const { client } = await import('@/lib/appwrite');
         client.setSession(loginData.secret);
         // Skip account.get() — client-side account ops fail when the domain
@@ -2013,12 +1993,13 @@ export function PostProvider({ children }: { children: ReactNode }) {
         // The server already gave us the userId we need.
         authUser = {
           $id: loginData.userId,
-          email: vimoreId,
+          email: loginData.email || vimoreId,
           name: '',
           emailVerification: false,
           $createdAt: loginData.expire ?? new Date().toISOString(),
         } as any;
       }
+      if (typeof authUser.email === 'string' && authUser.email) vimoreId = authUser.email;
       const profileDoc = await databases.getDocument(DATABASE_ID, COL.USERS, authUser.$id);
       const user = mapDocToUser(authUser, profileDoc);
       setCurrentUserState(user);
@@ -2715,7 +2696,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ postId: id, action }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || 'Reaction failed');
+      if (!res.ok) throw Object.assign(new Error(data?.error || 'Reaction failed'), { status: res.status });
       // Sync server-confirmed counts
       setPostsState(prev => prev.map(p => p.$id === id ? {
         ...p,
@@ -2760,7 +2741,11 @@ export function PostProvider({ children }: { children: ReactNode }) {
         ...prev,
         [id]: { ...(prev[id] || {}), likes: baseLikes, unlikes: baseUnlikes },
       }));
-      toast({ variant: 'destructive', title: 'Reaction Failed', description: formatErrorDescription(err, currentUser?.role) });
+      if (isSessionExpiredError(err)) {
+        redirectToLoginOnce();
+      } else {
+        toast({ variant: 'destructive', title: 'Reaction Failed', description: formatErrorDescription(err, currentUser?.role) });
+      }
     } finally {
       pendingReactionIdsRef.current.delete(id);
     }
@@ -2798,7 +2783,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ postId: id, action }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || 'Reaction failed');
+      if (!res.ok) throw Object.assign(new Error(data?.error || 'Reaction failed'), { status: res.status });
       // Sync server-confirmed counts
       setPostsState(prev => prev.map(p => p.$id === id ? {
         ...p,
@@ -2826,7 +2811,11 @@ export function PostProvider({ children }: { children: ReactNode }) {
         ...prev,
         [id]: { ...(prev[id] || {}), likes: baseLikes, unlikes: baseUnlikes },
       }));
-      toast({ variant: 'destructive', title: 'Reaction Failed', description: formatErrorDescription(err, currentUser?.role) });
+      if (isSessionExpiredError(err)) {
+        redirectToLoginOnce();
+      } else {
+        toast({ variant: 'destructive', title: 'Reaction Failed', description: formatErrorDescription(err, currentUser?.role) });
+      }
     } finally {
       pendingReactionIdsRef.current.delete(id);
     }
@@ -3967,7 +3956,9 @@ export function PostProvider({ children }: { children: ReactNode }) {
       });
     } catch (err: any) {
       logAppwriteError('recordView', err);
-      if (!isAuthorizationError(err)) {
+      if (isSessionExpiredError(err)) {
+        redirectToLoginOnce();
+      } else {
         toast({ variant: 'destructive', title: 'View Error', description: err?.message || 'Could not record post view.' });
       }
     }
@@ -4017,7 +4008,9 @@ export function PostProvider({ children }: { children: ReactNode }) {
       }
     } catch (err: any) {
       logAppwriteError('recordStoryView', err);
-      if (!isAuthorizationError(err)) {
+      if (isSessionExpiredError(err)) {
+        redirectToLoginOnce();
+      } else {
         toast({ variant: 'destructive', title: 'View Error', description: err?.message || 'Could not record story view.' });
       }
     }

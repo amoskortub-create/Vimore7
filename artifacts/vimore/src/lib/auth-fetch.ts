@@ -21,6 +21,27 @@ const PROJECT_ID =
 
 const COOKIE_KEY = 'cookieFallback';
 const SESSION_KEY = `a_session_${PROJECT_ID}`;
+const AUTH_REDIRECT_KEY = 'vimore_auth_expired_redirected';
+
+function isAuthPage(): boolean {
+  if (typeof window === 'undefined') return true;
+  const path = window.location.pathname;
+  return path === '/login' || path === '/signup' || path.startsWith('/auth/');
+}
+
+export function clearAuthRedirectState(): void {
+  if (typeof window === 'undefined') return;
+  try { sessionStorage.removeItem(AUTH_REDIRECT_KEY); } catch {}
+}
+
+export function redirectToLoginOnce(): void {
+  if (typeof window === 'undefined' || isAuthPage()) return;
+  try {
+    if (sessionStorage.getItem(AUTH_REDIRECT_KEY) === '1') return;
+    sessionStorage.setItem(AUTH_REDIRECT_KEY, '1');
+  } catch {}
+  window.location.replace('/login?reason=session-expired');
+}
 
 /** Synchronously read the Appwrite session value from localStorage. */
 export function getSessionFromStorage(): string | null {
@@ -96,11 +117,21 @@ export async function authFetch(
     }
 
     // Keep the browser/WebView HTTP cache off; eligible reads use IndexedDB above.
-    return fetch(url, {
+    const response = await fetch(url, {
       ...options,
       headers,
       cache: options.cache ?? 'no-store',
     });
+
+    if (typeof window !== 'undefined' && requestUrl?.origin === window.location.origin) {
+      if (response.status === 401) {
+        redirectToLoginOnce();
+      } else if (response.ok && requestUrl.pathname === '/api/auth/me') {
+        clearAuthRedirectState();
+      }
+    }
+
+    return response;
   };
 
   if (canCache) {

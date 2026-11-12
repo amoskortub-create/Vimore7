@@ -1266,7 +1266,13 @@ export function PostProvider({ children }: { children: ReactNode }) {
         const authorDoc = authorsMap[doc.user_id];
         const segments = (segmentsMap[doc.$id] || []).map(seg => ({
           $id: seg.$id,
-          type: seg.type || 'image',
+          type: seg.type || seg.media_type || (
+            String(seg.mime_type || seg.mimeType || '').startsWith('video/')
+            || /\.(mp4|mov|webm|m4v)(?:[?#]|$)/i.test(seg.story_url || '')
+              ? 'video'
+              : 'image'
+          ),
+          fileId: seg.media_id || undefined,
           mediaUrl: seg.media_id ? getFileUrl(BUCKET.STORY_MEDIA, seg.media_id) : (seg.story_url ? toProxyUrl(seg.story_url) : undefined),
           text: seg.text,
           duration: seg.duration || 5,
@@ -2911,12 +2917,18 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
   const addStory = async (segment: any) => {
     if (!currentUser) return;
+    let storyId: string | undefined;
+    const mediaId: string | undefined = segment.fileId || undefined;
     try {
+      const segmentType = segment.type || 'image';
+      const isTextOnly = !!segment.background || !!segment.textOverlays?.length || !!segment.text;
+      if ((segmentType === 'image' || segmentType === 'video') && !mediaId && !isTextOnly) {
+        throw new Error('Story media upload did not complete.');
+      }
       const expires_at = new Date(Date.now() + 86400000).toISOString();
       const rawMediaUrl = segment.mediaUrl || segment.image || '';
       // Only use explicitly provided fileId (from story media uploads).
       // Do NOT extract from post/other media URLs — those belong to different buckets.
-      const mediaId: string | undefined = segment.fileId || undefined;
 
       const storyDoc = await databases.createDocument(DATABASE_ID, COL.STORIES, ID.unique(), {
         user_id: currentUser.$id,
@@ -2924,6 +2936,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
         views_count: 0,
         story_url: rawMediaUrl || '',
       });
+      storyId = storyDoc.$id;
 
       const segData: Record<string, any> = {
         story_id: storyDoc.$id,
@@ -2948,6 +2961,31 @@ export function PostProvider({ children }: { children: ReactNode }) {
         return [{ $id: storyDoc.$id, user: currentUser, segments: [newSegment], expires_at, viewCount: 0 }, ...prev];
       });
     } catch (err: any) {
+      if (storyId) {
+        try {
+          const partialSegments = await databases.listDocuments(DATABASE_ID, COL.STORY_SEGMENTS, [
+            Query.equal('story_id', storyId),
+            Query.limit(50),
+          ]);
+          await Promise.all(partialSegments.documents.map(seg =>
+            databases.deleteDocument(DATABASE_ID, COL.STORY_SEGMENTS, seg.$id)
+          ));
+        } catch (cleanupError) {
+          logAppwriteError('addStory:cleanupSegments', cleanupError);
+        }
+        try {
+          await databases.deleteDocument(DATABASE_ID, COL.STORIES, storyId);
+        } catch (cleanupError) {
+          logAppwriteError('addStory:cleanupDocument', cleanupError);
+        }
+      }
+      if (mediaId) {
+        try {
+          await storage.deleteFile(BUCKET_STORIES, mediaId);
+        } catch (cleanupError) {
+          logAppwriteError('addStory:cleanupMedia', cleanupError);
+        }
+      }
       logAppwriteError('addStory', err);
       throw err;
     }

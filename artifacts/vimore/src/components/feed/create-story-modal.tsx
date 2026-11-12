@@ -90,7 +90,7 @@ export function CreateStoryModal({ isOpen, onClose }: { isOpen: boolean; onClose
       onClose();
       resetState();
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Upload failed", description: e.message || "Please try again." });
+      toast({ variant: "destructive", title: "Upload failed - story not posted", description: e.message || "Please try again." });
     } finally {
       setIsProcessing(false);
     }

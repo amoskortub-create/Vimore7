@@ -254,15 +254,12 @@ export default function Home() {
   const router = useRouter();
   const { t } = useTranslation();
   const { posts, campaigns, isLoading, initError, followingUsernames, friendUsernames, seenPostIds, isAuthenticated, isOffline, currentUser, triggerHaptic, loadMoreFeed, hasMoreFeed, isFeedLoading, hasLoadedFeed, feedRefreshStatus, refreshFeed } = usePosts();
-  const { connectionStatus } = useNetwork();
+  const { networkWarning } = useNetwork();
   const { currentTrack, isExpanded } = useMusic();
   const { newFollowingPostsCount, clearNewPosts, uploadProgress } = useFeedSignal();
   const [isStoryModalOpen, setIsStoryModalOpen] = useState(false);
 
   const [cachedPosts, setCachedPosts] = useState<any[]>(() => loadFeedCache<any>().posts);
-  const [cacheSavedAt, setCacheSavedAt] = useState<number | null>(() => loadFeedCache<any>().savedAt);
-  const firstPostsSnapshot = useRef(posts);
-
   const loadTriggerRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const weights = useRef<Record<string, number>>({});
@@ -301,13 +298,7 @@ export default function Home() {
   useEffect(() => {
     if (posts.length === 0) return;
     setCachedPosts(posts.slice(0, MAX_CACHED_POSTS));
-    if (firstPostsSnapshot.current !== posts) setCacheSavedAt(Date.now());
-    firstPostsSnapshot.current = posts;
   }, [posts]);
-
-  const cacheAgeMs = cacheSavedAt === null ? null : Date.now() - cacheSavedAt;
-  const cacheIsExpired = cacheAgeMs === null || cacheAgeMs > 24 * 60 * 60 * 1000;
-  const cacheNeedsRefresh = cachedPosts.length > 0 && (cacheAgeMs === null || cacheAgeMs > 5 * 60 * 1000);
 
   const shuffledBoostedRegular = useMemo(() => {
     const boosted = posts.filter(p => p.isBoosted && p.type !== 'reel' && !p.isFeedAppend);
@@ -480,36 +471,15 @@ export default function Home() {
       <Header />
       <SubHeader />
 
-      {isOffline && (
-        <div className="w-full bg-amber-500/10 border-b border-amber-500/20 px-4 py-3 flex items-center justify-center gap-2">
-          <WifiOff className="h-4 w-4 text-amber-500 shrink-0" />
-          <span className="text-[11px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400">
-            No internet - showing saved posts
-          </span>
-        </div>
-      )}
-      {!isOffline && connectionStatus === 'slow' && (
-        <div className="w-full bg-amber-500/10 border-b border-amber-500/20 px-4 py-3 text-center text-[11px] font-bold text-amber-700 dark:text-amber-300">
-          Slow connection - showing saved posts, updating...
-        </div>
-      )}
-      {!isOffline && feedRefreshStatus === 'server-error' && (
-        <button
-          type="button"
-          onClick={() => void refreshFeed()}
-          className="w-full bg-amber-500/10 border-b border-amber-500/20 px-4 py-3 text-center text-[11px] font-bold text-amber-700 dark:text-amber-300"
+      {networkWarning && (
+        <div
+          role="status"
+          className="pointer-events-none fixed inset-x-0 top-0 z-[90] flex h-9 items-center justify-center bg-amber-500/95 px-4 text-center text-[11px] font-bold text-black shadow-sm"
         >
-          Server slow - showing saved posts · Tap to retry
-        </button>
-      )}
-      {!isOffline && cachedPosts.length > 0 && cacheNeedsRefresh && (
-        <button
-          type="button"
-          onClick={() => void refreshFeed()}
-          className="w-full bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 text-center text-[10px] font-bold text-amber-700 dark:text-amber-300"
-        >
-          {cacheIsExpired ? "Saved feed is older than 24 hours — tap to refresh" : "Showing saved posts — updating…"}
-        </button>
+          {networkWarning === 'offline'
+            ? 'No internet - showing saved posts'
+            : 'Connection is very weak - showing saved posts'}
+        </div>
       )}
       
       <div className={cn(
@@ -637,9 +607,11 @@ export default function Home() {
                 ))}
                 <div className="py-6 flex flex-col items-center gap-2 text-center">
                   {isOffline && <WifiOff className="h-6 w-6 text-amber-500/50" />}
-                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/40">
-                    {isOffline ? "End of cached feed — connect to load more" : "Showing saved posts while the feed updates"}
-                  </p>
+                  {isOffline && (
+                    <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/40">
+                      End of cached feed — connect to load more
+                    </p>
+                  )}
                 </div>
               </>
             ) : !hasLoadedFeed && feedRefreshStatus === 'refreshing' ? (

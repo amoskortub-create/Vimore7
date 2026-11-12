@@ -14,6 +14,7 @@ export interface NetworkInfo {
   saveData: boolean;
   isOnline: boolean;
   connectionStatus: ConnectionStatus;
+  networkWarning: 'offline' | 'weak' | null;
   forcedTier: NetworkTier | null;
   setForcedTier: (tier: NetworkTier | null) => void;
 }
@@ -26,6 +27,7 @@ const DEFAULT_INFO: NetworkInfo = {
   saveData: false,
   isOnline: true,
   connectionStatus: 'checking',
+  networkWarning: null,
   forcedTier: null,
   setForcedTier: () => {},
 };
@@ -65,6 +67,7 @@ function publishTierGlobal(tier: NetworkTier) {
 
 export function NetworkProvider({ children }: { children: ReactNode }) {
   const [forcedTier, setForcedTierState] = useState<NetworkTier | null>(null);
+  const [networkWarning, setNetworkWarning] = useState<'offline' | 'weak' | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(() =>
     typeof navigator === 'undefined' || navigator.onLine ? 'checking' : 'offline'
   );
@@ -115,9 +118,78 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
+    let consecutiveFailures = 0;
+    let firstFailureAt = 0;
+    let lastSuccessfulFetchAt = Date.now();
+    let lastSuccessfulMediaAt = 0;
+    let lastScrollAt = 0;
+    const playingVideos = new Set<HTMLVideoElement>();
+
+    const refreshWarning = () => {
+      if (!active) return;
+      const now = Date.now();
+      const offline = !navigator.onLine;
+      const thoroughlyBad = consecutiveFailures >= 3
+        && now - firstFailureAt >= 10_000
+        && now - lastSuccessfulFetchAt >= 15_000;
+      const recentMedia = now - lastSuccessfulMediaAt < 10_000 || playingVideos.size > 0;
+      const recentScroll = now - lastScrollAt < 10_000;
+      const warning = recentMedia || (thoroughlyBad && recentScroll)
+        ? null
+        : offline ? 'offline' : thoroughlyBad ? 'weak' : null;
+      setNetworkWarning(previous => previous === warning ? previous : warning);
+    };
+
+    const markSuccessfulFetch = () => {
+      consecutiveFailures = 0;
+      firstFailureAt = 0;
+      lastSuccessfulFetchAt = Date.now();
+      setConnectionStatus('online');
+      refreshWarning();
+    };
+
+    const isAppwriteOrMediaRequest = (input: RequestInfo | URL): boolean => {
+      const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+      try {
+        const url = new URL(rawUrl, window.location.href);
+        return url.pathname.includes('/v1/')
+          || url.pathname.startsWith('/api/file/')
+          || url.pathname.includes('/storage/buckets/');
+      } catch {
+        return false;
+      }
+    };
+
+    const originalFetch = window.fetch;
+    const wrappedFetch: typeof window.fetch = (...args) => originalFetch.apply(window, args).then(response => {
+      if (response.ok && isAppwriteOrMediaRequest(args[0])) markSuccessfulFetch();
+      return response;
+    });
+    window.fetch = wrappedFetch;
+
+    const handleMediaSuccess = (event: Event) => {
+      const target = event.target;
+      if (
+        (event.type === 'load' && target instanceof HTMLImageElement && target.naturalWidth > 0)
+        || (event.type === 'canplay' && target instanceof HTMLVideoElement)
+        || (event.type === 'playing' && target instanceof HTMLVideoElement)
+      ) {
+        lastSuccessfulMediaAt = Date.now();
+        refreshWarning();
+      }
+      if (event.type === 'playing' && target instanceof HTMLVideoElement) playingVideos.add(target);
+      if ((event.type === 'pause' || event.type === 'ended') && target instanceof HTMLVideoElement) playingVideos.delete(target);
+    };
+    document.addEventListener('load', handleMediaSuccess, true);
+    document.addEventListener('canplay', handleMediaSuccess, true);
+    document.addEventListener('playing', handleMediaSuccess, true);
+    document.addEventListener('pause', handleMediaSuccess, true);
+    document.addEventListener('ended', handleMediaSuccess, true);
+
     const heartbeat = async () => {
       if (!navigator.onLine) {
         setConnectionStatus('offline');
+        refreshWarning();
         return;
       }
 
@@ -127,9 +199,13 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
           signal: AbortSignal.timeout(3000),
         });
         if (!response.ok) throw new Error(`Health check returned ${response.status}`);
-        if (active) setConnectionStatus('online');
+        if (active) markSuccessfulFetch();
       } catch {
-        if (active) setConnectionStatus(navigator.onLine ? 'slow' : 'offline');
+        if (!active) return;
+        consecutiveFailures += 1;
+        if (firstFailureAt === 0) firstFailureAt = Date.now();
+        setConnectionStatus(consecutiveFailures >= 3 ? 'slow' : 'checking');
+        refreshWarning();
       }
     };
 
@@ -138,16 +214,27 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
       void heartbeat();
     };
     const handleOffline = () => setConnectionStatus('offline');
+    const handleScroll = () => { lastScrollAt = Date.now(); };
 
     void heartbeat();
-    const timer = window.setInterval(heartbeat, 30_000);
+    const timer = window.setInterval(heartbeat, 5_000);
+    const warningTimer = window.setInterval(refreshWarning, 1_000);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+    window.addEventListener('scroll', handleScroll, { passive: true });
     return () => {
       active = false;
       window.clearInterval(timer);
+      window.clearInterval(warningTimer);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('scroll', handleScroll);
+      document.removeEventListener('load', handleMediaSuccess, true);
+      document.removeEventListener('canplay', handleMediaSuccess, true);
+      document.removeEventListener('playing', handleMediaSuccess, true);
+      document.removeEventListener('pause', handleMediaSuccess, true);
+      document.removeEventListener('ended', handleMediaSuccess, true);
+      if (window.fetch === wrappedFetch) window.fetch = originalFetch;
     };
   }, []);
 
@@ -174,6 +261,7 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
     saveData: info.saveData,
     isOnline: info.isOnline,
     connectionStatus,
+    networkWarning,
     forcedTier,
     setForcedTier,
   };

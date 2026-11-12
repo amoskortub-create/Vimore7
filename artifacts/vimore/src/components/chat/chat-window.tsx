@@ -412,8 +412,8 @@ export function ChatWindow({ contact, onBack }: ChatWindowProps) {
       }, 200);
 
       try {
-        const { uploadVoiceViaServer } = await import('@/lib/upload');
-        const uploadedVoice = await uploadVoiceViaServer(options.file);
+        const { uploadVoiceViaClient } = await import('@/lib/upload');
+        const uploadedVoice = await uploadVoiceViaClient(options.file);
 
         // Jump to 100% then send the real message
         if (pendingProgressRef.current) clearInterval(pendingProgressRef.current);

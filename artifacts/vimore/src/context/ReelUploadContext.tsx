@@ -1,8 +1,7 @@
 'use client';
 import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
-import { BUCKET, ID } from '@/lib/appwrite';
+import { account, databases, DATABASE_ID, COL, BUCKET, ID } from '@/lib/appwrite';
 import { uploadLargeViaClient, uploadViaClient } from '@/lib/upload';
-import { authFetch } from '@/lib/auth-fetch';
 import { validateAndCompressVideo } from '@/lib/video-compress';
 
 export type UploadStatus = 'compressing' | 'uploading' | 'done' | 'error';
@@ -132,29 +131,67 @@ export function ReelUploadProvider({ children }: { children: React.ReactNode }) 
 
       setJob(j => j ? { ...j, progress: 82, label: 'Saving post…' } : j);
 
-      // ── STEP 5: Create DB record (tiny JSON call, not binary) ─────────
-      const res = await authFetch('/api/upload/reel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          videoFileId,
-          coverFileId,
-          userId: payload.userId,
-          username: payload.username,
-          caption: payload.caption,
-          totalDuration: videoDuration,
-          effect: payload.effect,
-          visibility: payload.visibility,
-          allowComments: payload.allowComments,
-          allowDuet: payload.allowDuet,
-          allowDownloads: payload.allowDownloads,
-          selectedSound: payload.selectedSound,
-        }),
-        signal,
-      });
+      // ── STEP 5: Create the post through the authenticated client SDK ───
+      const signedInUser = await account.get();
+      if (signedInUser.$id !== payload.userId) throw new Error('The active account changed during reel upload.');
+      const durationInt = Math.round(videoDuration || 0);
+      let resolvedSoundId: string | undefined;
+      let resolvedSoundTitle: string | undefined;
+      let resolvedSoundArtist: string | undefined;
+      let resolvedSoundStartTime = 0;
+      if (payload.selectedSound?.id) {
+        resolvedSoundId = payload.selectedSound.id;
+        resolvedSoundTitle = payload.selectedSound.title || 'Sound';
+        resolvedSoundArtist = payload.selectedSound.artist || payload.username || 'Creator';
+        resolvedSoundStartTime = payload.selectedSound.startTime || 0;
+        try {
+          const sound = await databases.getDocument(DATABASE_ID, COL.SOUNDS, payload.selectedSound.id);
+          await databases.updateDocument(DATABASE_ID, COL.SOUNDS, payload.selectedSound.id, {
+            use_count: (Number(sound.use_count) || 0) + 1,
+          });
+        } catch (error) {
+          console.warn('Could not update reel sound usage count:', error);
+        }
+      } else {
+        const title = payload.caption.trim().split(' ').slice(0, 4).join(' ') || 'Original Sound';
+        try {
+          const sound = await databases.createDocument(DATABASE_ID, COL.SOUNDS, ID.unique(), {
+            title: title.slice(0, 80),
+            artist: payload.username || 'Creator',
+            file_id: `reel_media:${videoFileId}`,
+            duration: durationInt || 30,
+            use_count: 1,
+            is_active: true,
+          });
+          resolvedSoundId = sound.$id;
+          resolvedSoundTitle = title;
+          resolvedSoundArtist = payload.username || 'Creator';
+        } catch (error) {
+          console.warn('Could not create original reel sound:', error);
+        }
+      }
 
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || `Server error ${res.status}`);
+      const postData: Record<string, string | number | string[]> = {
+        user_id: signedInUser.$id,
+        content: payload.caption.trim(),
+        type: 'reel',
+        media_url: videoFileId,
+        likes_count: 0,
+        unlikes_count: 0,
+        comments_count: 0,
+        shares_count: 0,
+        views_count: 0,
+      };
+      if (coverFileId) postData.reel_cover_file_id = coverFileId;
+      if (durationInt > 0) postData.duration = durationInt;
+      if (payload.effect && payload.effect !== 'none') postData.effects_applied = [payload.effect];
+      if (resolvedSoundId) {
+        postData.sound_id = resolvedSoundId;
+        postData.sound_title = resolvedSoundTitle || '';
+        postData.sound_artist = resolvedSoundArtist || '';
+        postData.sound_start_time = resolvedSoundStartTime;
+      }
+      await databases.createDocument(DATABASE_ID, COL.POSTS, ID.unique(), postData);
 
       setJob(j => j ? { ...j, progress: 95, label: 'Publishing…' } : j);
       await new Promise(r => setTimeout(r, 400));

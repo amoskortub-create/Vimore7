@@ -14,7 +14,7 @@ import { formatErrorDescription, logAppwriteError } from '@/lib/appwrite-error';
 import { authFetch, clearAuthRedirectState, redirectToLoginOnce } from '@/lib/auth-fetch';
 import { signInWithIdentifier } from '@/lib/client-auth';
 import { clearApiResponseCache } from '@/lib/api-response-cache';
-import { offlineCache } from '@/lib/offline-cache';
+import { loadFeedCache, loadFeedCacheAsync, offlineCache, saveFeedCache } from '@/lib/offline-cache';
 import { firePush } from '@/lib/push-fire';
 import { CREDIT_PRICES } from '@/lib/credit-pricing';
 
@@ -346,8 +346,6 @@ interface PostContextType {
   recordWithdrawal: (node: any) => Promise<void>;
   processWithdrawal: (id: string, status: 'APPROVED' | 'REJECTED', adminMessage?: string, proofImageUrl?: string) => Promise<void>;
   verifyUser: (cost: number, currency: 'DIAMOND' | 'STAR') => Promise<void>;
-  processGiftTransaction: (cost: number, currency: 'GOLD' | 'DIAMOND') => Promise<void>;
-  unlockPost: (postId: string, cost: number) => Promise<void>;
   subscribeToCreator: (username: string, cost: number) => Promise<void>;
   cancelSubscription: (username: string) => Promise<void>;
   incrementShareCount: (postId: string) => Promise<void>;
@@ -614,8 +612,15 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
   const router = useRouter();
 
-  const [currentUser, setCurrentUserState] = useState<User | null>(null);
-  const [posts, setPostsState] = useState<Post[]>([]);
+  const [currentUser, setCurrentUserState] = useState<User | null>(() =>
+    typeof window === 'undefined' ? null : offlineCache.getUser() as User | null
+  );
+  const [posts, setPostsState] = useState<Post[]>(() => {
+    if (typeof window === 'undefined') return [];
+    const savedFeed = loadFeedCache<Post>().posts;
+    return savedFeed.length > 0 ? savedFeed : offlineCache.getPosts() as Post[];
+  });
+  const skipInitialFeedCacheWrite = useRef(true);
   const [hasMoreFeed, setHasMoreFeed] = useState(true);
   const [isFeedLoading, setIsFeedLoading] = useState(false);
   const feedCursorRef = useRef<string | null>(null);
@@ -624,12 +629,30 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const feedGlobalCursorRef = useRef<string | null>(null);
   const feedHasLoadedRef = useRef(false);
   const pendingRealtimePostsRef = useRef(new Map<string, Post>());
+  useEffect(() => {
+    let active = true;
+    void loadFeedCacheAsync<Post>().then(cache => {
+      if (active && cache.indexedDB && cache.posts.length > 0 && !feedHasLoadedRef.current) {
+        setPostsState(cache.posts);
+      }
+    });
+    return () => { active = false; };
+  }, []);
   const [activeComments, setActiveComments] = useState<PostComment[]>([]);
   const [isLoading, setIsLoadingState] = useState(true);
   const [initError] = useState<string | null>(null);
   const [isOffline, setIsOffline] = useState(false);
   const sessionCheckInFlightRef = useRef(false);
   const [settings, setSettingsState] = useState<AppSettings>(INITIAL_SETTINGS);
+
+  useEffect(() => {
+    if (skipInitialFeedCacheWrite.current) {
+      skipInitialFeedCacheWrite.current = false;
+      return;
+    }
+    saveFeedCache(posts);
+    offlineCache.savePosts(posts);
+  }, [posts]);
 
   const [clusters, setClustersState] = useState<Cluster[]>([]);
   const clustersRef = useRef<Cluster[]>([]);
@@ -730,6 +753,8 @@ export function PostProvider({ children }: { children: ReactNode }) {
     feedGlobalCursorRef.current = null;
     feedCursorRef.current = null;
     setHasMoreFeed(true);
+    let querySucceeded = false;
+    let queryError: unknown;
     try {
       const connIds = [...followingUserIdsRef.current].slice(0, 100);
       let connDocs: any[] = [];
@@ -743,9 +768,11 @@ export function PostProvider({ children }: { children: ReactNode }) {
             Query.limit(PAGE),
           ]);
           connDocs = r.documents;
+          querySucceeded = true;
           if (connDocs.length > 0) feedConnCursorRef.current = connDocs[connDocs.length - 1].$id;
           if (connDocs.length < PAGE) feedPhaseRef.current = 'global';
-        } catch {
+        } catch (error) {
+          queryError = error;
           feedPhaseRef.current = 'global';
         }
       } else {
@@ -760,6 +787,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
             Query.orderDesc('$createdAt'),
             Query.limit(PAGE),
           ]);
+          querySucceeded = true;
           const existingIds = new Set(connDocs.map((doc: any) => doc.$id));
           let lastScannedIndex = -1;
           for (let index = 0; index < r.documents.length && connDocs.length + globalDocs.length < PAGE; index++) {
@@ -774,13 +802,15 @@ export function PostProvider({ children }: { children: ReactNode }) {
             feedGlobalCursorRef.current = r.documents[lastScannedIndex].$id;
           }
           setHasMoreFeed(r.documents.length === PAGE || lastScannedIndex < r.documents.length - 1);
-        } catch {
+        } catch (error) {
+          queryError = error;
           setHasMoreFeed(false);
         }
       } else {
         setHasMoreFeed(true);
       }
 
+      if (!querySucceeded) throw queryError || new Error('Feed could not be refreshed.');
       const mapped = await withAuthors([...connDocs, ...globalDocs]);
       const loadedIds = new Set(mapped.map(post => post.$id));
       const nextPosts = [...mapped];
@@ -792,11 +822,19 @@ export function PostProvider({ children }: { children: ReactNode }) {
       }
       pendingRealtimePostsRef.current.clear();
       feedHasLoadedRef.current = true;
-      setPostsState(nextPosts);
-      offlineCache.savePosts(nextPosts);
+      const cachedPosts = nextPosts.length === 0 ? loadFeedCache<Post>().posts : [];
+      const visiblePosts = nextPosts.length === 0 && cachedPosts.length > 0 ? cachedPosts : nextPosts;
+      setPostsState(visiblePosts);
+      setIsOffline(false);
+      if (nextPosts.length > 0 || cachedPosts.length === 0) {
+        saveFeedCache(nextPosts);
+        offlineCache.savePosts(nextPosts);
+      }
     } catch (err) {
       logAppwriteError('loadFeed', err);
-      const cachedPosts = offlineCache.getPosts() as any[];
+      setIsOffline(true);
+      const savedFeed = loadFeedCache<Post>().posts;
+      const cachedPosts = savedFeed.length > 0 ? savedFeed : offlineCache.getPosts() as Post[];
       const loadedIds = new Set(cachedPosts.map((post: any) => post.$id));
       const nextPosts = [...cachedPosts];
       for (const post of pendingRealtimePostsRef.current.values()) {
@@ -3246,21 +3284,6 @@ export function PostProvider({ children }: { children: ReactNode }) {
     }
   }, [currentUser, logAppwriteError]);
 
-  const unlockPost = useCallback(async (postId: string, _ignoredCost: number) => {
-    if (!currentUser) return;
-    const res = await authFetch('/api/monetization/unlock-post', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ postId }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data?.error || 'Unlock failed');
-    }
-    window.location.href = data.dialerUri;
-    toast({ title: "Orange Money payment started", description: `Pay ${data.amountLD} LD to unlock this post.` });
-  }, [currentUser, toast]);
-
   const subscribeToCreator = useCallback(async (username: string, _ignoredCost: number) => {
     if (!currentUser) return;
     const creatorUser = allUsers.find(u => u.username === username);
@@ -3303,30 +3326,6 @@ export function PostProvider({ children }: { children: ReactNode }) {
     } catch { /* ignore */ }
     toast({ title: "Subscription cancelled" });
   }, [currentUser, allUsers, toast]);
-
-  const processGiftTransaction = useCallback(async (cost: number, _currency: 'GOLD' | 'DIAMOND' = 'DIAMOND') => {
-    if (!currentUser) throw new Error("Not logged in");
-    if (!targetUserForGift) throw new Error("No recipient selected");
-
-    // Optimistic balance deduction for snappy UI
-    setCurrentUserState(prev => prev ? { ...prev, diamondBalance: (prev.diamondBalance || 0) - cost } : null);
-
-    const res = await authFetch('/api/transaction/gift', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipientId: targetUserForGift.$id, amount: cost }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      // Rollback optimistic deduction
-      setCurrentUserState(prev => prev ? { ...prev, diamondBalance: (prev.diamondBalance || 0) + cost } : null);
-      throw new Error(data?.error || 'Gift failed');
-    }
-    if (typeof data.senderNewBalance === 'number') {
-      setCurrentUserState(prev => prev ? { ...prev, diamondBalance: data.senderNewBalance } : null);
-    }
-    toast({ title: "Gift sent!", description: `${data.creatorShare ?? ''} Credits sent to creator · ${data.platformFee ?? ''} Credits platform fee` });
-  }, [currentUser, targetUserForGift, toast]);
 
   const verifyUser = useCallback(async (cost: number, currency: 'DIAMOND' | 'STAR') => {
     if (!currentUser) return;
@@ -3568,8 +3567,9 @@ export function PostProvider({ children }: { children: ReactNode }) {
       } else {
         screenshotFileId = extractFileId(screenshotUrl) || screenshotUrl;
       }
-    } catch {
-      screenshotFileId = 'upload_failed';
+    } catch (error) {
+      logAppwriteError('createPaymentRequest.uploadScreenshot', error);
+      throw error;
     }
 
     const req: Record<string, any> = {
@@ -4307,7 +4307,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
     cancelTransaction: () => setPendingTransactionState(null),
     createPaymentRequest, approvePaymentRequest, rejectPaymentRequest,
     recordWithdrawal, processWithdrawal,
-    verifyUser, processGiftTransaction, unlockPost, subscribeToCreator, cancelSubscription,
+    verifyUser, subscribeToCreator, cancelSubscription,
     incrementShareCount: async (id: string) => {
       setPostsState(prev => prev.map(p => p.$id === id ? { ...p, shares: p.shares + 1 } : p));
       try {

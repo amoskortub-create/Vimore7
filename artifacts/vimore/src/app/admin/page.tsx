@@ -499,8 +499,8 @@ export default function AdminDashboard() {
       }
       await processWithdrawal(withdrawalActionTarget.id, withdrawalActionTarget.action, withdrawalAdminMessage || undefined, proofImageUrl);
       toast({ title: withdrawalActionTarget.action === 'APPROVED' ? "Withdrawal Approved" : "Withdrawal Rejected" });
-    } catch {
-      toast({ variant: 'destructive', title: 'Action Failed', description: 'Could not process withdrawal.' });
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Action Failed', description: error?.message || 'Could not process withdrawal.' });
     } finally {
       setIsProcessingWithdrawal(false);
       setWithdrawalActionTarget(null);

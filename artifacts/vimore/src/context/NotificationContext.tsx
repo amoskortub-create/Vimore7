@@ -50,6 +50,7 @@ interface NotificationContextType {
   decrementUnreadMessageCount: (by?: number) => void;
   updateMessagePreview: (clusterId: string, text: string, time: string) => void;
   refreshNotifications: (userId: string) => Promise<void>;
+  notificationsOffline: boolean;
   requestPushPermission: () => Promise<void>;
   hasPushPermission: boolean;
 }
@@ -57,6 +58,7 @@ interface NotificationContextType {
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
 const NOTIFICATION_SOUND = "/sounds/notification.mp3";
+const NOTIFICATION_CACHE_PREFIX = 'vimore_notifications_cache_v1_';
 
 function formatTimeAgoSimple(dateStr: string): string {
   const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
@@ -68,6 +70,7 @@ function formatTimeAgoSimple(dateStr: string): string {
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<NotificationNode[]>([]);
+  const [notificationsOffline, setNotificationsOffline] = useState(false);
   const [categoryPulses, setCategoryPulses] = useState<Record<PulseCategory, number>>({
     HOME: 0, FRIENDS: 0, MUSIC: 0, MESSAGES: 0, ADMIN: 0,
   });
@@ -89,16 +92,20 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const pendingReads = React.useRef<Set<string>>(new Set());
 
   const loadNotifications = useCallback(async (userId: string) => {
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     try {
-      // Use the authenticated server path for reads as well as mutations.
-      // This avoids the Android WebView using a different Appwrite permission
-      // or session path from the one used by mark-read/delete.
-      const response = await authFetch('/api/notifications/list', {
-        cache: 'no-store',
-      });
-      if (!response.ok) throw new Error(`Notification load failed (${response.status})`);
-      const data = await response.json();
-      const mapped: NotificationNode[] = (Array.isArray(data?.documents) ? data.documents : [])
+      const request = databases.listDocuments(DATABASE_ID, COL.NOTIFICATIONS, [
+        Query.equal('user_id', userId),
+        Query.orderDesc('$createdAt'),
+        Query.limit(100),
+      ]);
+      const result = await Promise.race([
+        request,
+        new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(() => reject(new Error('Notifications timed out after 5 seconds')), 5000);
+        }),
+      ]);
+      const mapped: NotificationNode[] = result.documents
         .filter((doc: any) => !pendingDeletions.current.has(doc.$id))
         .map((doc: any) => ({
           id: doc.$id,
@@ -117,18 +124,41 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           actionHref: doc.action_href || undefined,
         }));
       setNotifications(mapped);
+      setNotificationsOffline(false);
+      try {
+        localStorage.setItem(`${NOTIFICATION_CACHE_PREFIX}${userId}`, JSON.stringify({ savedAt: Date.now(), items: mapped }));
+      } catch {}
     } catch (err) {
+      setNotificationsOffline(true);
       console.error('loadNotifications error:', err);
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
     }
   }, []);
 
   useEffect(() => {
     if (currentUser) {
+      try {
+        const saved = localStorage.getItem(`${NOTIFICATION_CACHE_PREFIX}${currentUser.$id}`);
+        const parsed = saved ? JSON.parse(saved) : null;
+        setNotifications(Array.isArray(parsed?.items) ? parsed.items : []);
+      } catch {}
       loadNotifications(currentUser.$id);
     } else {
       setNotifications([]);
+      setNotificationsOffline(false);
     }
   }, [currentUser, loadNotifications]);
+
+  useEffect(() => {
+    if (!currentUser?.$id || notifications.length === 0) return;
+    try {
+      localStorage.setItem(`${NOTIFICATION_CACHE_PREFIX}${currentUser.$id}`, JSON.stringify({
+        savedAt: Date.now(),
+        items: notifications,
+      }));
+    } catch {}
+  }, [currentUser?.$id, notifications]);
 
   // Notifications are pushed via the real-time WebSocket in GlobalRealtimeListener.
   // Polling is intentionally removed to save mobile data.
@@ -296,17 +326,26 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const fetchUnreadMessageCount = useCallback(async (userId: string) => {
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     try {
-      const res = await databases.listDocuments(DATABASE_ID, COL.MESSAGES, [
+      const request = databases.listDocuments(DATABASE_ID, COL.MESSAGES, [
         Query.equal('receiver_id', userId),
         Query.orderDesc('$createdAt'),
         Query.limit(100),
+      ]);
+      const res = await Promise.race([
+        request,
+        new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(() => reject(new Error('Unread message count timed out after 5 seconds')), 5000);
+        }),
       ]);
       const count = res.documents.filter((doc: any) => doc.is_read === false).length;
       setUnreadMessageCount(count);
       setPulseCount('MESSAGES', count);
     } catch {
-      // silently ignore — badge simply won't update if the collection is unreachable
+      // The cached badge remains unchanged if Appwrite is unreachable.
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
     }
   }, [setPulseCount]);
 
@@ -357,7 +396,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   return (
     <NotificationContext.Provider value={{
-      notifications, unreadCount, unreadMessageCount, categoryPulses, messagePreviews,
+      notifications, unreadCount, unreadMessageCount, categoryPulses, messagePreviews, notificationsOffline,
       addSignal, markAsRead, markAllAsRead, purgeSignal, clearPulse,
       incrementPulse, setPulseCount, incrementUnreadMessageCount, decrementUnreadMessageCount,
       updateMessagePreview, refreshNotifications,

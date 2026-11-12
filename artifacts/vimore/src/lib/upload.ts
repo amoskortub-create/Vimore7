@@ -1,7 +1,35 @@
 /** Browser-only Appwrite Storage upload helpers. */
 
-import { client, ID, storage, BUCKET, getFileUrl } from './appwrite';
-import { authFetch } from './auth-fetch';
+import { account, client, ID, Permission, Role, storage, BUCKET, getFileUrl } from './appwrite';
+
+const UPLOADABLE_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/avif',
+  'image/gif',
+  'image/heic',
+  'image/heif',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'audio/aac',
+  'audio/mpeg',
+  'audio/mp4',
+  'audio/ogg',
+  'audio/wav',
+  'audio/webm',
+  'audio/x-wav',
+  'video/mp4',
+  'video/quicktime',
+  'video/webm',
+  'video/x-m4v',
+]);
+
+function validateUploadFile(file: File | null | undefined): asserts file is File {
+  if (!file || typeof file.size !== 'number' || file.size <= 0 ||
+      typeof file.type !== 'string' || !UPLOADABLE_MIME_TYPES.has(file.type.toLowerCase())) {
+    throw new Error('Invalid file');
+  }
+}
 
 function normalizeUploadFile(file: File, fallbackName: string): File {
   // Capacitor/WebView can return a File-like object from a different realm,
@@ -18,14 +46,17 @@ function formatFileSize(size: number): string {
 }
 
 function uploadError(error: unknown, file: File, bucketId: string): Error {
-  const appwriteError = error as { message?: string; code?: number | string; type?: string };
+  const appwriteError = error as { message?: string; code?: number | string; status?: number | string; type?: string };
   const message = appwriteError?.message || String(error);
-  const code = appwriteError?.code;
+  const code = appwriteError?.code ?? appwriteError?.status;
   const numericCode = Number(code);
   const type = appwriteError?.type || '';
   const detail = `${message} (Appwrite code: ${code ?? 'unknown'}; file size: ${formatFileSize(file.size)}; bucketId: ${bucketId})`;
   const errorType = `${type} ${message}`.toLowerCase();
 
+  if (numericCode === 500) {
+    return new Error(`Upload failed for bucket ${bucketId}. Appwrite code: 500; message: ${message}`);
+  }
   if (numericCode === 404 || errorType.includes('storage_bucket_not_found')) {
     return new Error(`Storage bucket not found for bucket ${bucketId}. ${detail}`);
   }
@@ -43,6 +74,35 @@ function uploadError(error: unknown, file: File, bucketId: string): Error {
     return new Error(`File too large - max ${maxSize} for bucket ${bucketId}. ${detail}`);
   }
   return new Error(`Upload failed for bucket ${bucketId}. ${detail}`);
+}
+
+async function filePermissions(bucketId: string, permissions?: string[]): Promise<string[]> {
+  if (permissions) return permissions;
+  if (bucketId === BUCKET.PAYMENT_SCREENSHOTS) {
+    const user = await account.get();
+    return [Permission.read(Role.user(user.$id))];
+  }
+  return [Permission.read(Role.any())];
+}
+
+function isAppwrite500(error: unknown): boolean {
+  const appwriteError = error as { code?: number | string; status?: number | string };
+  return Number(appwriteError?.code ?? appwriteError?.status) === 500;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function createFileWithRetry(file: File, bucketId: string, fileId: string, permissions: string[]) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await storage.createFile(bucketId, fileId, file, permissions);
+    } catch (error) {
+      if (attempt > 0 || !isAppwrite500(error)) throw uploadError(error, file, bucketId);
+      await delay(2000);
+    }
+  }
 }
 
 async function getBucketMaxFileSize(bucketId: string): Promise<number | null> {
@@ -63,17 +123,12 @@ async function getBucketMaxFileSize(bucketId: string): Promise<number | null> {
   }
 }
 
-async function createFile(file: File, bucketId: string, fileId?: string) {
+async function createFile(file: File, bucketId: string, fileId?: string, permissions?: string[]) {
   const maxFileSize = await getBucketMaxFileSize(bucketId);
   if (maxFileSize !== null && file.size > maxFileSize) {
     throw new Error(`File too large - max ${formatFileSize(maxFileSize)} for bucket ${bucketId}. Your file is ${formatFileSize(file.size)}.`);
   }
-
-  try {
-    return await storage.createFile(bucketId, fileId || ID.unique(), file);
-  } catch (error) {
-    throw uploadError(error, file, bucketId);
-  }
+  return createFileWithRetry(file, bucketId, fileId || ID.unique(), await filePermissions(bucketId, permissions));
 }
 
 /**
@@ -88,12 +143,14 @@ async function createFile(file: File, bucketId: string, fileId?: string) {
  * @returns        The Appwrite fileId (use getFileUrl() to build a URL from it).
  */
 export async function uploadViaClient(
-  file: File,
+  file: File | null | undefined,
   bucketId: string,
   fileId?: string,
+  permissions?: string[],
 ): Promise<string> {
+  validateUploadFile(file);
   const normalizedFile = normalizeUploadFile(file, 'upload.bin');
-  const uploaded = await createFile(normalizedFile, bucketId, fileId);
+  const uploaded = await createFile(normalizedFile, bucketId, fileId, permissions);
   return uploaded.$id;
 }
 
@@ -101,6 +158,7 @@ export interface ClientUploadOptions {
   onProgress?: (pct: number) => void;
   signal?: AbortSignal;
   timeoutMs?: number;
+  permissions?: string[];
 }
 
 /**
@@ -116,12 +174,13 @@ export interface ClientUploadOptions {
  * @returns        The Appwrite fileId.
  */
 export async function uploadLargeViaClient(
-  file: File,
+  file: File | null | undefined,
   bucketId: string,
   fileId: string | undefined,
   options: ClientUploadOptions = {},
 ): Promise<string> {
   if (options.signal?.aborted) throw new Error('Upload cancelled');
+  validateUploadFile(file);
   const normalizedFile = normalizeUploadFile(file, 'upload.bin');
   const maxFileSize = await getBucketMaxFileSize(bucketId);
   if (maxFileSize !== null && normalizedFile.size > maxFileSize) {
@@ -134,8 +193,12 @@ export async function uploadLargeViaClient(
   });
   try {
     const uploaded = await Promise.race([
-      storage.createFile(bucketId, fileId || ID.unique(), normalizedFile)
-        .catch(error => { throw uploadError(error, normalizedFile, bucketId); }),
+      createFileWithRetry(
+        normalizedFile,
+        bucketId,
+        fileId || ID.unique(),
+        await filePermissions(bucketId, options.permissions),
+      ),
       timeout,
     ]);
     options.onProgress?.(1);
@@ -146,24 +209,13 @@ export async function uploadLargeViaClient(
 }
 
 /**
- * Upload voice recordings through the same-origin server route. This avoids
- * Appwrite CORS and cross-realm File issues in Capacitor Android WebViews.
+ * Upload voice recordings directly through the Appwrite Web SDK.
  */
-export async function uploadVoiceViaServer(file: File): Promise<{ fileId: string; mediaUrl: string }> {
+export async function uploadVoiceViaClient(file: File): Promise<{ fileId: string; mediaUrl: string }> {
   const normalizedFile = normalizeUploadFile(file, 'voice.webm');
-  const formData = new FormData();
-  formData.append('file', normalizedFile, normalizedFile.name || 'voice.webm');
-
-  const response = await authFetch('/api/upload/voice', {
-    method: 'POST',
-    body: formData,
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || !data.fileId) {
-    throw new Error(data?.error || 'Could not save the voice message.');
-  }
+  const fileId = await uploadViaClient(normalizedFile, BUCKET.VOICE_MESSAGES);
   return {
-    fileId: data.fileId,
-    mediaUrl: data.mediaUrl || getFileUrl(BUCKET.VOICE_MESSAGES, data.fileId),
+    fileId,
+    mediaUrl: getFileUrl(BUCKET.VOICE_MESSAGES, fileId),
   };
 }

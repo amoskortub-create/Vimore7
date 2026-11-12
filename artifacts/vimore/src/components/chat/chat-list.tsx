@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { saveCache, OFFLINE_KEYS } from "@/lib/offline-cache";
+import { loadCache, saveCache, OFFLINE_KEYS } from "@/lib/offline-cache";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { OnlineIndicator } from "@/components/ui/online-indicator";
 import {
@@ -37,6 +37,7 @@ export function ChatList({ selectedId, onSelect }: ChatListProps) {
   const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<"all" | "unread" | "clusters">("all");
+  const [cachedChats] = useState<any[]>(() => loadCache<any>(OFFLINE_KEYS.MESSAGES_CONTACTS));
 
   const [pinnedUsernames] = useState(new Set<string>());
 
@@ -49,7 +50,15 @@ export function ChatList({ selectedId, onSelect }: ChatListProps) {
         .map(c => ({ ...c, isGroup: false })),
       ...(clusters || [])
         .filter(cl => cl.members && cl.members.some((m: any) => m.username === currentUser.username))
-        .map(cl => ({ ...cl, isGroup: true }))
+        .map(cl => ({ ...cl, isGroup: true })),
+      ...cachedChats
+        .filter((chat: any) => chat?.$id && (chat.isGroup || chat.username))
+        .map((chat: any) => ({
+          ...chat,
+          isCachedConversation: true,
+          friendshipStatus: 'accepted',
+          members: chat.isGroup ? [{ username: currentUser.username }] : undefined,
+        })),
     ];
 
     const seen = new Set<string>();
@@ -102,7 +111,7 @@ export function ChatList({ selectedId, onSelect }: ChatListProps) {
     });
 
     return { sortedChats: sorted, requestCount: 0 };
-  }, [connections, clusters, searchQuery, activeFilter, pinnedUsernames, currentUser, friendUsernames, chatMessages, chatLastMessageAt, chatLastIncomingAt, chatReadReceipts]);
+  }, [connections, clusters, cachedChats, searchQuery, activeFilter, pinnedUsernames, currentUser, friendUsernames, chatMessages, chatLastMessageAt, chatLastIncomingAt, chatReadReceipts]);
 
   // Persist the sorted conversation list to localStorage for offline access
   useEffect(() => {

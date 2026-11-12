@@ -57,7 +57,7 @@ function MessagesInner() {
     return null;
   }, [connections, clusters, selectedChatId, currentUser]);
 
-  if (isLoading || !currentUser) {
+  if (!currentUser) {
     return <MessagesLoading />;
   }
 

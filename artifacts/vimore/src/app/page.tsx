@@ -8,6 +8,7 @@ import Image from "next/image";
 import { Header } from "@/components/layout/header";
 import { SubHeader } from "@/components/layout/sub-header";
 import { PostCard } from "@/components/post/post-card";
+import { CreatePostModal } from "@/components/post/create-post-modal";
 import { Stories } from "@/components/feed/stories";
 import { SuggestedFollows } from "@/components/feed/suggested-follows";
 import { RightSidebar } from "@/components/layout/right-sidebar";
@@ -25,6 +26,7 @@ import { useFeedSignal } from "@/context/FeedSignalContext";
 import { AcronymRibbon } from "@/components/branding/acronym-meaning";
 import { listAllStores, isStoreBoosted, getStoreLogoUrl } from "@/lib/stores";
 import { cached } from "@/lib/client-cache";
+import { loadFeedCache } from "@/lib/offline-cache";
 
 function seededShuffle<T>(arr: T[], seed: number): T[] {
   const result = [...arr];
@@ -245,24 +247,19 @@ function EmailVerificationGate({ email }: { email?: string }) {
   );
 }
 
-const FEED_CACHE_KEY = 'vimore_feed_cache_v1';
 const MAX_CACHED_POSTS = 30;
 
 export default function Home() {
   const router = useRouter();
   const { t } = useTranslation();
-  const { posts, campaigns, isLoading, initError, followingUsernames, friendUsernames, seenPostIds, isAuthenticated, isOffline, currentUser, triggerHaptic, loadMoreFeed, hasMoreFeed, isFeedLoading } = usePosts();
+  const { posts, campaigns, isLoading, initError, followingUsernames, friendUsernames, seenPostIds, isAuthenticated, isOffline, currentUser, triggerHaptic, loadMoreFeed, hasMoreFeed, isFeedLoading, refreshFeed } = usePosts();
   const { currentTrack, isExpanded } = useMusic();
   const { newFollowingPostsCount, clearNewPosts, uploadProgress } = useFeedSignal();
   const [isStoryModalOpen, setIsStoryModalOpen] = useState(false);
 
-  const [cachedPosts, setCachedPosts] = useState<any[]>(() => {
-    if (typeof window === 'undefined') return [];
-    try {
-      const saved = localStorage.getItem(FEED_CACHE_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
+  const [cachedPosts, setCachedPosts] = useState<any[]>(() => loadFeedCache<any>().posts);
+  const [cacheSavedAt, setCacheSavedAt] = useState<number | null>(() => loadFeedCache<any>().savedAt);
+  const firstPostsSnapshot = useRef(posts);
 
   const loadTriggerRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -300,29 +297,15 @@ export default function Home() {
   }, [isLoading, seenPostIds]);
 
   useEffect(() => {
-    if (posts.length === 0 || isOffline) return;
-    try {
-      const toCache = posts.slice(0, MAX_CACHED_POSTS).map((p: any) => ({
-        $id: p.$id,
-        user: p.user,
-        content: p.content,
-        image: p.image,
-        videoUrl: p.videoUrl,
-        likes: p.likes,
-        unlikes: p.unlikes,
-        comments: p.comments,
-        views: p.views,
-        time: p.time,
-        type: p.type,
-        isBoosted: p.isBoosted,
-        isLocked: p.isLocked,
-        unlockPrice: p.unlockPrice,
-        linkPreview: p.linkPreview,
-      }));
-      localStorage.setItem(FEED_CACHE_KEY, JSON.stringify(toCache));
-      setCachedPosts(toCache);
-    } catch {}
-  }, [posts, isOffline]);
+    if (posts.length === 0) return;
+    setCachedPosts(posts.slice(0, MAX_CACHED_POSTS));
+    if (firstPostsSnapshot.current !== posts) setCacheSavedAt(Date.now());
+    firstPostsSnapshot.current = posts;
+  }, [posts]);
+
+  const cacheAgeMs = cacheSavedAt === null ? null : Date.now() - cacheSavedAt;
+  const cacheIsExpired = cacheAgeMs === null || cacheAgeMs > 24 * 60 * 60 * 1000;
+  const cacheNeedsRefresh = cachedPosts.length > 0 && (cacheAgeMs === null || cacheAgeMs > 5 * 60 * 1000);
 
   const shuffledBoostedRegular = useMemo(() => {
     const boosted = posts.filter(p => p.isBoosted && p.type !== 'reel' && !p.isFeedAppend);
@@ -476,7 +459,7 @@ export default function Home() {
   }, [isLoading, isAuthenticated, isOffline, router]);
 
   // MANDATORY HANDSHAKE: Do not materialize feed if profile fetch is pending or failed
-  if (isLoading) {
+  if (isLoading && !(cachedPosts.length > 0 && currentUser)) {
     return null; // Let the AppLoadingGate handle the kinetic splash
   }
 
@@ -504,6 +487,15 @@ export default function Home() {
               : t('home_offline')}
           </span>
         </div>
+      )}
+      {!isOffline && cachedPosts.length > 0 && cacheNeedsRefresh && (
+        <button
+          type="button"
+          onClick={() => void refreshFeed()}
+          className="w-full bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 text-center text-[10px] font-bold text-amber-700 dark:text-amber-300"
+        >
+          {cacheIsExpired ? "Saved feed is older than 24 hours — tap to refresh" : "Showing saved posts — updating…"}
+        </button>
       )}
       
       <div className={cn(
@@ -624,15 +616,15 @@ export default function Home() {
                   <AcronymRibbon className="mt-4 rounded-[1.5rem]" />
                 )}
               </>
-            ) : isOffline && cachedPosts.length > 0 ? (
+            ) : cachedPosts.length > 0 ? (
               <>
                 {cachedPosts.map((post: any) => (
                   <PostCard key={`cached-${post.$id}`} {...post} />
                 ))}
                 <div className="py-6 flex flex-col items-center gap-2 text-center">
-                  <WifiOff className="h-6 w-6 text-amber-500/50" />
+                  {isOffline && <WifiOff className="h-6 w-6 text-amber-500/50" />}
                   <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/40">
-                    End of cached feed — connect to load more
+                    {isOffline ? "End of cached feed — connect to load more" : "Showing saved posts while the feed updates"}
                   </p>
                 </div>
               </>
@@ -645,6 +637,9 @@ export default function Home() {
                   <h3 className="text-2xl font-black italic uppercase tracking-tighter">{t('home_empty_title')}</h3>
                   <p className="text-muted-foreground text-sm font-medium uppercase tracking-widest">{t('home_empty_desc')}</p>
                 </div>
+                <CreatePostModal>
+                  <Button type="button" className="rounded-full font-bold">Create Post</Button>
+                </CreatePostModal>
               </div>
             )}
           </div>

@@ -21,7 +21,7 @@ function isPublicActivePath(path: string): boolean {
 }
 
 export function AppLoadingGate({ children }: { children: React.ReactNode }) {
-  const { isLoading, initError, currentUser } = usePosts();
+  const { isLoading, initError, currentUser, posts } = usePosts();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -44,11 +44,23 @@ export function AppLoadingGate({ children }: { children: React.ReactNode }) {
       setShouldRenderSplash(false);
       return;
     }
+    const hasCachedScreen = Boolean(currentUser) && (
+      (current === '/' && posts.length > 0) ||
+      current === '/menu' ||
+      current.startsWith('/profile') ||
+      current === '/messages' ||
+      current === '/notifications'
+    );
+    if (isLoading && hasCachedScreen) {
+      setIsVisible(false);
+      setShouldRenderSplash(false);
+      return;
+    }
     if (!isLoading && !initError) {
       setIsVisible(false);
       setShouldRenderSplash(false);
     }
-  }, [isLoading, initError, pathname]);
+  }, [isLoading, initError, pathname, currentUser, posts.length]);
 
   useEffect(() => {
     const current = getActivePath(pathname) || mountedPath.current;

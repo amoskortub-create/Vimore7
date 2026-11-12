@@ -38,6 +38,7 @@ import { useToast } from "@/hooks/use-toast";
 import { BiometricGate } from "@/components/layout/biometric-gate";
 import { authFetch } from "@/lib/auth-fetch";
 import { isValidOrangeMoneyNumber } from "@/lib/ld-monetization";
+import { OrangeMoneyPaymentsPanel } from "@/components/monetization/orange-money-payments-panel";
 
 
 export default function EarningsPage() {
@@ -212,6 +213,7 @@ export default function EarningsPage() {
         </header>
 
         <main className="max-w-2xl mx-auto px-4 pb-32 space-y-5 pt-6">
+          <OrangeMoneyPaymentsPanel />
 
           {/* Vault Hero */}
           <div className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-[#0f1a3d] via-[#1a0533] to-[#0a2620] p-6 shadow-2xl">

@@ -62,7 +62,7 @@ import { NativeAdNode } from "@/components/ad/native-ad-node";
 
 export default function MenuPage() {
   const { currentTrack, isExpanded } = useMusic();
-  const { unreadCount, categoryPulses, clearPulse } = useNotifications();
+  const { unreadCount, categoryPulses, clearPulse, notificationsOffline, refreshNotifications } = useNotifications();
   const { currentUser, triggerHaptic, logout, chatMessages, receivedRequestUsernames, submitTicket } = usePosts();
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -153,6 +153,15 @@ export default function MenuPage() {
         "max-w-xl mx-auto p-4 sm:p-6 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 transition-all",
         "pt-4"
       )}>
+        {notificationsOffline && currentUser && (
+          <button
+            type="button"
+            onClick={() => void refreshNotifications(currentUser.$id)}
+            className="w-full rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-left text-xs font-bold text-amber-700 dark:text-amber-300"
+          >
+            Offline — showing last saved notifications · Tap to retry
+          </button>
+        )}
         <Link href="/profile" className="block group">
           <div className="bg-white dark:bg-card rounded-[2rem] p-5 shadow-xl shadow-black/5 border border-border flex items-center justify-between transition-all hover:shadow-2xl active:scale-[0.98]">
             <div className="flex items-center gap-4">

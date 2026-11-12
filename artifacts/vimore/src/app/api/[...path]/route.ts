@@ -31,24 +31,16 @@ import * as PushSend from '@/server/api-impl/root/push/send';
 import * as PushSubscribe from '@/server/api-impl/root/push/subscribe';
 import * as PushUnsubscribe from '@/server/api-impl/root/push/unsubscribe';
 import * as NativePushSubscribe from '@/server/api-impl/root/push/native-subscribe';
-import * as TransactionGift from '@/server/api-impl/root/transaction/gift';
-import * as TransactionLockPost from '@/server/api-impl/root/transaction/lock-post';
 import * as TransactionSubscribe from '@/server/api-impl/root/transaction/subscribe';
-import * as TransactionUnlockPost from '@/server/api-impl/root/transaction/unlock-post';
 import * as TransactionVerify from '@/server/api-impl/root/transaction/verify';
-import * as UploadReel from '@/server/api-impl/root/upload-reel';
-import * as UploadVoice from '@/server/api-impl/root/upload-voice';
 import * as UserActivity from '@/server/api-impl/root/user/activity';
 import * as UserProfile from '@/server/api-impl/root/user/profile';
 import * as Withdraw from '@/server/api-impl/root/withdraw';
 import * as PostReaction from '@/server/api-impl/root/post-reaction';
 import * as MonetizationValidateCreatorEligibility from '@/server/api-impl/root/monetization/validate-creator-eligibility';
-import * as MonetizationGenerateUssd from '@/server/api-impl/root/monetization/generate-ussd';
-import * as MonetizationLogTransaction from '@/server/api-impl/root/monetization/log-transaction';
 import * as MonetizationUpdateCreatorEarnings from '@/server/api-impl/root/monetization/update-creator-earnings';
 import * as MonetizationOrangeMoneyAccount from '@/server/api-impl/root/monetization/orange-money-account';
 import * as MonetizationSubscribe from '@/server/api-impl/root/monetization/subscribe';
-import * as MonetizationUnlockPost from '@/server/api-impl/root/monetization/unlock-post';
 import * as MonetizationEarningsSummary from '@/server/api-impl/root/monetization/earnings-summary';
 
 export const dynamic = 'force-dynamic';
@@ -89,24 +81,16 @@ const ROUTES: Record<string, Handler> = {
   'push/native-subscribe': NativePushSubscribe,
   'push/web-subscribe': NativePushSubscribe,
   'push/web-unsubscribe': PushUnsubscribe,
-  'transaction/gift': TransactionGift,
-  'transaction/lock-post': TransactionLockPost,
   'transaction/subscribe': TransactionSubscribe,
-  'transaction/unlock-post': TransactionUnlockPost,
   'transaction/verify': TransactionVerify,
-  'upload/reel': UploadReel,
-  'upload/voice': UploadVoice,
   'user/activity': UserActivity,
   'user/profile': UserProfile,
   'withdraw': Withdraw,
   'post/reaction': PostReaction,
   'monetization/validate-creator-eligibility': MonetizationValidateCreatorEligibility,
-  'monetization/generate-ussd': MonetizationGenerateUssd,
-  'monetization/log-transaction': MonetizationLogTransaction,
   'monetization/update-creator-earnings': MonetizationUpdateCreatorEarnings,
   'monetization/orange-money-account': MonetizationOrangeMoneyAccount,
   'monetization/subscribe': MonetizationSubscribe,
-  'monetization/unlock-post': MonetizationUnlockPost,
   'monetization/earnings-summary': MonetizationEarningsSummary,
 };
 

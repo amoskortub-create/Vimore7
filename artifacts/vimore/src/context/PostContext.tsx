@@ -2000,7 +2000,14 @@ export function PostProvider({ children }: { children: ReactNode }) {
         } as any;
       }
       if (typeof authUser.email === 'string' && authUser.email) vimoreId = authUser.email;
-      const profileDoc = await databases.getDocument(DATABASE_ID, COL.USERS, authUser.$id);
+      const profileRes = await authFetch('/api/auth/me', { cache: 'no-store' });
+      const profileData = await profileRes.json();
+      if (!profileRes.ok) {
+        throw new Error(profileData.error || 'Could not load your account profile.');
+      }
+      authUser = profileData.authUser;
+      if (typeof authUser.email === 'string' && authUser.email) vimoreId = authUser.email;
+      const profileDoc = profileData.profileDoc;
       const user = mapDocToUser(authUser, profileDoc);
       setCurrentUserState(user);
 

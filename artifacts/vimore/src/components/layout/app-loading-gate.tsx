@@ -21,7 +21,7 @@ function isPublicActivePath(path: string): boolean {
 }
 
 export function AppLoadingGate({ children }: { children: React.ReactNode }) {
-  const { isLoading, isOffline, initError, currentUser } = usePosts();
+  const { isLoading, initError, currentUser } = usePosts();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -63,12 +63,12 @@ export function AppLoadingGate({ children }: { children: React.ReactNode }) {
   }, [pathname, isLoading, initError]);
 
   useEffect(() => {
-    if (!isLoading && !isOffline && !currentUser) {
+    if (!isLoading && !currentUser) {
       const current = getActivePath(pathname) || mountedPath.current;
       if (!current || isPublicActivePath(current)) return;
       router.replace('/login');
     }
-  }, [isLoading, isOffline, currentUser, pathname, router]);
+  }, [isLoading, currentUser, pathname, router]);
 
   const showSplash = !isPublicPath && shouldRenderSplash;
 

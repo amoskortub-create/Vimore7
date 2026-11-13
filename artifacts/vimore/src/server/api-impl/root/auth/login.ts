@@ -1,6 +1,6 @@
 import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionCookieMaxAge } from '@/lib/session-cookie';
+import { getSessionCookieExpiresAt, getSessionCookieMaxAge } from '@/lib/session-cookie';
 import { Query } from 'node-appwrite';
 import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
 
@@ -96,7 +96,11 @@ export async function POST(req: NextRequest) {
 
     if (!res.ok) {
       return NextResponse.json(
-        { error: data?.message || 'Invalid credentials.' },
+        {
+          error: data?.message || 'Invalid credentials.',
+          code: typeof data?.code === 'number' ? data.code : res.status,
+          type: typeof data?.type === 'string' ? data.type : undefined,
+        },
         { status: res.status }
       );
     }
@@ -130,6 +134,7 @@ export async function POST(req: NextRequest) {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
+      expires: getSessionCookieExpiresAt(),
       maxAge: getSessionCookieMaxAge(data.expire),
     });
     return response;

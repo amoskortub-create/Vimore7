@@ -1,7 +1,7 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionCookieMaxAge } from '@/lib/session-cookie';
+import { getSessionCookieExpiresAt, getSessionCookieMaxAge } from '@/lib/session-cookie';
 
 const ENDPOINT = (
   process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || 'https://appwrite.mediatechliberia.online/v1'
@@ -88,6 +88,7 @@ export async function POST(req: NextRequest) {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
+      expires: getSessionCookieExpiresAt(),
       maxAge: getSessionCookieMaxAge(sessionData.expire),
     });
     return response;

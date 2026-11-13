@@ -15,6 +15,8 @@
 
 import { clearApiResponseCache, fetchCachedApiResponse } from './api-response-cache';
 
+let deadSessionCleanupPromise: Promise<void> | null = null;
+
 const PROJECT_ID =
   process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || 'vimore123';
 
@@ -63,6 +65,48 @@ export function storeSessionInStorage(session: string): void {
     fallback[SESSION_KEY] = session;
     localStorage.setItem(COOKIE_KEY, JSON.stringify(fallback));
   } catch {}
+}
+
+export function isUnauthorizedSessionError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const { code, status, type } = error as { code?: unknown; status?: unknown; type?: unknown };
+  return code === 401 || status === 401 || type === 'user_session_not_found';
+}
+
+export function clearStoredAppwriteSession(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = localStorage.getItem(COOKIE_KEY);
+    if (!raw) return;
+    const stored = JSON.parse(raw);
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+      localStorage.removeItem(COOKIE_KEY);
+      return;
+    }
+    delete stored[SESSION_KEY];
+    if (Object.keys(stored).length > 0) localStorage.setItem(COOKIE_KEY, JSON.stringify(stored));
+    else localStorage.removeItem(COOKIE_KEY);
+  } catch {
+    localStorage.removeItem(COOKIE_KEY);
+  }
+}
+
+export async function clearDeadAppwriteSessionOnce(deleteCurrentSession: () => Promise<unknown>): Promise<void> {
+  if (typeof window === 'undefined') return;
+  if (!deadSessionCleanupPromise) {
+    deadSessionCleanupPromise = (async () => {
+      try { await deleteCurrentSession(); } catch { /* expired session may already be gone */ }
+      clearStoredAppwriteSession();
+      try {
+        await fetch('/api/auth/logout', { method: 'POST', cache: 'no-store', credentials: 'same-origin' });
+      } catch { /* the local token is still cleared; retrying login creates a fresh session */ }
+    })();
+  }
+  await deadSessionCleanupPromise;
+}
+
+export function resetDeadAppwriteSessionCleanup(): void {
+  deadSessionCleanupPromise = null;
 }
 
 export async function authFetch(

@@ -11,7 +11,7 @@ import {
 import { BUCKET_STORIES, storage } from '@/lib/appwrite';
 
 import { formatErrorDescription, logAppwriteError } from '@/lib/appwrite-error';
-import { authFetch, clearAuthRedirectState, getSessionFromStorage, redirectToLoginOnce, storeSessionInStorage } from '@/lib/auth-fetch';
+import { authFetch, clearAuthRedirectState, clearDeadAppwriteSessionOnce, getSessionFromStorage, isUnauthorizedSessionError, redirectToLoginOnce, resetDeadAppwriteSessionCleanup, storeSessionInStorage } from '@/lib/auth-fetch';
 import { clearApiResponseCache } from '@/lib/api-response-cache';
 import { offlineCache } from '@/lib/offline-cache';
 import { firePush } from '@/lib/push-fire';
@@ -1967,7 +1967,10 @@ export function PostProvider({ children }: { children: ReactNode }) {
       let authUser;
       try {
         authUser = await account.get();
-      } catch {
+      } catch (sessionError) {
+        if (isUnauthorizedSessionError(sessionError)) {
+          await clearDeadAppwriteSessionOnce(() => account.deleteSession('current'));
+        }
         authUser = null;
       }
       if (!authUser) {
@@ -1981,10 +1984,14 @@ export function PostProvider({ children }: { children: ReactNode }) {
         });
         const loginData = await loginRes.json();
         if (!loginRes.ok) {
-          throw new Error(loginData.error || 'Invalid credentials.');
+          throw Object.assign(new Error(loginData.error || 'Invalid credentials.'), {
+            code: typeof loginData.code === 'number' ? loginData.code : loginRes.status,
+            type: typeof loginData.type === 'string' ? loginData.type : undefined,
+          });
         }
         // Persist the session before treating this browser as signed in.
         persistAppwriteSession(loginData.secret);
+        resetDeadAppwriteSessionCleanup();
         if (typeof loginData.email === 'string' && loginData.email) vimoreId = loginData.email;
         const { client } = await import('@/lib/appwrite');
         client.setSession(loginData.secret);
@@ -2041,12 +2048,18 @@ export function PostProvider({ children }: { children: ReactNode }) {
         loadUnreadSignals(authUser.$id, profileDoc.username || '').catch(() => {});
         loadConversationMetadata(authUser.$id, profileDoc.username || '').catch(() => {});
       });
+      console.log("[login] success", user.$id);
       toast({ title: "Welcome back!", description: "You are now signed in." });
       return { success: true };
     } catch (err: any) {
       setIsLoadingState(false);
+      console.log("[login] failed", err.message, err.code);
       logAppwriteError('login', err);
-      const msg = formatErrorDescription(err, null) || 'Invalid credentials. Please try again.';
+      const rawMessage = typeof err?.message === 'string' && err.message.trim() ? err.message : null;
+      const codeSuffix = typeof err?.code === 'number' ? ` (Appwrite ${err.code})` : '';
+      const msg = rawMessage
+        ? `${rawMessage}${codeSuffix}`
+        : formatErrorDescription(err, null) || 'Invalid credentials. Please try again.';
       return { success: false, message: msg };
     }
   }, [toast, loadFeed, loadSocialGraph, loadConnections, loadStories, loadClusters, loadUserWithdrawals, loadCampaigns, loadChatReadReceipts, loadUnreadSignals, loadConversationMetadata]);

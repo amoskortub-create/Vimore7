@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   try {
     const sessionUser = await getSessionUser(req);
     if (!sessionUser) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ authenticated: false, reason: 'session_expired' }, { status: 401 });
     }
 
     const profileDoc = await getAdminDatabases().getDocument(DATABASE_ID, 'users', sessionUser.userId);
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
     console.error('[/api/auth/me]', err);
     const code = err?.code ?? err?.status;
     if (code === 401 || err?.type === 'general_unauthorized_scope') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ authenticated: false, reason: 'session_expired' }, { status: 401 });
     }
     return NextResponse.json({ error: err.message || 'Session check failed' }, { status: 500 });
   }

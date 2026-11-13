@@ -11,6 +11,8 @@ import { useToast } from "@/hooks/use-toast";
 import Link from "next/link";
 import { AcronymCaption } from "@/components/branding/acronym-meaning";
 import { useTranslation } from "@/context/LanguageContext";
+import { account } from "@/lib/appwrite";
+import { clearDeadAppwriteSessionOnce, isUnauthorizedSessionError } from "@/lib/auth-fetch";
 
 interface SavedAccount {
   id: string;
@@ -62,6 +64,16 @@ export default function LoginPage() {
       router.replace("/");
     }
   }, [currentUser, contextLoading, router]);
+
+  useEffect(() => {
+    let active = true;
+    void account.get().catch(async (error) => {
+      if (active && isUnauthorizedSessionError(error)) {
+        await clearDeadAppwriteSessionOnce(() => account.deleteSession('current'));
+      }
+    });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     try {

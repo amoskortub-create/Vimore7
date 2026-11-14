@@ -455,11 +455,11 @@ export default function MyProfilePage() {
           <div className="relative">
             <div className="relative h-48 sm:h-64 bg-gradient-to-r from-primary/20 via-accent/10 to-primary/20 overflow-hidden group">
               {coverSource && !coverFailed ? (
-                <Image
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
                   src={coverSource}
-                  alt="Cover"
-                  fill
-                  className="object-cover dark:brightness-75 transition-transform duration-700 group-hover:scale-105"
+                  alt=""
+                  className="absolute inset-0 h-full w-full object-cover dark:brightness-75 transition-transform duration-700 group-hover:scale-105"
                   onError={() => {
                     console.log("[profile] cover failed", currentUser.$id, coverFileId, coverSource);
                     setCoverFailed(true);

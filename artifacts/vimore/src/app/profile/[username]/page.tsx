@@ -412,11 +412,11 @@ export default function UserProfilePage({ params }: { params: Promise<{ username
               {settings.isFreeMode ? (
                 <div className="absolute inset-0 bg-secondary/20 flex items-center justify-center"><EyeOff className="h-10 w-10 text-muted-foreground/20" /></div>
               ) : coverSource && !coverFailed ? (
-                <Image
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
                   src={coverSource}
-                  alt="Cover"
-                  fill
-                  className="object-cover dark:brightness-75"
+                  alt=""
+                  className="absolute inset-0 h-full w-full object-cover dark:brightness-75"
                   onError={() => {
                     console.log("[profile] cover failed", displayUser.$id, coverFileId, coverSource);
                     setCoverFailed(true);

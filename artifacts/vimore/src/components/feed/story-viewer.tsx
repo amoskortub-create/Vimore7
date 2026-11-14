@@ -84,7 +84,7 @@ export function StoryViewer() {
     || (/\.(mp4|mov|webm|m4v)(?:[?#]|$)/i.test(mediaSource) ? 'video' : 'image');
   const hasTextContent = !!currentSegment
     && (!!currentSegment.background || !!currentSegment.text || !!currentSegment.textOverlays?.length);
-  const imageSource = getAdaptivePreview(mediaSource, 'story', tier) || mediaSource;
+  const imageSource = mediaSource;
   const retryableImageSource = retryMediaUrl(imageSource, mediaAttempt);
   const requiresMedia = !!currentSegment
     && (segmentType === 'video' || !!mediaSource || (segmentType === 'image' && !hasTextContent));
@@ -544,13 +544,12 @@ export function StoryViewer() {
                       </button>
                     </>
                   ) : mediaSource && segmentType !== 'video' ? (
-                    <Image 
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
                       key={currentMediaKey}
                       src={retryableImageSource}
-                      alt="Story Content" 
-                      fill 
-                      className={cn("object-cover", (currentSegment as any).filter)}
-                      priority
+                      alt=""
+                      className={cn("absolute inset-0 h-full w-full object-cover", (currentSegment as any).filter)}
                       onLoad={() => setReadyMediaKey(currentMediaKey)}
                       onError={(event) => handleMediaError(event.currentTarget.src, event.nativeEvent)}
                     />
@@ -564,11 +563,6 @@ export function StoryViewer() {
               )}
               {isMediaFailed && (
                 <div className="absolute inset-0 z-[55] flex flex-col items-center justify-center gap-3 bg-black/85 px-8 text-center text-white">
-                  <p className="text-sm font-bold">
-                    {!mediaSource
-                      ? "This story failed to upload."
-                      : "Story media could not be loaded. Tap to retry."}
-                  </p>
                   {mediaSource && (
                     <Button
                       size="sm"

@@ -120,7 +120,7 @@ export function Stories({ onOpenCreate }: StoriesProps) {
                     mediaUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
-                        src={getAdaptivePreview(mediaUrl, 'thumb', tier) || mediaUrl}
+                        src={mediaUrl}
                         alt={story.user.name} 
                         className={cn("w-full h-full object-cover transition-transform group-hover:scale-110", (firstSegment as any).filter)}
                       />

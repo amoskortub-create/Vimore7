@@ -31,6 +31,9 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useNetwork } from "@/context/NetworkContext";
 import { getAdaptivePreview } from "@/lib/adaptive-media";
+import { loadCache, OFFLINE_KEYS, saveCache } from "@/lib/offline-cache";
+
+const EXPLORE_CREATORS_CACHE_KEY = `${OFFLINE_KEYS.FRIENDS_DISCOVERY}_explore`;
 
 export default function ExplorePage() {
   const router = useRouter();
@@ -49,14 +52,15 @@ export default function ExplorePage() {
     isVerified: boolean;
     isOnline: boolean;
     lastSeenAt: string | null;
-  }[]>([]);
+  }[]>(() => loadCache(EXPLORE_CREATORS_CACHE_KEY));
 
   useEffect(() => {
+    let active = true;
     databases.listDocuments(DATABASE_ID, COL.USERS, [
       Query.orderDesc('followers_count'),
       Query.limit(20),
     ]).then(res => {
-      setRealCreators(res.documents.map((u: any) => ({
+      const creators = res.documents.map((u: any) => ({
         $id: u.$id,
         name: u.name || 'User',
         username: u.username || 'user',
@@ -65,8 +69,12 @@ export default function ExplorePage() {
         isVerified: u.is_verified || false,
         isOnline: u.is_online || false,
         lastSeenAt: u.last_seen_at || null,
-      })));
+      }));
+      if (!active) return;
+      setRealCreators(creators);
+      saveCache(EXPLORE_CREATORS_CACHE_KEY, creators, 20);
     }).catch(() => {});
+    return () => { active = false; };
   }, []);
 
   const trendingTags = useMemo(() => {

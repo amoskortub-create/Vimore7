@@ -89,7 +89,8 @@ import {
   SelectValue 
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { client, databases, DATABASE_ID, COL, BUCKET_IMAGES, BUCKET, Query, getFileUrl } from "@/lib/appwrite";
+import { client, databases, DATABASE_ID, COL, BUCKET_IMAGES, BUCKET, Query, getFileUrl, getStoredFileUrl, extractFileId } from "@/lib/appwrite";
+import { loadCache, OFFLINE_KEYS, saveCache } from "@/lib/offline-cache";
 import { getCreatorOrangeMoneyNumber, saveCreatorOrangeMoneyNumber } from "@/lib/orange-money-payments";
 import ProfileLoading from "./loading";
 
@@ -126,6 +127,7 @@ export default function MyProfilePage() {
   const [refiningMode, setRefiningMode] = useState<"avatar" | "cover">("avatar");
   const [isRefinementOpen, setIsRefinementOpen] = useState(false);
   const [isApplyingRefinement, setIsApplyingRefinement] = useState(false);
+  const [coverFailed, setCoverFailed] = useState(false);
 
   const [editData, setEditData] = useState({
     name: "",
@@ -137,8 +139,12 @@ export default function MyProfilePage() {
     orangeMoneyNumber: "",
   });
 
-  const [ownProfilePosts, setOwnProfilePosts] = useState<Post[]>([]);
-  const [isLoadingOwnPosts, setIsLoadingOwnPosts] = useState(false);
+  const [ownProfilePosts, setOwnProfilePosts] = useState<Post[]>(() =>
+    currentUser?.$id ? loadCache<Post>(`${OFFLINE_KEYS.PROFILE}_${currentUser.$id}_posts`) : []
+  );
+  const [isLoadingOwnPosts, setIsLoadingOwnPosts] = useState(() =>
+    currentUser?.$id ? loadCache<Post>(`${OFFLINE_KEYS.PROFILE}_${currentUser.$id}_posts`).length === 0 : false
+  );
   const [ownPostsCursor, setOwnPostsCursor] = useState<string | null>(null);
   const [hasMoreOwnPosts, setHasMoreOwnPosts] = useState(true);
   const ownPostsLoadMoreRef = useRef<HTMLDivElement>(null);
@@ -157,6 +163,43 @@ export default function MyProfilePage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
+  const coverSource = getStoredFileUrl(BUCKET.COVERS, currentUser?.cover);
+  const coverFileId = extractFileId(currentUser?.cover || '') || currentUser?.cover || null;
+
+  useEffect(() => {
+    setCoverFailed(false);
+  }, [currentUser?.$id, coverSource]);
+
+  useEffect(() => {
+    if (!currentUser?.$id) return;
+    const cacheKey = `${OFFLINE_KEYS.PROFILE}_${currentUser.$id}_posts`;
+    const cachedPosts = loadCache<Post>(cacheKey);
+    setOwnProfilePosts(cachedPosts);
+    setIsLoadingOwnPosts(cachedPosts.length === 0);
+    setOwnPostsCursor(null);
+    setHasMoreOwnPosts(true);
+    isLoadingOwnPostsRef.current = cachedPosts.length === 0;
+    let active = true;
+
+    void fetchProfilePosts(currentUser.$id, null).then(({ posts, cursor, hasMore }) => {
+      if (!active) return;
+      if (posts.length > 0) {
+        setOwnProfilePosts(posts);
+        saveCache(cacheKey, posts, 15);
+        setOwnPostsCursor(cursor);
+        setHasMoreOwnPosts(hasMore);
+      } else if (cachedPosts.length === 0) {
+        setOwnProfilePosts([]);
+        setOwnPostsCursor(cursor);
+        setHasMoreOwnPosts(hasMore);
+      }
+    }).finally(() => {
+      if (!active) return;
+      setIsLoadingOwnPosts(false);
+      isLoadingOwnPostsRef.current = false;
+    });
+    return () => { active = false; };
+  }, [currentUser?.$id, fetchProfilePosts]);
 
   useEffect(() => {
     if (!currentUser?.$id) return;
@@ -213,23 +256,6 @@ export default function MyProfilePage() {
         .catch(() => {});
     }
   }, [currentUser]);
-
-  useEffect(() => {
-    if (!currentUser?.$id) return;
-    setOwnProfilePosts([]);
-    setOwnPostsCursor(null);
-    setHasMoreOwnPosts(true);
-    setIsLoadingOwnPosts(true);
-    isLoadingOwnPostsRef.current = true;
-    fetchProfilePosts(currentUser.$id, null).then(({ posts, cursor, hasMore }) => {
-      setOwnProfilePosts(posts);
-      setOwnPostsCursor(cursor);
-      setHasMoreOwnPosts(hasMore);
-    }).finally(() => {
-      setIsLoadingOwnPosts(false);
-      isLoadingOwnPostsRef.current = false;
-    });
-  }, [currentUser?.$id, fetchProfilePosts]);
 
   // Fetch Reels directly from POSTS collection
   useEffect(() => {
@@ -312,7 +338,9 @@ export default function MyProfilePage() {
         fetchProfilePosts(currentUser.$id, ownPostsCursor).then(({ posts, cursor, hasMore }) => {
           setOwnProfilePosts(prev => {
             const existingIds = new Set(prev.map(p => p.$id));
-            return [...prev, ...posts.filter(p => !existingIds.has(p.$id))];
+            const next = [...prev, ...posts.filter(p => !existingIds.has(p.$id))];
+            if (currentUser?.$id) saveCache(`${OFFLINE_KEYS.PROFILE}_${currentUser.$id}_posts`, next, 30);
+            return next;
           });
           setOwnPostsCursor(cursor);
           setHasMoreOwnPosts(hasMore);
@@ -402,7 +430,7 @@ export default function MyProfilePage() {
     return typeof currentUser.following === 'number' ? currentUser.following : parseFollowerCount(currentUser.following);
   }, [currentUser, liveFollowing]);
 
-  if (isLoading) {
+  if (isLoading && !currentUser) {
     return <ProfileLoading />;
   }
 
@@ -426,8 +454,17 @@ export default function MyProfilePage() {
           
           <div className="relative">
             <div className="relative h-48 sm:h-64 bg-gradient-to-r from-primary/20 via-accent/10 to-primary/20 overflow-hidden group">
-              {currentUser.cover ? (
-                <Image src={currentUser.cover} alt="Cover" fill className="object-cover dark:brightness-75 transition-transform duration-700 group-hover:scale-105" />
+              {coverSource && !coverFailed ? (
+                <Image
+                  src={coverSource}
+                  alt="Cover"
+                  fill
+                  className="object-cover dark:brightness-75 transition-transform duration-700 group-hover:scale-105"
+                  onError={() => {
+                    console.log("[profile] cover failed", currentUser.$id, coverFileId, coverSource);
+                    setCoverFailed(true);
+                  }}
+                />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center">
                   <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-16 h-16 text-primary/30">

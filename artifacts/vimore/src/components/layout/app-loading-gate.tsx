@@ -48,6 +48,8 @@ export function AppLoadingGate({ children }: { children: React.ReactNode }) {
       (current === '/' && posts.length > 0) ||
       current === '/menu' ||
       current.startsWith('/profile') ||
+      current === '/explore' ||
+      current === '/music' ||
       current === '/messages' ||
       current === '/notifications'
     );

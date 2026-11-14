@@ -249,10 +249,12 @@ export function MusicProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 5000);
     try {
       // Use the server-side catalog route so music loads regardless of
       // client-side Appwrite collection permissions.
-      const res = await fetch('/api/music/catalog');
+      const res = await fetch('/api/music/catalog', { signal: controller.signal });
       if (!res.ok) throw new Error(`catalog ${res.status}`);
       const data = await res.json();
 
@@ -325,6 +327,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
         if (cachedAlbums) setGlobalAlbumsState(JSON.parse(cachedAlbums));
       } catch { }
     } finally {
+      window.clearTimeout(timeoutId);
       setIsMusicLoadingState(false);
     }
   }, []);

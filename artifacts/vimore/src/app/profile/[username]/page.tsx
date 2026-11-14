@@ -45,7 +45,7 @@ import { useNotifications } from "@/context/NotificationContext";
 import { aiTranslatePostAction } from "@/app/actions/ai";
 import Image from "next/image";
 import { cn, parseFollowerCount, isTextForeignToUser } from "@/lib/utils";
-import { client, databases, DATABASE_ID, COL, Query, getFileUrl, BUCKET } from "@/lib/appwrite";
+import { client, databases, DATABASE_ID, COL, Query, getFileUrl, getStoredFileUrl, extractFileId, BUCKET } from "@/lib/appwrite";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -85,6 +85,7 @@ export default function UserProfilePage({ params }: { params: Promise<{ username
   const profileCacheKey = `${OFFLINE_KEYS.PROFILE}_${encodeURIComponent(username.toLowerCase())}`;
   
   const [displayUser, setDisplayUser] = useState<User | null>(() => loadKeyValue<User>(profileCacheKey));
+  const [coverFailed, setCoverFailed] = useState(false);
   const [isLoadingProfile, setIsLoadingProfile] = useState(() => !isCacheFresh(profileCacheKey));
   const [profilePosts, setProfilePosts] = useState<Post[]>([]);
   const [isLoadingProfilePosts, setIsLoadingProfilePosts] = useState(false);
@@ -120,6 +121,12 @@ export default function UserProfilePage({ params }: { params: Promise<{ username
   const received = isRequestReceived(username);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const coverSource = getStoredFileUrl(BUCKET.COVERS, displayUser?.cover);
+  const coverFileId = extractFileId(displayUser?.cover || '') || displayUser?.cover || null;
+
+  useEffect(() => {
+    setCoverFailed(false);
+  }, [displayUser?.$id, coverSource]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') setDeviceLanguage(window.navigator.language.split('-')[0]);
@@ -402,7 +409,22 @@ export default function UserProfilePage({ params }: { params: Promise<{ username
           </header>
           <div className="relative">
             <div className="relative h-48 sm:h-64 bg-gradient-to-r from-primary/20 via-accent/10 to-primary/20 overflow-hidden">
-              {settings.isFreeMode ? <div className="absolute inset-0 bg-secondary/20 flex items-center justify-center"><EyeOff className="h-10 w-10 text-muted-foreground/20" /></div> : displayUser.cover ? <Image src={displayUser.cover} alt="Cover" fill className="object-cover dark:brightness-75" /> : <div className="absolute inset-0 flex items-center justify-center opacity-10"><img src="/icon.svg" alt="ViMore" className="h-24 w-24" /></div>}
+              {settings.isFreeMode ? (
+                <div className="absolute inset-0 bg-secondary/20 flex items-center justify-center"><EyeOff className="h-10 w-10 text-muted-foreground/20" /></div>
+              ) : coverSource && !coverFailed ? (
+                <Image
+                  src={coverSource}
+                  alt="Cover"
+                  fill
+                  className="object-cover dark:brightness-75"
+                  onError={() => {
+                    console.log("[profile] cover failed", displayUser.$id, coverFileId, coverSource);
+                    setCoverFailed(true);
+                  }}
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center opacity-10"><img src="/icon.svg" alt="ViMore" className="h-24 w-24" /></div>
+              )}
             </div>
             <div className="px-4 pb-4">
               <div className="relative inline-block -mt-16 sm:-mt-24 ml-0 sm:ml-2"><Avatar className="w-32 h-32 sm:w-44 sm:h-44 border-4 border-white dark:border-card shadow-xl ring-2 ring-primary/5"><AvatarImage src={displayUser.avatar} /><AvatarFallback>{displayUser.name[0]}</AvatarFallback></Avatar></div>

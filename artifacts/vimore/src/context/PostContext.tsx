@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   account, databases, client, ID, Query, Models, Permission, Role,
   COL, BUCKET, DATABASE_ID,
-  getFileUrl, extractFileId, formatTimeAgo, avatarFallback, toProxyUrl,
+  getFileUrl, getStoredFileUrl, extractFileId, formatTimeAgo, avatarFallback, toProxyUrl,
 } from '@/lib/appwrite';
 import { BUCKET_STORIES, storage } from '@/lib/appwrite';
 
@@ -105,7 +105,9 @@ export interface User {
 export interface StorySegment {
   $id: string;
   type: 'image' | 'video' | 'text';
+  fileId?: string;
   mediaUrl?: string;
+  posterUrl?: string;
   text?: string;
   duration?: number;
   overlays?: any[];
@@ -439,6 +441,8 @@ const OFFICIAL_GATEWAY = {
 };
 
 function mapDocToUser(authUser: Models.User<Models.Preferences>, doc: Models.Document): User {
+  const coverValue = doc.cover_id || doc.cover_file_id || doc.cover_image_id || doc.cover_photo_id
+    || doc.coverFileId || doc.coverImageId || doc.coverPhotoId || doc.coverImage || doc.coverPhoto || doc.cover;
   return {
     $id: authUser.$id,
     name: doc.name || authUser.name,
@@ -446,7 +450,7 @@ function mapDocToUser(authUser: Models.User<Models.Preferences>, doc: Models.Doc
     vimoreId: authUser.email,
     phone: doc.phone || undefined,
     avatar: doc.avatar_id ? getFileUrl(BUCKET.AVATARS, doc.avatar_id) : avatarFallback(doc.name || authUser.name),
-    cover: doc.cover_id ? getFileUrl(BUCKET.COVERS, doc.cover_id) : undefined,
+    cover: getStoredFileUrl(BUCKET.COVERS, coverValue) || undefined,
     isVerified: doc.is_verified || false,
     isEmailVerified: authUser.emailVerification,
     followers: doc.followers_count || 0,
@@ -477,13 +481,15 @@ function mapDocToUser(authUser: Models.User<Models.Preferences>, doc: Models.Doc
 }
 
 function mapProfileDocToUser(doc: Models.Document): User {
+  const coverValue = doc.cover_id || doc.cover_file_id || doc.cover_image_id || doc.cover_photo_id
+    || doc.coverFileId || doc.coverImageId || doc.coverPhotoId || doc.coverImage || doc.coverPhoto || doc.cover;
   return {
     $id: doc.$id,
     name: doc.name || '',
     username: doc.username || '',
     vimoreId: doc.email || '',
     avatar: doc.avatar_id ? getFileUrl(BUCKET.AVATARS, doc.avatar_id) : avatarFallback(doc.name || 'U'),
-    cover: doc.cover_id ? getFileUrl(BUCKET.COVERS, doc.cover_id) : undefined,
+    cover: getStoredFileUrl(BUCKET.COVERS, coverValue) || undefined,
     isVerified: doc.is_verified || false,
     followers: doc.followers_count || 0,
     following: doc.following_count || 0,
@@ -673,7 +679,11 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const [clusters, setClustersState] = useState<Cluster[]>([]);
   const clustersRef = useRef<Cluster[]>([]);
   useEffect(() => { clustersRef.current = clusters; }, [clusters]);
-  const [connections, setConnectionsState] = useState<Connection[]>([]);
+  const [connections, setConnectionsState] = useState<Connection[]>(() => {
+    if (typeof window === 'undefined') return [];
+    return (offlineCache.getConnections() as Connection[])
+      .filter(connection => connection.friendshipStatus === 'accepted');
+  });
   const conversationCleanupUsersRef = useRef(new Set<string>());
   const [stories, setStoriesState] = useState<any[]>([]);
   const [chatMessages, setChatMessages] = useState<Record<string, ChatMessage[]>>({});
@@ -706,7 +716,13 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const [followerUsernames, setFollowerUsernamesState] = useState<Set<string>>(new Set());
   const [postCountOverrides, setPostCountOverrides] = useState<Record<string, { likes?: number; unlikes?: number; comments?: number; shares?: number }>>({});
   const [streamedComments, setStreamedComments] = useState<PostComment[]>([]);
-  const [friendUsernames, setFriendUsernamesState] = useState<Set<string>>(new Set());
+  const [friendUsernames, setFriendUsernamesState] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set<string>();
+    return new Set((offlineCache.getConnections() as Connection[])
+      .filter(connection => connection.friendshipStatus === 'accepted')
+      .map(connection => connection.username)
+      .filter(Boolean));
+  });
   const [sentRequestUsernames, setSentRequestUsernamesState] = useState<Set<string>>(new Set());
   const [receivedRequestUsernames, setReceivedRequestUsernamesState] = useState<Set<string>>(new Set());
   const [activeSubscriptions, setActiveSubscriptionsState] = useState<Set<string>>(new Set());
@@ -1054,7 +1070,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const loadConnections = useCallback(async (userId: string, currentUsername?: string) => {
+  const loadConnections = useCallback(async (userId: string) => {
     try {
       if (!conversationCleanupUsersRef.current.has(userId)) {
         const response = await authFetch('/api/friends/action', {
@@ -1124,52 +1140,17 @@ export function PostProvider({ children }: { children: ReactNode }) {
         followsYou: false,
       }));
 
-      const allMessages: any[] = [];
-      if (currentUsername) {
-        const listAcceptedMessages = async (queries: string[]) => {
-          const documents: any[] = [];
-          let cursor: string | undefined;
-          while (true) {
-            const page = await databases.listDocuments(DATABASE_ID, COL.MESSAGES, [
-              ...queries,
-              Query.orderDesc('$createdAt'),
-              Query.limit(100),
-              ...(cursor ? [Query.cursorAfter(cursor)] : []),
-            ]);
-            documents.push(...page.documents);
-            if (page.documents.length < 100) return documents;
-            cursor = page.documents[page.documents.length - 1]?.$id;
-            if (!cursor) return documents;
-          }
-        };
-        for (let offset = 0; offset < friendIdList.length; offset += 100) {
-          const ids = friendIdList.slice(offset, offset + 100);
-          const results = await Promise.all([
-            listAcceptedMessages([Query.equal('sender_id', userId), Query.equal('receiver_id', ids)]),
-            listAcceptedMessages([Query.equal('sender_id', ids), Query.equal('receiver_id', userId)]),
-          ]);
-          allMessages.push(...results[0], ...results[1]);
-        }
-      }
-
-      const lastMessageByChat = new Map<string, any>();
-      for (const message of allMessages) {
-        const chatId = message.cluster_id;
-        const previous = chatId ? lastMessageByChat.get(chatId) : null;
-        if (!chatId || (previous && previous.$createdAt >= message.$createdAt)) continue;
-        lastMessageByChat.set(chatId, message);
-      }
+      const cachedConnections = new Map(
+        (offlineCache.getConnections() as Connection[]).map(connection => [connection.username, connection])
+      );
       const enriched = conns.map(connection => {
-        const chatId = [currentUsername, connection.username].sort().join('_');
-        const message = lastMessageByChat.get(chatId);
-        return message
-          ? {
-              ...connection,
-              friendshipStatus: 'accepted' as const,
-              lastMessage: getChatMessagePreview({ text: message.text, type: message.type }),
-              lastTime: formatTimeAgo(message.$createdAt),
-            }
-          : { ...connection, friendshipStatus: 'accepted' as const };
+        const cached = cachedConnections.get(connection.username);
+        return {
+          ...connection,
+          friendshipStatus: 'accepted' as const,
+          lastMessage: cached?.lastMessage,
+          lastTime: cached?.lastTime,
+        };
       });
       setConnectionsState(enriched);
       offlineCache.saveConnections(enriched);
@@ -1264,23 +1245,33 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
       const mapped = storiesResult.documents.map((doc: any) => {
         const authorDoc = authorsMap[doc.user_id];
-        const segments = (segmentsMap[doc.$id] || []).map(seg => ({
-          $id: seg.$id,
-          type: seg.type || seg.media_type || (
-            String(seg.mime_type || seg.mimeType || '').startsWith('video/')
-            || /\.(mp4|mov|webm|m4v)(?:[?#]|$)/i.test(seg.story_url || '')
-              ? 'video'
-              : 'image'
-          ),
-          fileId: seg.media_id || undefined,
-          mediaUrl: seg.media_id ? getFileUrl(BUCKET.STORY_MEDIA, seg.media_id) : (seg.story_url ? toProxyUrl(seg.story_url) : undefined),
-          text: seg.text,
-          duration: seg.duration || 5,
-          filter: seg.filter,
-          background: seg.background,
-          textOverlays: seg.text_overlays ? JSON.parse(seg.text_overlays) : undefined,
-          postId: seg.post_id || undefined,
-        }));
+        const segments = (segmentsMap[doc.$id] || []).map(seg => {
+          const storedMediaUrl = seg.story_url || seg.media_url || seg.mediaUrl || seg.image;
+          const fileId = seg.media_id || seg.media_file_id || seg.mediaId || seg.file_id || seg.fileId
+            || extractFileId(storedMediaUrl || '') || undefined;
+          const rawType = String(seg.type || seg.media_type || '').toLowerCase();
+          const mimeType = String(seg.mime_type || seg.mimeType || '').toLowerCase();
+          const detectedType = mimeType.startsWith('video/')
+            || /\.(mp4|mov|webm|m4v)(?:[?#]|$)/i.test(storedMediaUrl || '')
+            ? 'video'
+            : 'image';
+          const mediaUrl = fileId
+            ? getFileUrl(BUCKET.STORY_MEDIA, fileId)
+            : getStoredFileUrl(BUCKET.STORY_MEDIA, storedMediaUrl);
+          return {
+            $id: seg.$id,
+            type: rawType === 'text' ? 'text' : (detectedType === 'video' || rawType === 'video' ? 'video' : 'image'),
+            fileId,
+            mediaUrl: mediaUrl || undefined,
+            posterUrl: getStoredFileUrl(BUCKET.STORY_MEDIA, seg.poster_url || seg.thumbnail_url || seg.poster) || undefined,
+            text: seg.text,
+            duration: seg.duration || 5,
+            filter: seg.filter,
+            background: seg.background,
+            textOverlays: seg.text_overlays ? JSON.parse(seg.text_overlays) : undefined,
+            postId: seg.post_id || undefined,
+          };
+        });
         return {
           $id: doc.$id,
           user_id: doc.user_id,
@@ -1638,12 +1629,12 @@ export function PostProvider({ children }: { children: ReactNode }) {
         databases.listDocuments(DATABASE_ID, COL.MESSAGES, [
           Query.equal('sender_id', userId),
           Query.orderDesc('$createdAt'),
-          Query.limit(200),
+          Query.limit(20),
         ]),
         databases.listDocuments(DATABASE_ID, COL.MESSAGES, [
           Query.equal('receiver_id', userId),
           Query.orderDesc('$createdAt'),
-          Query.limit(200),
+          Query.limit(20),
         ]),
       ]);
 
@@ -1793,7 +1784,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       void Promise.allSettled([
         loadFeed(),
         loadSocialGraph(authUser.$id),
-        loadConnections(authUser.$id, profileDoc.username || ''),
+        loadConnections(authUser.$id),
         loadStories(),
         loadClusters(authUser.$id),
         loadUserWithdrawals(authUser.$id),
@@ -2056,7 +2047,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       void Promise.allSettled([
         loadFeed(),
         loadSocialGraph(authUser.$id),
-        loadConnections(authUser.$id, profileDoc.username || ''),
+        loadConnections(authUser.$id),
         loadStories(),
         loadClusters(authUser.$id),
         loadUserWithdrawals(authUser.$id),
@@ -2175,7 +2166,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       await Promise.allSettled([
         loadFeed(),
         loadSocialGraph(authUser.$id),
-        loadConnections(authUser.$id, username),
+        loadConnections(authUser.$id),
         loadStories(),
         loadClusters(authUser.$id),
         loadCampaigns(),
@@ -3067,7 +3058,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       }
       setReceivedRequestUsernamesState(prev => { const next = new Set(prev); next.delete(username); return next; });
       setFollowingUsernamesState(prev => new Set(prev).add(username));
-      await loadConnections(currentUser.$id, currentUser.username);
+      await loadConnections(currentUser.$id);
       if (senderDoc) {
         setConnectionsState(prev => prev.some(connection => connection.username === username)
           ? prev

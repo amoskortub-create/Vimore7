@@ -166,6 +166,18 @@ export function toProxyUrl(url: string): string {
   return url;
 }
 
+export function getStoredFileUrl(bucketId: string, value: string | null | undefined): string {
+  const source = value?.trim();
+  if (!source) return '';
+  if (source.startsWith('blob:') || source.startsWith('data:')) return source;
+  if (source.startsWith('/api/file/') || /\/storage\/buckets\/[^/]+\/files\//.test(source)) {
+    const fileId = extractFileId(source);
+    return fileId ? getFileUrl(bucketId, fileId) : '';
+  }
+  if (/^https?:\/\//i.test(source)) return source;
+  return /^[a-zA-Z0-9._-]{1,64}$/.test(source) ? getFileUrl(bucketId, source) : '';
+}
+
 export function isMediaUrl(value: string | undefined | null): value is string {
   return !!value && (
     value.startsWith('/api/file/') ||

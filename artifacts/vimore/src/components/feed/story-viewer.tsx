@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { usePosts, StorySegment } from "@/context/PostContext";
 import { useNetwork } from "@/context/NetworkContext";
 import { getAdaptivePreview } from "@/lib/adaptive-media";
-import { databases, DATABASE_ID, COL, ID } from "@/lib/appwrite";
+import { databases, DATABASE_ID, COL, ID, BUCKET_STORIES, getStoredFileUrl, extractFileId } from "@/lib/appwrite";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
 import {
@@ -24,6 +24,11 @@ import { useToast } from "@/hooks/use-toast";
 const STORY_DURATION = 5000; // 5 seconds per segment
 const AD_DURATION = 30000; // 30 seconds for ads
 const QUICK_REACTIONS = ["❤️", "🔥", "😂", "😮", "😢", "👏"];
+
+function retryMediaUrl(url: string, attempt: number): string {
+  if (!attempt) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}retry=${attempt}`;
+}
 
 interface FloatingReaction {
   id: number;
@@ -73,17 +78,23 @@ export function StoryViewer() {
   const isOwner = activeStory?.user.username === currentUser?.username;
   const currentSegment = activeStory?.segments[segmentIndex];
   const mediaSource = currentSegment
-    ? (currentSegment.mediaUrl || (currentSegment as any).image || '')
+    ? getStoredFileUrl(BUCKET_STORIES, currentSegment.mediaUrl || (currentSegment as any).image || '')
     : '';
   const segmentType = currentSegment?.type
     || (/\.(mp4|mov|webm|m4v)(?:[?#]|$)/i.test(mediaSource) ? 'video' : 'image');
   const hasTextContent = !!currentSegment
     && (!!currentSegment.background || !!currentSegment.text || !!currentSegment.textOverlays?.length);
+  const imageSource = getAdaptivePreview(mediaSource, 'story', tier) || mediaSource;
+  const retryableImageSource = retryMediaUrl(imageSource, mediaAttempt);
   const requiresMedia = !!currentSegment
     && (segmentType === 'video' || !!mediaSource || (segmentType === 'image' && !hasTextContent));
   const currentMediaKey = `${activeStory?.$id || ''}:${currentSegment?.$id || segmentIndex}:${mediaAttempt}`;
   const isMediaLoaded = !requiresMedia || readyMediaKey === currentMediaKey;
   const isMediaFailed = requiresMedia && (!mediaSource || failedMediaKey === currentMediaKey);
+  const handleMediaError = (url: string, error: unknown) => {
+    console.log("[story] media failed", activeStory?.$id, currentSegment?.fileId || extractFileId(mediaSource), url || mediaSource, error);
+    setFailedMediaKey(currentMediaKey);
+  };
 
   const handleClose = useCallback(() => {
     setActiveStoryIndex(null);
@@ -507,7 +518,8 @@ export function StoryViewer() {
                     <>
                       <video
                         key={currentMediaKey}
-                        src={mediaSource}
+                        src={retryMediaUrl(mediaSource, mediaAttempt)}
+                        poster={currentSegment?.posterUrl}
                         preload="auto"
                         className="w-full h-full object-cover"
                         autoPlay
@@ -522,7 +534,7 @@ export function StoryViewer() {
                         }}
                         onPause={() => setPlayingMediaKey(key => key === currentMediaKey ? null : key)}
                         onEnded={() => setPlayingMediaKey(key => key === currentMediaKey ? null : key)}
-                        onError={() => setFailedMediaKey(currentMediaKey)}
+                        onError={(event) => handleMediaError(event.currentTarget.currentSrc, event.currentTarget.error)}
                       />
                       <button
                         className="absolute bottom-24 right-4 z-30 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white"
@@ -534,13 +546,13 @@ export function StoryViewer() {
                   ) : mediaSource && segmentType !== 'video' ? (
                     <Image 
                       key={currentMediaKey}
-                      src={getAdaptivePreview(mediaSource, 'story', tier) || mediaSource}
+                      src={retryableImageSource}
                       alt="Story Content" 
                       fill 
                       className={cn("object-cover", (currentSegment as any).filter)}
                       priority
                       onLoad={() => setReadyMediaKey(currentMediaKey)}
-                      onError={() => setFailedMediaKey(currentMediaKey)}
+                      onError={(event) => handleMediaError(event.currentTarget.src, event.nativeEvent)}
                     />
                   ) : null}
                 </>
@@ -555,7 +567,7 @@ export function StoryViewer() {
                   <p className="text-sm font-bold">
                     {!mediaSource
                       ? "This story failed to upload."
-                      : "Could not load story media. Tap to retry."}
+                      : "Story media could not be loaded. Tap to retry."}
                   </p>
                   {mediaSource && (
                     <Button

@@ -93,7 +93,7 @@ export function WithdrawCredits() {
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
           <label className="text-xs font-bold">Amount in Credits</label>
-          <Input type="number" min={MIN_WITHDRAW_CREDITS} max={balance} step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} />
+          <Input type="number" min={MIN_WITHDRAW_CREDITS} max={balance} step="0.01" placeholder={`At least ${MIN_WITHDRAW_CREDITS} Credits`} value={amount} onChange={(event) => setAmount(event.target.value)} />
         </div>
         <div className="space-y-1.5">
           <label className="text-xs font-bold">Method</label>
@@ -121,6 +121,9 @@ export function WithdrawCredits() {
         <p className="text-xs font-bold text-amber-600">Minimum withdraw is {MIN_WITHDRAW_CREDITS} Credits</p>
       )}
       {credits > balance && <p className="text-xs font-bold text-destructive">Insufficient Credit Balance.</p>}
+      {(!accountName.trim() || !accountNumber.trim()) && (
+        <p className="text-xs text-muted-foreground">Enter the account name and account number to enable withdrawal.</p>
+      )}
       <Button className="w-full" onClick={handleSubmit} disabled={isSubmitting || credits < MIN_WITHDRAW_CREDITS || credits > balance || !accountName.trim() || !accountNumber.trim()}>
         {isSubmitting ? "Submitting..." : "Request Withdraw"}
       </Button>

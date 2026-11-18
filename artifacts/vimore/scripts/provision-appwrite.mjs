@@ -582,6 +582,7 @@ const COLLECTIONS = [
       { key: 'idx_sender_user_id', type: 'key', attributes: ['senderUserId'], orders: ['ASC'] },
       { key: 'idx_receiver_user_id', type: 'key', attributes: ['receiverUserId'], orders: ['ASC'] },
       { key: 'idx_transaction_user_id', type: 'key', attributes: ['user_id'], orders: ['ASC'] },
+      { key: 'idx_transaction_user_status', type: 'key', attributes: ['user_id', 'status'], orders: ['ASC', 'ASC'] },
       { key: 'idx_transaction_type', type: 'key', attributes: ['transactionType'], orders: ['ASC'] },
       { key: 'idx_amount_ld', type: 'key', attributes: ['amountLD'], orders: ['ASC'] },
       { key: 'idx_item_id', type: 'key', attributes: ['itemId'], orders: ['ASC'] },
@@ -739,6 +740,7 @@ const COLLECTIONS = [
       { key: 'creator_username',   type: 'string',   size: 64  },
       { key: 'subscriber_username',type: 'string',   size: 64  },
       { key: 'price',              type: 'float',    defaultValue: 0 },
+      { key: 'tier',               type: 'string',   size: 32  },
       { key: 'status',             type: 'string',   size: 16, defaultValue: 'ACTIVE' },
       { key: 'expires_at',         type: 'datetime'  },
     ],
@@ -746,6 +748,7 @@ const COLLECTIONS = [
       { key: 'idx_subscriber_id', type: 'key', attributes: ['subscriber_id'], orders: ['ASC'] },
       { key: 'idx_creator_id',    type: 'key', attributes: ['creator_id'],    orders: ['ASC'] },
       { key: 'idx_status',        type: 'key', attributes: ['status'],        orders: ['ASC'] },
+      { key: 'idx_subscription_check', type: 'key', attributes: ['subscriber_id', 'creator_id', 'status'], orders: ['ASC', 'ASC', 'ASC'] },
     ],
   },
   {

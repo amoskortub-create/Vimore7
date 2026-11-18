@@ -1,7 +1,7 @@
 "use client";
 
 import { Component, type ReactNode, useRef, useEffect, useState, useMemo, useCallback } from "react";
-import { saveCache, loadCache, isCacheFresh, pinMediaInSW, OFFLINE_KEYS } from "@/lib/offline-cache";
+import { saveCache, loadCache, pinMediaInSW, OFFLINE_KEYS } from "@/lib/offline-cache";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
@@ -33,6 +33,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useNetwork } from "@/context/NetworkContext";
 import { getAdaptivePreview } from "@/lib/adaptive-media";
+import { seededShuffle, uniqueReels } from "@/lib/reel-feed";
 import { Input } from "@/components/ui/input";
 import { cn, saveFileToDevice } from "@/lib/utils";
 import { usePosts } from "@/context/PostContext";
@@ -90,18 +91,6 @@ const SHARE_PLATFORMS = [
   { id: "twitter", label: "X / Twitter", bg: "bg-black border border-white/20", emoji: "🐦" },
   { id: "telegram", label: "Telegram", bg: "bg-[#2CA5E0]", emoji: "✈️" },
 ];
-
-/* ── Seeded Fisher-Yates shuffle — same seed = same order, so feed is stable within a session ── */
-function seededShuffle<T>(arr: T[], seed: number): T[] {
-  const result = [...arr];
-  let s = seed;
-  for (let i = result.length - 1; i > 0; i--) {
-    s = (s * 1664525 + 1013904223) & 0xffffffff;
-    const j = Math.abs(s) % (i + 1);
-    [result[i], result[j]] = [result[j], result[i]];
-  }
-  return result;
-}
 
 function MessagePickerSheet({
   reel,
@@ -485,7 +474,6 @@ function ReelItem({
   onToggleMute,
   onOpenShare,
   onOpenComment,
-  onMarkSeen,
   onSkip,
 }: {
   reel: ReelFeedItem;
@@ -497,7 +485,6 @@ function ReelItem({
   onToggleMute: () => void;
   onOpenShare: () => void;
   onOpenComment: () => void;
-  onMarkSeen: (id: string) => void;
   onSkip: () => void;
 }) {
   const router = useRouter();
@@ -520,7 +507,7 @@ function ReelItem({
   const [showHeart, setShowHeart] = useState(false);
   // showSoundSheet removed — "use this sound" feature deleted
   const [isDownloading, setIsDownloading] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(() => netTier !== 'lite');
+  const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [seekFlash, setSeekFlash] = useState<'left' | 'right' | null>(null);
@@ -531,7 +518,6 @@ function ReelItem({
   const lastTapRef = useRef(0);
   const singleTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const soundAudioRef = useRef<HTMLAudioElement | null>(null);
-  const seenMarkedRef = useRef(false);
 
   const combinedVideoRef = useCallback((el: HTMLVideoElement | null) => {
     setVideoElement(el);
@@ -556,15 +542,15 @@ function ReelItem({
     };
   }, [videoElement]);
 
-  // Mark reel as seen after 2s of active play
   useEffect(() => {
-    if (!isActive || seenMarkedRef.current || reel.isCampaignReel) return;
-    const timer = setTimeout(() => {
-      onMarkSeen(reel.$id);
-      seenMarkedRef.current = true;
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, [isActive, reel.$id, reel.isCampaignReel, onMarkSeen]);
+    if (!videoElement) return;
+    videoElement.muted = isMuted;
+    if (isActive) {
+      videoElement.play().catch(() => setIsPlaying(false));
+    } else {
+      videoElement.pause();
+    }
+  }, [videoElement, isActive, isMuted]);
 
   const isLiked = isPostLiked(reel.$id);
   const isOwn = currentUser?.username === creator.username;
@@ -705,7 +691,11 @@ function ReelItem({
           loop
           playsInline
           muted={isMuted}
-          preload="none"
+          autoPlay={isActive}
+          preload={isActive ? "auto" : "metadata"}
+          onCanPlay={() => {
+            if (isActive) videoElement?.play().catch(() => setIsPlaying(false));
+          }}
           onError={() => { setVideoUnavailable(true); setIsPlaying(false); }}
           className="absolute inset-0 w-full h-full object-cover"
           style={{ filter: videoFilter, transform: videoMirror ? 'scaleX(-1)' : undefined }}
@@ -1003,16 +993,17 @@ function ReelItem({
 /* ─────────────────────────────── Main Page ─────────────────────────────── */
 
 export default function ReelsPage() {
-  const { campaigns, posts, openCommentHub, fetchComments, friendUsernames, followingUsernames, followingUserIds, settings, isOffline, fetchReels, postCountOverrides } = usePosts();
-  const { tier: pageTier } = useNetwork();
+  const { campaigns, openCommentHub, fetchComments, friendUsernames, followingUsernames, followingUserIds, settings, isOffline, fetchReels, postCountOverrides } = usePosts();
 
   const [cachedReels] = useState<Post[]>(() => loadCache<Post>(OFFLINE_KEYS.REELS));
-  const [reelsList, setReelsList] = useState<Post[]>(() => cachedReels);
+  const [reelsList, setReelsList] = useState<Post[]>(() => uniqueReels(cachedReels));
   const [reelsPhase, setReelsPhase] = useState<'connections' | 'global'>('connections');
   const [reelsConnCursor, setReelsConnCursor] = useState<string | null>(null);
   const [reelsGlobalCursor, setReelsGlobalCursor] = useState<string | null>(null);
   const [hasMoreReels, setHasMoreReels] = useState(true);
   const [isLoadingReels, setIsLoadingReels] = useState(false);
+  const [feedError, setFeedError] = useState(false);
+  const [retryFeed, setRetryFeed] = useState(0);
   const isLoadingReelsRef = useRef(false);
   const reelsPhaseRef = useRef<'connections' | 'global'>('connections');
   const reelsConnCursorRef = useRef<string | null>(null);
@@ -1021,21 +1012,16 @@ export default function ReelsPage() {
   // Stable per-session random seed (different every page load = different shuffle)
   const sessionSeed = useRef(Math.floor(Math.random() * 0x7fffffff));
 
-  // Track which reels the user has seen this session
-  const [seenIds, setSeenIds] = useState<Set<string>>(() => new Set());
-  const markSeen = useCallback((id: string) => {
-    setSeenIds(prev => { if (prev.has(id)) return prev; const n = new Set(prev); n.add(id); return n; });
-  }, []);
-
   useEffect(() => {
-    if (isCacheFresh(OFFLINE_KEYS.REELS)) return;
+    if (isOffline) return;
     if (isLoadingReelsRef.current) return;
     isLoadingReelsRef.current = true;
     setIsLoadingReels(true);
+    setFeedError(false);
     const connIds = [...followingUserIds].slice(0, 100);
     fetchReels({ phase: 'connections', connIds, connCursor: null, globalCursor: null })
       .then(({ posts, phase, connCursor, globalCursor, hasMore }) => {
-        setReelsList(posts);
+        setReelsList(uniqueReels(seededShuffle(posts, sessionSeed.current)));
         setReelsPhase(phase);
         setReelsConnCursor(connCursor);
         setReelsGlobalCursor(globalCursor);
@@ -1044,15 +1030,16 @@ export default function ReelsPage() {
         reelsConnCursorRef.current = connCursor;
         reelsGlobalCursorRef.current = globalCursor;
       })
-      .catch(() => {
+      .catch((error) => {
+        console.error("[reels] initial feed load failed", error);
         if (isOffline && cachedReels.length > 0) setReelsList(cachedReels);
+        else setFeedError(true);
       })
       .finally(() => {
         setIsLoadingReels(false);
         isLoadingReelsRef.current = false;
       });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchReels]);
+  }, [fetchReels, followingUserIds, isOffline, retryFeed]);
 
   useEffect(() => {
     if (isOffline && reelsList.length === 0 && !isLoadingReels && cachedReels.length > 0) {
@@ -1062,7 +1049,7 @@ export default function ReelsPage() {
 
   useEffect(() => {
     if (isOffline || reelsList.length === 0) return;
-    const toCache = reelsList.slice(0, 15).map(r => ({
+    const toCache = uniqueReels(reelsList).slice(0, 15).map(r => ({
       $id: r.$id, user: r.user, content: r.content,
       videoUrl: r.videoUrl, image: r.image,
       likes: r.likes, unlikes: r.unlikes,
@@ -1077,85 +1064,18 @@ export default function ReelsPage() {
     return { ...r, ...(ov.likes !== undefined ? { likes: ov.likes } : {}), ...(ov.unlikes !== undefined ? { unlikes: ov.unlikes } : {}), ...(ov.comments !== undefined ? { comments: ov.comments } : {}), ...(ov.shares !== undefined ? { shares: ov.shares } : {}) };
   }), [reelsList, postCountOverrides]);
 
-  /* ── For You feed: unseen first (shuffled) → most viewed (shuffled) → rest ── */
-  const forYouSorted = useMemo(() => {
-    const seed = sessionSeed.current;
-    const connectionSet = new Set([...(friendUsernames || []), ...(followingUsernames || [])]);
-
-    const unseen = reels.filter(r => !seenIds.has(r.$id));
-    const seen = reels.filter(r => seenIds.has(r.$id));
-
-    // Within unseen: connections get priority via a weighted shuffle
-    // Split unseen into connection-unseen and global-unseen, shuffle each, interleave
-    const unseenConn = unseen.filter(r => connectionSet.has(r.user.username));
-    const unseenGlobal = unseen.filter(r => !connectionSet.has(r.user.username));
-
-    // Sort global unseen by views desc, then shuffle within tiers
-    const unseenGlobalByViews = [...unseenGlobal].sort((a, b) => (b.views || 0) - (a.views || 0));
-    // Split into top-viewed and rest, shuffle each bucket separately
-    const topViewedCount = Math.ceil(unseenGlobalByViews.length / 3);
-    const topViewed = seededShuffle(unseenGlobalByViews.slice(0, topViewedCount), seed + 1);
-    const restViewed = seededShuffle(unseenGlobalByViews.slice(topViewedCount), seed + 2);
-    const shuffledUnseenConn = seededShuffle(unseenConn, seed + 3);
-
-    // Interleave: conn, top-viewed global, rest
-    const unseenOrdered: Post[] = [];
-    let ci = 0, ti = 0, ri = 0;
-    while (ci < shuffledUnseenConn.length || ti < topViewed.length || ri < restViewed.length) {
-      if (ci < shuffledUnseenConn.length) unseenOrdered.push(shuffledUnseenConn[ci++]);
-      if (ti < topViewed.length) unseenOrdered.push(topViewed[ti++]);
-      if (ci < shuffledUnseenConn.length) unseenOrdered.push(shuffledUnseenConn[ci++]);
-      if (ri < restViewed.length) unseenOrdered.push(restViewed[ri++]);
-    }
-
-    // Seen: sort by views desc, shuffle slightly so it's not identical every time
-    const seenByViews = seededShuffle(
-      [...seen].sort((a, b) => (b.views || 0) - (a.views || 0)),
-      seed + 4
-    );
-
-    return [...unseenOrdered, ...seenByViews];
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reels, friendUsernames, followingUsernames]);
-
-  /* ── Following feed: friends/following only, unseen-recent first, then seen-recent, all shuffled ── */
+  // Order each fetched batch once, then append pages without reshuffling the
+  // videos already on screen.
+  const forYouSorted = useMemo(() => uniqueReels(reels), [reels]);
   const followingSorted = useMemo(() => {
-    const seed = sessionSeed.current;
     const friendSet = new Set([...(friendUsernames || []), ...(followingUsernames || [])]);
-    const friendReels = reels.filter(r => friendSet.has(r.user.username));
-
-    const unseen = friendReels.filter(r => !seenIds.has(r.$id));
-    const seen = friendReels.filter(r => seenIds.has(r.$id));
-
-    // Most recent first, then shuffle within a small window (groups of 5) to avoid exact same order
-    const sortByRecent = (arr: Post[]) => [...arr].sort((a, b) => {
-      const ta = typeof a.time === 'string' ? new Date(a.time).getTime() : 0;
-      const tb = typeof b.time === 'string' ? new Date(b.time).getTime() : 0;
-      return tb - ta;
-    });
-
-    const shuffleInWindows = (arr: Post[], windowSize: number) => {
-      const result: Post[] = [];
-      for (let i = 0; i < arr.length; i += windowSize) {
-        const window = arr.slice(i, i + windowSize);
-        result.push(...seededShuffle(window, seed + i));
-      }
-      return result;
-    };
-
-    const unseenOrdered = shuffleInWindows(sortByRecent(unseen), 5);
-    const seenOrdered = shuffleInWindows(sortByRecent(seen), 5);
-
-    return [...unseenOrdered, ...seenOrdered];
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    return uniqueReels(reels).filter(reel => friendSet.has(reel.user.username));
   }, [reels, friendUsernames, followingUsernames]);
 
   /* ── Campaign injection into forYou feed ── */
   const reelFeed = useMemo<ReelFeedItem[]>(() => {
-    const videoCampaignsRaw = campaigns
-      .filter((c: any) => c.is_active && c.placement === 'reel' && c.type === "video" && c.media_url)
-      .sort(() => Math.random() - 0.5);
-    const videoCampaigns = videoCampaignsRaw.map((c) => ({
+    const videoCampaignsRaw = campaigns.filter((c: any) => c.is_active && c.placement === 'reel' && c.type === "video" && c.media_url);
+    const videoCampaigns = seededShuffle(videoCampaignsRaw.map((c) => ({
       $id: c.$id,
       user: { name: "ViMore Official", username: "vimore", avatar: "/icon.svg", isVerified: true, role: "Global Node" },
       content: c.content || c.title,
@@ -1170,39 +1090,32 @@ export default function ReelsPage() {
       campaignTitle: c.title,
       actionUrl: c.action_url,
       actionLabel: c.action_label,
-    } as unknown as ReelFeedItem));
+    } as unknown as ReelFeedItem)), sessionSeed.current);
 
-    const boostedReels: ReelFeedItem[] = [...(posts || []).filter((p: any) => p.isBoosted && p.type === 'reel')]
-      .sort(() => Math.random() - 0.5) as ReelFeedItem[];
-
-    if (videoCampaigns.length === 0 && boostedReels.length === 0) return forYouSorted as ReelFeedItem[];
+    if (videoCampaigns.length === 0) return uniqueReels(forYouSorted) as ReelFeedItem[];
 
     const result: ReelFeedItem[] = [];
-    let reelIdx = 0, campIdx = 0, boostedIdx = 0, countSinceLast = 0;
+    let reelIdx = 0, campIdx = 0, countSinceLast = 0;
 
     for (let i = 0; i < 2 && reelIdx < forYouSorted.length; i++) {
       result.push(forYouSorted[reelIdx++] as ReelFeedItem);
     }
-    if (reelIdx > 0 && videoCampaigns.length > 0) {
-      result.push(videoCampaigns[campIdx++ % videoCampaigns.length]);
-    }
+    if (reelIdx > 0 && campIdx < videoCampaigns.length) result.push(videoCampaigns[campIdx++]);
 
     while (reelIdx < forYouSorted.length) {
       result.push(forYouSorted[reelIdx++] as ReelFeedItem);
       countSinceLast++;
-      // Random ~1-in-5 chance per reel after at least 2 organic reels since last injection
-      if (countSinceLast >= 2 && Math.random() < 0.2) {
+      if (countSinceLast >= 5) {
         countSinceLast = 0;
-        if (videoCampaigns.length > 0) result.push(videoCampaigns[campIdx++ % videoCampaigns.length]);
-        if (boostedReels.length > 0) { result.push(boostedReels[boostedIdx % boostedReels.length]); boostedIdx++; }
+        if (campIdx < videoCampaigns.length) result.push(videoCampaigns[campIdx++]);
       }
     }
-    return result;
+    return uniqueReels(result);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [forYouSorted, campaigns, posts]);
+  }, [forYouSorted, campaigns]);
 
   const [activeIndex, setActiveIndex] = useState(0);
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
   const [shareReel, setShareReel] = useState<Post | null>(null);
   const [reelTab, setReelTab] = useState<"foryou" | "following">("foryou");
 
@@ -1234,8 +1147,7 @@ export default function ReelsPage() {
           if (entry.isIntersecting) {
             setActiveIndex(idx);
             video.muted = isMuted;
-            if (pageTier !== 'lite') video.play().catch(() => {});
-            else try { video.pause(); } catch {}
+            video.play().catch(() => {});
           } else {
             video.pause();
             video.currentTime = 0;
@@ -1246,7 +1158,7 @@ export default function ReelsPage() {
     );
     containerRefs.current.forEach((el) => { if (el) observer.observe(el); });
     return () => observer.disconnect();
-  }, [activeFeed.length, isMuted, pageTier]);
+  }, [activeFeed.length, activeFeed, isMuted]);
 
   useEffect(() => {
     const video = videoRefs.current[activeIndex];
@@ -1274,8 +1186,11 @@ export default function ReelsPage() {
         globalCursor: reelsGlobalCursorRef.current,
       }).then(({ posts, phase, connCursor, globalCursor, hasMore }) => {
         setReelsList(prev => {
-          const existingIds = new Set(prev.map(r => r.$id));
-          return [...prev, ...posts.filter(r => !existingIds.has(r.$id))];
+          const known = uniqueReels(prev);
+          const nextBatch = uniqueReels(posts).filter(reel =>
+            !known.some(existing => existing.$id === reel.$id || (existing.videoUrl && existing.videoUrl === reel.videoUrl))
+          );
+          return uniqueReels([...known, ...seededShuffle(nextBatch, sessionSeed.current + known.length)]);
         });
         setReelsPhase(phase);
         setReelsConnCursor(connCursor);
@@ -1284,6 +1199,9 @@ export default function ReelsPage() {
         reelsPhaseRef.current = phase;
         reelsConnCursorRef.current = connCursor;
         reelsGlobalCursorRef.current = globalCursor;
+      }).catch(error => {
+        console.error("[reels] failed to load more feed items", error);
+        setFeedError(true);
       }).finally(() => {
         setIsLoadingReels(false);
         isLoadingReelsRef.current = false;
@@ -1323,7 +1241,7 @@ export default function ReelsPage() {
   }
 
   /* ── Empty state ── */
-  if (activeFeed.length === 0 && reelTab === "foryou") {
+  if (activeFeed.length === 0 && reelTab === "foryou" && !feedError) {
     return (
       <div className="fixed inset-0 bg-black flex flex-col items-center justify-center gap-4">
         <Link href="/" className="absolute top-12 left-4 w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center">
@@ -1406,7 +1324,18 @@ export default function ReelsPage() {
           </div>
         ) : (
           <>
-            {activeFeed.map((reel, index) => (
+            {feedError && reelsList.length === 0 ? (
+              <div className="flex h-[100svh] flex-col items-center justify-center gap-4 bg-black text-white">
+                <Film className="h-10 w-10 text-white/40" />
+                <p className="text-sm font-bold">Could not load Reels</p>
+                <button
+                  onClick={() => setRetryFeed(value => value + 1)}
+                  className="rounded-full bg-white/15 px-5 py-2 text-xs font-black uppercase tracking-wider"
+                >
+                  Try again
+                </button>
+              </div>
+            ) : activeFeed.map((reel, index) => (
               <ReelErrorBoundary key={`${reel.$id}-${index}`} onSkip={() => skipToNextReel(index)}>
                 <ReelItem
                   reel={reel}
@@ -1418,7 +1347,6 @@ export default function ReelsPage() {
                   onToggleMute={() => setIsMuted((m) => !m)}
                   onOpenShare={() => !reel.isCampaignReel && setShareReel(reel)}
                   onOpenComment={() => !reel.isCampaignReel && handleOpenComment(reel.$id)}
-                  onMarkSeen={markSeen}
                   onSkip={() => skipToNextReel(index)}
                 />
               </ReelErrorBoundary>

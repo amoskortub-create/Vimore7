@@ -547,6 +547,15 @@ function mapDocToPost(doc: Models.Document, authorDoc?: Models.Document): Post {
   const images = imageIds.map((id: string) => getFileUrl(BUCKET.POST_MEDIA, id));
   const videoId = doc.video_id;
   const isReel = doc.type === 'reel';
+  const mediaValue = String(isReel ? doc.media_url || '' : videoId || '');
+  const mediaParts = mediaValue.match(/^(reel_media|post_media):(.+)$/);
+  const videoUrl = /^https?:\/\//i.test(mediaValue)
+    ? mediaValue
+    : mediaValue.startsWith('/api/file/')
+      ? mediaValue
+      : mediaValue
+        ? getFileUrl(mediaParts?.[1] || (isReel ? BUCKET.REEL_MEDIA : BUCKET.POST_MEDIA), mediaParts?.[2] || mediaValue)
+        : undefined;
 
   const author: User = authorDoc ? {
     $id: doc.user_id,
@@ -580,9 +589,7 @@ function mapDocToPost(doc: Models.Document, authorDoc?: Models.Document): Post {
     views: doc.views_count || 0,
     image: images[0],
     images: images.length > 0 ? images : undefined,
-    videoUrl: isReel && doc.media_url
-      ? getFileUrl(BUCKET.REEL_MEDIA, doc.media_url)
-      : (videoId ? getFileUrl(BUCKET.POST_MEDIA, videoId) : undefined),
+    videoUrl,
     type: doc.type,
     theme: doc.theme ? (THEME_ID_TO_CLASS[doc.theme] ?? doc.theme) : undefined,
     imageFilter: doc.image_filter,
@@ -3524,7 +3531,11 @@ export function PostProvider({ children }: { children: ReactNode }) {
     let { phase, connIds, connCursor, globalCursor } = params;
 
     try {
-      const videoFilter = Query.or([Query.equal('type', 'reel'), Query.isNotNull('video_id')]);
+      const videoFilter = Query.or([
+        Query.equal('type', 'reel'),
+        Query.isNotNull('video_id'),
+        Query.isNotNull('media_url'),
+      ]);
 
       if (phase === 'connections' && connIds.length > 0) {
         const q: any[] = [
@@ -3542,23 +3553,12 @@ export function PostProvider({ children }: { children: ReactNode }) {
           return { posts: await withAuthors(r.documents), phase: 'connections', connCursor, globalCursor, hasMore: true };
         }
 
-        // Connection phase exhausted — fill remainder from global
-        phase = 'global';
-        const connDocs = r.documents;
-        const remaining = PAGE - connDocs.length;
-        const connDocIds = new Set(connDocs.map((d: any) => d.$id));
-        const gq: any[] = [videoFilter, Query.orderDesc('$createdAt'), Query.limit(PAGE)];
-        if (globalCursor) gq.push(Query.cursorAfter(globalCursor));
-        const gr = await databases.listDocuments(DATABASE_ID, COL.POSTS, gq);
-        const newGlobal = gr.documents.filter((d: any) => !connDocIds.has(d.$id)).slice(0, remaining);
-        if (gr.documents.length > 0) globalCursor = gr.documents[gr.documents.length - 1].$id;
-
         return {
-          posts: await withAuthors([...connDocs, ...newGlobal]),
+          posts: await withAuthors(r.documents),
           phase: 'global',
           connCursor,
           globalCursor,
-          hasMore: gr.documents.length === PAGE,
+          hasMore: true,
         };
       }
 
@@ -3575,8 +3575,9 @@ export function PostProvider({ children }: { children: ReactNode }) {
         globalCursor,
         hasMore: r.documents.length === PAGE,
       };
-    } catch {
-      return { posts: [], phase, connCursor, globalCursor, hasMore: false };
+    } catch (error) {
+      console.error('[reels] failed to fetch feed page', error);
+      throw error;
     }
   }, [withAuthors]);
 

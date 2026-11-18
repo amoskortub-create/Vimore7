@@ -8,17 +8,35 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: 'You must be logged in.' }, { status: 401 });
 
   const db = getAdminDatabases();
-  const result = await db.listDocuments(DATABASE_ID, 'creator_earnings', [
-    Query.equal('userId', session.userId),
-    Query.limit(1),
+  const result = await db.listDocuments(DATABASE_ID, 'transactions', [
+    Query.equal('user_id', session.userId),
+    Query.equal('status', 'completed'),
+    Query.limit(500),
   ]);
-  const earnings = result.documents[0] || {
+  const earnings = {
     userId: session.userId,
-    totalEarningsLD: 0,
-    giftsEarningsLD: 0,
-    subscriptionsEarningsLD: 0,
-    lockedPostsEarningsLD: 0,
-    lockedMusicEarningsLD: 0,
+    totalEarningsCredits: 0,
+    giftsEarningsCredits: 0,
+    subscriptionsEarningsCredits: 0,
+    lockedPostsEarningsCredits: 0,
+    lockedMusicEarningsCredits: 0,
+    lastUpdated: new Date().toISOString(),
   };
+  for (const transaction of result.documents) {
+    const credits = Number(transaction.amountCredits || 0);
+    if (transaction.currency !== 'CREDIT' || !Number.isFinite(credits)) continue;
+    earnings.totalEarningsCredits += credits;
+    if (transaction.transactionType === 'gift') earnings.giftsEarningsCredits += credits;
+    if (transaction.transactionType === 'subscription') earnings.subscriptionsEarningsCredits += credits;
+    if (transaction.transactionType === 'unlock_post') earnings.lockedPostsEarningsCredits += credits;
+    if (transaction.transactionType === 'unlock_music') earnings.lockedMusicEarningsCredits += credits;
+  }
+  for (const key of [
+    'totalEarningsCredits',
+    'giftsEarningsCredits',
+    'subscriptionsEarningsCredits',
+    'lockedPostsEarningsCredits',
+    'lockedMusicEarningsCredits',
+  ] as const) earnings[key] = Math.round(earnings[key] * 100) / 100;
   return NextResponse.json({ earnings });
 }

@@ -79,7 +79,6 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Progress } from "@/components/ui/progress";
 import { BUCKET_IMAGES } from "@/lib/appwrite";
-import { getCreatorOrangeMoneyNumber } from "@/lib/orange-money-payments";
 
 interface CreatePostModalProps {
   children: React.ReactNode;
@@ -170,7 +169,7 @@ export function CreatePostModal({ children, sharedPost, initialContent, onOpen }
   const [commentsDisabled, setCommentsDisabled] = useState(false);
   
   const [isLocked, setIsLocked] = useState(false);
-  const [unlockPrice, setUnlockPrice] = useState(100);
+  const [unlockPrice, setUnlockPrice] = useState(2);
   
   const [showFeelingSelector, setShowFeelingSelector] = useState(false);
   const [showLocationSelector, setShowLocationSelector] = useState(false);
@@ -408,21 +407,9 @@ export function CreatePostModal({ children, sharedPost, initialContent, onOpen }
 
   const handlePost = async () => {
     if (!currentUser || isPosting) return;
-    if (isLocked) {
-      try {
-        const orangeMoneyNumber = await getCreatorOrangeMoneyNumber(currentUser.$id);
-        if (!orangeMoneyNumber) {
-          toast({
-            variant: "destructive",
-            title: "Orange Money number required",
-            description: "Add your Orange Money number in Profile to sell locked posts.",
-          });
-          return;
-        }
-      } catch (error: any) {
-        toast({ variant: "destructive", title: "Could not check Orange Money number", description: error?.message || "Please retry." });
-        return;
-      }
+    if (isLocked && (!Number.isInteger(unlockPrice) || unlockPrice < 2 || unlockPrice > 10)) {
+      toast({ variant: "destructive", title: "Invalid Credits price", description: "Locked Posts must cost 2 to 10 Credits." });
+      return;
     }
     triggerHaptic(30);
     setIsPosting(true);
@@ -736,19 +723,19 @@ export function CreatePostModal({ children, sharedPost, initialContent, onOpen }
                     <Gem className="h-4 w-4 text-cyan-400" />
                     <span className="text-[10px] font-black uppercase tracking-widest text-white/60">Unlock Price</span>
                   </div>
-                  <Badge className="bg-cyan-500 text-white border-none font-black h-5 px-3 uppercase tracking-tighter">{unlockPrice} LD</Badge>
+                  <Badge className="bg-cyan-500 text-white border-none font-black h-5 px-3 uppercase tracking-tighter">{unlockPrice} Credits</Badge>
                 </div>
                 <Slider 
                   value={[unlockPrice]} 
-                  min={100}
-                  max={500}
+                  min={2}
+                  max={10}
                   step={1} 
                   onValueChange={(val) => setUnlockPrice(val[0])}
                   className="[&_[role=slider]]:bg-cyan-500"
                 />
                 <div className="flex justify-between text-[8px] font-black text-white/40 uppercase tracking-widest">
-                  <span>100 LD</span>
-                  <span>500 LD</span>
+                  <span>2 Credits</span>
+                  <span>10 Credits</span>
                 </div>
               </div>
             )}

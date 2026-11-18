@@ -3,6 +3,7 @@
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import { authFetch } from "@/lib/auth-fetch";
+import { WITHDRAW_RATE_LD, WITHDRAW_RATE_USD } from "@/lib/credit-monetization";
 import { 
   ShieldCheck, 
   Zap, 
@@ -129,7 +130,6 @@ import {
 } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { useToast } from "@/hooks/use-toast";
-import { calculatePlatformFee } from "@/lib/transaction-fee";
 import Image from "next/image";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -630,23 +630,13 @@ export default function AdminDashboard() {
       const totalUSD = goldUSD + diamondUSD;
       const totalLRD = totalUSD * LD_MULTIPLIER;
 
-      // Calculate platform fees from transactions (10% of all sender-side tx amounts)
-      let pfGold = 0, pfDiamond = 0;
-      try {
-        const txRes = await databases.listDocuments(DATABASE_ID, COL.TRANSACTIONS, [
-          Query.orderDesc('$createdAt'), Query.limit(500),
-        ]);
-        txRes.documents.forEach((tx: any) => {
-          const senderTypes = ['GIFT_SENT', 'POST_UNLOCK', 'SUBSCRIPTION'];
-          if (!senderTypes.includes(tx.type)) return;
-          const cut = calculatePlatformFee(Number(tx.amount || 0));
-          if (tx.currency === 'GOLD') pfGold += cut;
-          else if (tx.currency === 'DIAMOND') pfDiamond += cut;
-        });
-      } catch { /* ignore */ }
+      const feesResponse = await authFetch('/api/monetization/platform-fees');
+      const feesData = await feesResponse.json().catch(() => ({}));
+      if (!feesResponse.ok) throw new Error(feesData.error || 'Could not load platform fees.');
+      const totalPlatformFeeCredits = Number(feesData.totalPlatformFeeCredits || 0);
 
-      const platformFeesUSD = pfGold * GOLD_RATE + pfDiamond * DIAMOND_RATE;
-      const platformFeesLRD = platformFeesUSD * LD_MULTIPLIER;
+      const platformFeesUSD = totalPlatformFeeCredits * WITHDRAW_RATE_USD;
+      const platformFeesLRD = totalPlatformFeeCredits * WITHDRAW_RATE_LD;
 
       const topHolders = fetched
         .map(u => ({
@@ -673,7 +663,9 @@ export default function AdminDashboard() {
         snapshotTime: new Date(),
       });
       setTreasuryCountdown(3600);
-    } catch { /* ignore */ }
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Treasury data unavailable", description: error?.message || "Could not load treasury data." });
+    }
     finally { setIsFetchingTreasury(false); }
   };
 
@@ -2738,7 +2730,7 @@ export default function AdminDashboard() {
                   <div className="flex flex-wrap gap-3 px-2">
                     {[
                       { label: "Gold Rate", value: "$0.01 / Gold", color: "text-amber-500", bg: "bg-amber-500/10" },
-                      { label: "Credit Rate", value: "$0.25 / Credit", color: "text-cyan-500", bg: "bg-cyan-500/10" },
+                      { label: "Credit Rate", value: `$${WITHDRAW_RATE_USD} / Credit`, color: "text-cyan-500", bg: "bg-cyan-500/10" },
                       { label: "LRD Rate", value: "L$190 / $1 USD", color: "text-green-500", bg: "bg-green-500/10" },
                       { label: "Platform Cut", value: "10% per tx", color: "text-primary", bg: "bg-primary/10" },
                     ].map(r => (

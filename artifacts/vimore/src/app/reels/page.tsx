@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useState, useMemo, useCallback } from "react";
+import { Component, type ReactNode, useRef, useEffect, useState, useMemo, useCallback } from "react";
 import { saveCache, loadCache, isCacheFresh, pinMediaInSW, OFFLINE_KEYS } from "@/lib/offline-cache";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
@@ -113,6 +113,7 @@ function MessagePickerSheet({
   onBack: () => void;
 }) {
   const { connections, sendChatMessage, incrementShareCount, friendUsernames } = usePosts();
+  const creator = reel.user ?? { name: "ViMore creator", username: "unknown", avatar: "" };
   const { triggerHaptic } = useMusic();
   const { toast } = useToast();
   const { t } = useTranslation();
@@ -138,8 +139,8 @@ function MessagePickerSheet({
     setSharingTo(recipientId);
     await sendChatMessage(recipientId, {
       type: "video",
-      mediaUrl: reel.videoUrl,
-      text: `Shared a reel from @${reel.user.username}: ${reel.content.slice(0, 80)}${reel.content.length > 80 ? "..." : ""}`,
+      mediaUrl: reel.videoUrl || "",
+      text: `Shared a reel from @${creator.username}: ${String(reel.content || "").slice(0, 80)}${String(reel.content || "").length > 80 ? "..." : ""}`,
     });
     incrementShareCount?.(reel.$id);
     setSentTo((prev) => new Set(prev).add(recipientId));
@@ -233,6 +234,7 @@ function MessagePickerSheet({
 
 function ReelShareSheet({ reel, onClose }: { reel: Post; onClose: () => void }) {
   const { addStory, incrementShareCount } = usePosts();
+  const creator = reel.user ?? { name: "ViMore creator", username: "unknown", avatar: "" };
   const { triggerHaptic, triggerDownloadWithAd } = useMusic();
   const { tier: netTier } = useNetwork();
   const { toast } = useToast();
@@ -246,9 +248,9 @@ function ReelShareSheet({ reel, onClose }: { reel: Post; onClose: () => void }) 
     addStory({
       type: "video",
       videoUrl: reel.videoUrl,
-      image: reel.image || reel.user.avatar,
+      image: reel.image || creator.avatar,
       background: "bg-black",
-      textOverlays: [{ text: `@${reel.user.username}`, x: 50, y: 85, color: "#FFFFFF" }],
+      textOverlays: [{ text: `@${creator.username}`, x: 50, y: 85, color: "#FFFFFF" }],
     });
     incrementShareCount?.(reel.$id);
     toast({ title: "Added to your story" });
@@ -346,7 +348,7 @@ function ReelShareSheet({ reel, onClose }: { reel: Post; onClose: () => void }) 
             </div>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-white font-bold text-sm">@{reel.user.username}</p>
+            <p className="text-white font-bold text-sm">@{creator.username}</p>
             <p className="text-white/50 text-xs mt-0.5 line-clamp-2">{reel.content}</p>
           </div>
         </div>
@@ -446,6 +448,33 @@ function ActionBtn({
   );
 }
 
+class ReelErrorBoundary extends Component<{ onSkip: () => void; children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error("[reels] reel item failed to render", error.message);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex h-[100svh] w-full flex-shrink-0 snap-start flex-col items-center justify-center gap-3 bg-black text-white">
+          <Film className="h-10 w-10 text-white/40" />
+          <p className="text-sm font-bold">Video unavailable</p>
+          <button onClick={this.props.onSkip} className="rounded-full bg-white/15 px-5 py-2 text-xs font-black uppercase tracking-wider">
+            Skip
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function ReelItem({
   reel,
   index,
@@ -457,6 +486,7 @@ function ReelItem({
   onOpenShare,
   onOpenComment,
   onMarkSeen,
+  onSkip,
 }: {
   reel: ReelFeedItem;
   index: number;
@@ -468,6 +498,7 @@ function ReelItem({
   onOpenShare: () => void;
   onOpenComment: () => void;
   onMarkSeen: (id: string) => void;
+  onSkip: () => void;
 }) {
   const router = useRouter();
   const {
@@ -485,6 +516,7 @@ function ReelItem({
   const { tier: netTier } = useNetwork();
   const { triggerHaptic } = useMusic();
   const { toast } = useToast();
+  const creator = reel.user ?? { name: "ViMore creator", username: "unknown", avatar: "" };
   const [showHeart, setShowHeart] = useState(false);
   // showSoundSheet removed — "use this sound" feature deleted
   const [isDownloading, setIsDownloading] = useState(false);
@@ -493,6 +525,8 @@ function ReelItem({
   const [duration, setDuration] = useState(0);
   const [seekFlash, setSeekFlash] = useState<'left' | 'right' | null>(null);
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
+  const [videoUnavailable, setVideoUnavailable] = useState(!reel.videoUrl);
+  const [videoRetryKey, setVideoRetryKey] = useState(0);
   const [localLikes, setLocalLikes] = useState(reel.likes);
   const lastTapRef = useRef(0);
   const singleTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -533,8 +567,8 @@ function ReelItem({
   }, [isActive, reel.$id, reel.isCampaignReel, onMarkSeen]);
 
   const isLiked = isPostLiked(reel.$id);
-  const isOwn = currentUser?.username === reel.user.username;
-  const isFollowing = followingUsernames.has(reel.user.username);
+  const isOwn = currentUser?.username === creator.username;
+  const isFollowing = followingUsernames.has(creator.username);
   const reelData = reel as unknown as Record<string, unknown>;
   const soundId = reelData.sound_id as string | undefined;
   const soundTitle = reelData.sound_title as string | undefined;
@@ -601,8 +635,8 @@ function ReelItem({
     }
   };
 
-  const isFriendWith = isFriend(reel.user.username);
-  const requestSent = isRequestSent(reel.user.username);
+  const isFriendWith = isFriend(creator.username);
+  const requestSent = isRequestSent(creator.username);
 
   const handleTap = (e: React.MouseEvent) => {
     const now = Date.now();
@@ -648,8 +682,8 @@ function ReelItem({
 
   const handleFollowToggle = () => {
     triggerHaptic(20);
-    if (requestSent) cancelFriendRequest(reel.user.username);
-    else sendFriendRequest(reel.user.username);
+    if (requestSent) cancelFriendRequest(creator.username);
+    else sendFriendRequest(creator.username);
   };
 
   const fmt = (n: number) => (n >= 1000000 ? `${(n / 1000000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}K` : n.toString());
@@ -662,17 +696,21 @@ function ReelItem({
       style={{ height: "100svh" }}
     >
       {/* Video */}
-      <video
-        ref={combinedVideoRef}
-        src={reel.videoUrl}
-        poster={getAdaptivePreview(reel.image, 'fullscreen', netTier) || reel.image}
-        loop
-        playsInline
-        muted={isMuted}
-        preload="none"
-        className="absolute inset-0 w-full h-full object-cover"
-        style={{ filter: videoFilter, transform: videoMirror ? 'scaleX(-1)' : undefined }}
-      />
+      {reel.videoUrl && !videoUnavailable && (
+        <video
+          key={videoRetryKey}
+          ref={combinedVideoRef}
+          src={reel.videoUrl}
+          poster={getAdaptivePreview(reel.image, 'fullscreen', netTier) || reel.image}
+          loop
+          playsInline
+          muted={isMuted}
+          preload="none"
+          onError={() => { setVideoUnavailable(true); setIsPlaying(false); }}
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ filter: videoFilter, transform: videoMirror ? 'scaleX(-1)' : undefined }}
+        />
+      )}
 
       {/* Vignette */}
       {showVignetteOverlay && (
@@ -691,6 +729,24 @@ function ReelItem({
 
       {/* Tap zone */}
       <div className="absolute inset-0 z-10" onClick={handleTap} />
+
+      {videoUnavailable && (
+        <div className="absolute inset-0 z-[15] flex flex-col items-center justify-center gap-3 bg-neutral-950/85 text-white">
+          <Film className="h-10 w-10 text-white/40" />
+          <p className="text-sm font-bold">Video unavailable</p>
+          {reel.videoUrl && (
+            <button
+              onClick={() => { setVideoRetryKey((key) => key + 1); setVideoUnavailable(false); }}
+              className="pointer-events-auto rounded-full bg-white/15 px-5 py-2 text-xs font-black uppercase tracking-wider"
+            >
+              Try again
+            </button>
+          )}
+          <button onClick={onSkip} className="pointer-events-auto rounded-full bg-white/15 px-5 py-2 text-xs font-black uppercase tracking-wider">
+            Skip
+          </button>
+        </div>
+      )}
 
       {/* Double-tap heart burst */}
       {showHeart && (
@@ -750,12 +806,12 @@ function ReelItem({
       <div className="absolute right-3 bottom-28 z-30 flex flex-col items-center gap-3 pointer-events-auto">
         {/* Avatar + follow */}
         <div className="relative mb-1">
-          <Link href={reel.isCampaignReel ? "/" : `/profile/${reel.user.username}`}>
+          <Link href={reel.isCampaignReel ? "/" : `/profile/${creator.username}`}>
             <div className="relative">
               <div className="absolute -inset-0.5 rounded-full bg-gradient-to-br from-primary via-purple-500 to-pink-500 opacity-80" />
               <Avatar className="h-12 w-12 border-2 border-black relative">
-                <AvatarImage src={getAdaptivePreview(reel.user.avatar, 'avatar', netTier) || reel.user.avatar} />
-                <AvatarFallback>{reel.user.name[0]}</AvatarFallback>
+                <AvatarImage src={getAdaptivePreview(creator.avatar, 'avatar', netTier) || creator.avatar} />
+                <AvatarFallback>{creator.name[0] || '?'}</AvatarFallback>
               </Avatar>
             </div>
           </Link>
@@ -821,7 +877,7 @@ function ReelItem({
             {/* Gift */}
             {!isOwn && settings?.isGiftingEnabled && (
               <ActionBtn
-                onClick={() => { triggerHaptic(30); openGiftHub(reel.user as any); }}
+                onClick={() => { triggerHaptic(30); openGiftHub(creator as any); }}
                 label="Gift"
                 glow="shadow-yellow-400/30"
               >
@@ -856,12 +912,12 @@ function ReelItem({
         ) : (
           <>
             <Link
-              href={`/profile/${reel.user.username}`}
+              href={`/profile/${creator.username}`}
               className="flex items-center gap-2 mb-2 pointer-events-auto w-fit"
             >
-              <span className="text-white font-black text-sm drop-shadow">{reel.user.name}</span>
-              <span className="text-white/60 text-xs">@{reel.user.username}</span>
-              {reel.user.isVerified && (
+              <span className="text-white font-black text-sm drop-shadow">{creator.name}</span>
+              <span className="text-white/60 text-xs">@{creator.username}</span>
+              {creator.isVerified && (
                 <div className="w-4 h-4 bg-primary rounded-full flex items-center justify-center flex-shrink-0">
                   <Check className="w-2.5 h-2.5 text-white" />
                 </div>
@@ -880,7 +936,7 @@ function ReelItem({
             <div className="flex items-center gap-1.5 mt-2">
               <Music2 className="w-3 h-3 text-white/60 flex-shrink-0 animate-spin [animation-duration:6s]" />
               <p className="text-white/60 text-xs truncate">
-                {soundTitle ? `${soundTitle} · ${soundArtist || reel.user.name}` : `Original Sound · ${reel.user.name}`}
+                {soundTitle ? `${soundTitle} · ${soundArtist || creator.name}` : `Original Sound · ${creator.name}`}
               </p>
             </div>
           </>
@@ -1163,6 +1219,10 @@ export default function ReelsPage() {
     containerRefs.current[index] = el;
   }, []);
 
+  const skipToNextReel = useCallback((index: number) => {
+    containerRefs.current[index + 1]?.scrollIntoView({ behavior: 'smooth' });
+  }, []);
+
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
@@ -1347,19 +1407,21 @@ export default function ReelsPage() {
         ) : (
           <>
             {activeFeed.map((reel, index) => (
-              <ReelItem
-                key={`${reel.$id}-${index}`}
-                reel={reel}
-                index={index}
-                isMuted={isMuted}
-                isActive={activeIndex === index}
-                onVideoRef={setVideoRef(index)}
-                onContainerRef={setContainerRef(index)}
-                onToggleMute={() => setIsMuted((m) => !m)}
-                onOpenShare={() => !reel.isCampaignReel && setShareReel(reel)}
-                onOpenComment={() => !reel.isCampaignReel && handleOpenComment(reel.$id)}
-                onMarkSeen={markSeen}
-              />
+              <ReelErrorBoundary key={`${reel.$id}-${index}`} onSkip={() => skipToNextReel(index)}>
+                <ReelItem
+                  reel={reel}
+                  index={index}
+                  isMuted={isMuted}
+                  isActive={activeIndex === index}
+                  onVideoRef={setVideoRef(index)}
+                  onContainerRef={setContainerRef(index)}
+                  onToggleMute={() => setIsMuted((m) => !m)}
+                  onOpenShare={() => !reel.isCampaignReel && setShareReel(reel)}
+                  onOpenComment={() => !reel.isCampaignReel && handleOpenComment(reel.$id)}
+                  onMarkSeen={markSeen}
+                  onSkip={() => skipToNextReel(index)}
+                />
+              </ReelErrorBoundary>
             ))}
             {isLoadingReels && reelsList.length > 0 && (
               <div className="h-[100svh] w-full flex-shrink-0 snap-start bg-black flex flex-col items-center justify-center gap-3">

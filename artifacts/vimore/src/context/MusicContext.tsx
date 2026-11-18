@@ -4,6 +4,8 @@ import React, { createContext, useContext, useState, ReactNode, useEffect, useCa
 import { usePosts } from './PostContext';
 import { databases, ID, Query, Permission, Role, BUCKET, DATABASE_ID, COL, getFileUrl, extractFileId } from '@/lib/appwrite';
 import { saveCache, loadCache, loadKeyValue, saveKeyValue, isCacheFresh, pinMediaInSW, OFFLINE_KEYS } from '@/lib/offline-cache';
+import { authFetch } from '@/lib/auth-fetch';
+import { normalizeLockedCredits } from '@/lib/credit-monetization';
 
 
 export interface Track {
@@ -140,7 +142,7 @@ interface MusicContextType {
   refreshMusicVault: () => Promise<void>;
   recordSongStream: (songId: string | number) => Promise<void>;
   unlockedMusicIds: Set<string | number>;
-  unlockMusic: (id: string | number, price: number, artistId: string, isVerified: boolean) => Promise<void>;
+  unlockMusic: (id: string | number, price: number, artistId: string, isVerified: boolean, contentType?: 'track' | 'album') => Promise<void>;
   isMusicUnlocked: (id: string | number) => boolean;
   audioDuration: number;
   isMusicLoading: boolean;
@@ -164,7 +166,9 @@ function mapDocToTrack(doc: any): Track {
     isBoosted: doc.is_boosted || false,
      boostExpiry: doc.boost_expiry ? new Date(doc.boost_expiry).getTime() : undefined,
     isLocked: doc.is_locked || false,
-    unlockPrice: doc.unlock_price || 0,
+    unlockPrice: doc.is_locked
+      ? normalizeLockedCredits(doc.credit_price ?? doc.unlock_price)
+      : 0,
   };
 }
 
@@ -181,7 +185,9 @@ function mapDocToAlbum(doc: any, songs: Track[]): Album {
     totalStreams: '0',
     songs,
     isLocked: doc.is_locked || false,
-    unlockPrice: doc.unlock_price || 0,
+    unlockPrice: doc.is_locked
+      ? normalizeLockedCredits(doc.credit_price ?? doc.unlock_price)
+      : 0,
   };
 }
 
@@ -200,7 +206,7 @@ function mapDocToPlaylist(doc: any, songs: Track[]): Playlist {
 }
 
 export function MusicProvider({ children }: { children: ReactNode }) {
-  const { currentUser, campaigns } = usePosts();
+  const { currentUser, campaigns, applyCreditBalance } = usePosts();
 
   const [currentTrack, setCurrentTrackState] = useState<Track | null>(null);
   const [globalSongs, setGlobalSongsState] = useState<Track[]>(() => loadKeyValue<MusicCatalogCache>(OFFLINE_KEYS.MUSIC)?.songs || []);
@@ -446,29 +452,27 @@ export function MusicProvider({ children }: { children: ReactNode }) {
 
   const unlockMusic = useCallback(async (
     id: string | number,
-    price: number,
-    artistId: string,
-    isVerified: boolean,
+    _price: number,
+    _artistId: string,
+    _isVerified: boolean,
+    contentType: 'track' | 'album' = 'track',
   ) => {
     if (!currentUser) throw new Error('Not logged in');
-    const artistShare = isVerified ? 0.9 : 0.8;
-    const artistAmount = Math.round(price * artistShare * 100) / 100;
     try {
-      await databases.createDocument(DATABASE_ID, COL.MUSIC_UNLOCKS, ID.unique(), {
-        user_id: currentUser.$id,
-        track_id: String(id),
-        price_paid: price,
-        artist_id: artistId,
-        artist_amount: artistAmount,
-      }, [
-        Permission.read(Role.user(currentUser.$id)),
-      ]);
+      const response = await authFetch('/api/monetization/credit-purchase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'locked_music', contentId: String(id), contentType }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Could not unlock this music.');
+      if (typeof data.buyerNewBalance === 'number') applyCreditBalance(data.buyerNewBalance);
       setUnlockedMusicIdsState(prev => new Set(prev).add(id));
     } catch (err: any) {
       console.error('unlockMusic error:', err);
       throw err;
     }
-  }, [currentUser]);
+  }, [currentUser, applyCreditBalance]);
 
   const recordSongStream = useCallback(async (songId: string | number) => {
     setGlobalSongsState(prev => prev.map(s => {
@@ -534,6 +538,9 @@ export function MusicProvider({ children }: { children: ReactNode }) {
 
   const publishTrack = useCallback(async (track: any) => {
     if (!currentUser) return;
+    if (track.isLocked && (!Number.isInteger(track.unlockPrice) || Number(track.unlockPrice) < 2 || Number(track.unlockPrice) > 10)) {
+      throw new Error('Locked Music must cost 2 to 10 Credits.');
+    }
     try {
       let audioId: string | undefined;
       let coverId: string | undefined;
@@ -569,7 +576,10 @@ export function MusicProvider({ children }: { children: ReactNode }) {
       if (audioId) docData.file_id = audioId;
       if (coverId) docData.cover_id = coverId;
       if (track.albumId) docData.album_id = track.albumId;
-      if (track.isLocked) { docData.is_locked = true; docData.unlock_price = track.unlockPrice || 0; }
+      if (track.isLocked) {
+        docData.is_locked = true;
+        docData.credit_price = track.unlockPrice;
+      }
 
       const permissions = [
         Permission.read(Role.any()),
@@ -592,6 +602,9 @@ export function MusicProvider({ children }: { children: ReactNode }) {
 
   const publishAlbum = useCallback(async (album: any) => {
     if (!currentUser) return;
+    if (album.isLocked && (!Number.isInteger(album.unlockPrice) || Number(album.unlockPrice) < 2 || Number(album.unlockPrice) > 10)) {
+      throw new Error('Locked Music must cost 2 to 10 Credits.');
+    }
     try {
       let coverId: string | undefined;
       if (album.coverFile instanceof File) {
@@ -612,7 +625,10 @@ export function MusicProvider({ children }: { children: ReactNode }) {
         is_published: true,
       };
       if (coverId) docData.cover_id = coverId;
-      if (album.isLocked) { docData.is_locked = true; docData.unlock_price = album.unlockPrice || 0; }
+      if (album.isLocked) {
+        docData.is_locked = true;
+        docData.credit_price = album.unlockPrice;
+      }
 
       const doc = await databases.createDocument(DATABASE_ID, COL.ALBUMS, ID.unique(), docData);
 

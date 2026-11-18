@@ -81,6 +81,7 @@ export default function FinancialMonitorPage() {
   const [withdrawalRequests, setWithdrawalRequests] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [reviewingWithdrawalId, setReviewingWithdrawalId] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [realtimePulse, setRealtimePulse] = useState(0);
 
@@ -99,10 +100,11 @@ export default function FinancialMonitorPage() {
           Query.orderDesc('$createdAt'),
           Query.limit(200),
         ]),
-        databases.listDocuments(DATABASE_ID, COL.WITHDRAWAL_REQUESTS, [
-          Query.orderDesc('$createdAt'),
-          Query.limit(200),
-        ]),
+        fetch('/api/withdraw').then(async response => {
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'Could not load withdrawals.');
+          return data.requests || [];
+        }),
       ]);
 
       if (adminsRes.status === 'fulfilled') {
@@ -138,19 +140,20 @@ export default function FinancialMonitorPage() {
       }
 
       if (withdrawalsRes.status === 'fulfilled') {
-        setWithdrawalRequests(withdrawalsRes.value.documents.map((doc: any) => ({
+        setWithdrawalRequests(withdrawalsRes.value.map((doc: any) => ({
           $id: doc.$id,
-          username: doc.username || '—',
-          accountName: doc.account_name || doc.accountName || '—',
-          payoutAmount: doc.payout_amount ?? doc.payoutAmount ?? 0,
-          payoutCurrency: doc.payout_currency || doc.payoutCurrency || 'USD',
-          method: doc.method || doc.payment_method || '—',
-          amount: doc.amount ?? 0,
-          currency: doc.currency || 'USD',
-          status: doc.status || 'PENDING',
-          createdAt: doc.$createdAt,
-          proofImageUrl: doc.proof_image_url,
-          adminMessage: doc.admin_message,
+          username: doc.username || doc.userName || '—',
+          accountName: doc.accountName || '—',
+          accountNumber: doc.accountNumber || '',
+          payoutAmount: doc.amountLD || 0,
+          payoutCurrency: 'LD',
+          method: doc.method || '—',
+          amount: doc.amountCredits || 0,
+          currency: 'Credits',
+          status: String(doc.status || 'pending').toUpperCase() === 'PAID' ? 'APPROVED' : String(doc.status || 'pending').toUpperCase(),
+          createdAt: doc.createdAt,
+          adminMessage: doc.reason,
+          proofImageUrl: doc.proofImageUrl,
         })));
       }
 
@@ -163,6 +166,27 @@ export default function FinancialMonitorPage() {
     }
   }, [toast]);
 
+  const reviewWithdrawal = async (requestId: string, action: 'approve' | 'reject') => {
+    const reason = action === 'reject' ? window.prompt('Enter a reason for rejecting this withdrawal:') : undefined;
+    if (action === 'reject' && !reason?.trim()) return;
+    setReviewingWithdrawalId(requestId);
+    try {
+      const response = await fetch('/api/withdraw', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId, action, reason }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not review withdrawal.');
+      toast({ title: action === 'approve' ? 'Withdrawal approved and marked paid' : 'Withdrawal rejected' });
+      await loadData(true);
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Withdrawal review failed', description: error.message });
+    } finally {
+      setReviewingWithdrawalId(null);
+    }
+  };
+
   useEffect(() => {
     if (!isSuper) return;
     loadData();
@@ -173,7 +197,7 @@ export default function FinancialMonitorPage() {
 
     const channels = [
       `databases.${DATABASE_ID}.collections.${COL.PAYMENT_REQUESTS}.documents`,
-      `databases.${DATABASE_ID}.collections.${COL.WITHDRAWAL_REQUESTS}.documents`,
+      `databases.${DATABASE_ID}.collections.withdraw_requests.documents`,
       `databases.${DATABASE_ID}.collections.${COL.USERS}.documents`,
     ];
 
@@ -531,7 +555,7 @@ export default function FinancialMonitorPage() {
                             <div className="flex items-start justify-between gap-2 flex-wrap">
                               <div>
                                 <p className="font-black text-sm">@{req.username}</p>
-                                <p className="text-white/40 text-xs font-bold">{req.accountName} · {req.method}</p>
+                                <p className="text-white/40 text-xs font-bold">{req.accountName} · {req.method} · {req.accountNumber}</p>
                               </div>
                               <Badge className={cn('border text-[9px] font-black uppercase tracking-widest flex items-center gap-1 shrink-0', STATUS_STYLE[req.status] || STATUS_STYLE.PENDING)}>
                                 <StatusIcon className="w-2.5 h-2.5" />
@@ -556,6 +580,24 @@ export default function FinancialMonitorPage() {
                             )}
                           </div>
                         </div>
+                        {req.status === 'PENDING' && (
+                          <div className="mt-3 flex gap-2">
+                            <button
+                              className="rounded-lg bg-emerald-500/15 px-3 py-2 text-[10px] font-black uppercase text-emerald-400 disabled:opacity-50"
+                              disabled={reviewingWithdrawalId === req.$id}
+                              onClick={() => reviewWithdrawal(req.$id, 'approve')}
+                            >
+                              Approve / Mark Paid
+                            </button>
+                            <button
+                              className="rounded-lg bg-red-500/15 px-3 py-2 text-[10px] font-black uppercase text-red-400 disabled:opacity-50"
+                              disabled={reviewingWithdrawalId === req.$id}
+                              onClick={() => reviewWithdrawal(req.$id, 'reject')}
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        )}
                         {req.proofImageUrl && (
                           <div className="mt-3 pt-3 border-t border-white/5 flex items-center gap-2">
                             <a

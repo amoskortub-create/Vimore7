@@ -15,36 +15,19 @@ const client = new Client().setEndpoint(endpoint).setProject(projectId).setKey(a
 const databases = new Databases(client);
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-const gifts = [
-  ['Blush Bloom', '🌷', 50, 'Love'], ['Sweet Heart', '💗', 60, 'Love'], ['Rose Aura', '🌹', 80, 'Love'], ['Love Letter', '💌', 90, 'Love'], ['Cupid Crown', '👑', 100, 'Love'],
-  ['Hope Basket', '🧺', 120, 'Support'], ['Kindness Pack', '🤝', 140, 'Support'], ['Village Blessing', '🙏', 160, 'Support'], ['Power Boost', '⚡', 180, 'Support'], ['Helping Hand', '🫶', 200, 'Support'],
-  ['Sunrise Petal', '🌼', 50, 'Nature'], ['Forest Calm', '🌿', 70, 'Nature'], ['Leaf Blessing', '🍃', 90, 'Nature'], ['Rainforest Glow', '🌴', 110, 'Nature'], ['Golden Horizon', '🌅', 150, 'Nature'],
-  ['Market Feast', '🍲', 60, 'Food'], ['Palm Rice', '🍚', 80, 'Food'], ['Jolly Cake', '🎂', 100, 'Food'], ['Cocoa Joy', '🍫', 130, 'Food'], ['Feast Table', '🍽️', 170, 'Food'],
-  ['Party Pop', '🎉', 70, 'Celebration'], ['Confetti Burst', '🎊', 100, 'Celebration'], ['Birthday Star', '⭐', 130, 'Celebration'], ['Victory Bell', '🔔', 160, 'Celebration'], ['Grand Finale', '🏆', 200, 'Celebration'],
-  ['Street Beat', '🎵', 80, 'Music'], ['Studio Spark', '🎧', 100, 'Music'], ['Vibe Mix', '🎶', 120, 'Music'], ['Sound Wave', '🔊', 150, 'Music'], ['Live Stage', '🎤', 200, 'Music'],
-  ['Travel Bag', '🧳', 90, 'Travel'], ['Airport Pass', '🎫', 110, 'Travel'], ['Coastline Escape', '🏖️', 150, 'Travel'], ['Sky Route', '✈️', 200, 'Travel'], ['Global Glow', '🌍', 250, 'Travel'],
-  ['First Win', '🥇', 80, 'Achievement'], ['Momentum Star', '🌟', 120, 'Achievement'], ['Silver Goal', '🥈', 160, 'Achievement'], ['Champion Crown', '🏆', 220, 'Achievement'], ['Legend Medal', '🏅', 300, 'Achievement'],
-  ['Hometown Pride', '🏡', 75, 'Community'], ['Community Cheer', '👏', 110, 'Community'], ['Neighborhood Lift', '🧡', 140, 'Community'], ['Unity Circle', '🤝', 190, 'Community'], ['Together Crown', '👨‍👩‍👧‍👦', 260, 'Community'],
-  ['Peace Euphoria', '🕊️', 90, 'Wellness'], ['Calm Wave', '🌊', 120, 'Wellness'], ['Glow Ritual', '✨', 170, 'Wellness'], ['Mindful Crown', '👁️', 220, 'Wellness'], ['Luxury Calm', '💎', 500, 'Wellness'],
-];
-
 const schemas = [
-  {
-    id: 'creator_orange_money_accounts', name: 'Creator Orange Money Accounts',
-    permissions: [Permission.read(Role.users())],
-    attrs: [
-      ['userId', 'string', { size: 36, required: true }], ['orangeMoneyNumber', 'string', { size: 20, required: true }], ['accountName', 'string', { size: 128, required: true }],
-      ['isVerified', 'boolean', { required: true, defaultValue: false }], ['createdAt', 'datetime', { required: true }], ['updatedAt', 'datetime', { required: true }],
-    ], indexes: [['userId', 'unique', ['userId']], ['orangeMoneyNumber', 'unique', ['orangeMoneyNumber']]],
-  },
   {
     id: 'transactions', name: 'Transactions', permissions: [],
     attrs: [
       ['transactionId', 'string', { size: 36, required: true }], ['senderUserId', 'string', { size: 36, required: true }], ['receiverUserId', 'string', { size: 36, required: true }],
       ['transactionType', 'enum', { elements: ['gift', 'subscription', 'unlock_post', 'unlock_music', 'store_boost', 'marketplace_boost', 'verification', 'currency_purchase'], required: true }], ['amountLD', 'integer', { required: true, min: 1 }],
-      ['itemId', 'string', { size: 36 }], ['itemType', 'enum', { elements: ['post', 'music', 'gift_item'] }], ['orangeMoneyRef', 'string', { size: 128 }],
+      ['amountCredits', 'float'], ['currency', 'string', { size: 16 }], ['user_id', 'string', { size: 36 }],
+      ['type', 'string', { size: 64 }], ['amount', 'float'], ['description', 'string', { size: 512 }],
+      ['reference_id', 'string', { size: 64 }], ['from_user_id', 'string', { size: 36 }],
+      ['from_user_name', 'string', { size: 128 }], ['from_user_avatar', 'string', { size: 512 }],
+      ['itemId', 'string', { size: 36 }], ['itemType', 'enum', { elements: ['post', 'music', 'gift_item'] }],
       ['status', 'enum', { elements: ['pending', 'completed', 'failed', 'cancelled'], required: true }], ['createdAt', 'datetime', { required: true }],
-    ], indexes: [['transactionId', 'unique', ['transactionId']], ['senderUserId', 'key', ['senderUserId']], ['receiverUserId', 'key', ['receiverUserId']], ['transactionType', 'key', ['transactionType']], ['amountLD', 'key', ['amountLD']], ['status', 'key', ['status']], ['createdAt', 'key', ['createdAt']]],
+    ], indexes: [['transactionId', 'unique', ['transactionId']], ['senderUserId', 'key', ['senderUserId']], ['receiverUserId', 'key', ['receiverUserId']], ['user_id', 'key', ['user_id']], ['transactionType', 'key', ['transactionType']], ['amountLD', 'key', ['amountLD']], ['status', 'key', ['status']], ['createdAt', 'key', ['createdAt']]],
   },
   {
     id: 'creator_earnings', name: 'Creator Earnings', permissions: [],
@@ -52,15 +35,40 @@ const schemas = [
   },
   {
     id: 'locked_content', name: 'Locked Content', permissions: [],
-    attrs: [['contentId', 'string', { size: 36, required: true }], ['creatorUserId', 'string', { size: 36, required: true }], ['contentType', 'enum', { elements: ['post', 'music'], required: true }], ['priceLD', 'integer', { required: true, min: 100, max: 500 }], ['isLocked', 'boolean', { required: true, defaultValue: true }], ['createdAt', 'datetime', { required: true }]], indexes: [['contentId', 'unique', ['contentId']], ['creatorUserId', 'key', ['creatorUserId']], ['contentType', 'key', ['contentType']], ['priceLD', 'key', ['priceLD']]],
+    attrs: [['contentId', 'string', { size: 36, required: true }], ['creatorUserId', 'string', { size: 36, required: true }], ['contentType', 'enum', { elements: ['post', 'music'], required: true }], ['priceCredits', 'float', { required: true, min: 2, max: 10 }], ['isLocked', 'boolean', { required: true, defaultValue: true }], ['createdAt', 'datetime', { required: true }]], indexes: [['contentId', 'unique', ['contentId']], ['creatorUserId', 'key', ['creatorUserId']], ['contentType', 'key', ['contentType']], ['priceCredits', 'key', ['priceCredits']]],
   },
   {
     id: 'subscriptions', name: 'Subscriptions', permissions: [],
-    attrs: [['subscriptionId', 'string', { size: 36, required: true }], ['subscriberUserId', 'string', { size: 36, required: true }], ['creatorUserId', 'string', { size: 36, required: true }], ['amountLD', 'integer', { required: true, min: 500, max: 500 }], ['startDate', 'datetime', { required: true }], ['endDate', 'datetime', { required: true }], ['isActive', 'boolean', { required: true, defaultValue: true }], ['autoRenew', 'boolean', { required: true, defaultValue: true }]], indexes: [['subscriptionId', 'unique', ['subscriptionId']], ['subscriberUserId', 'key', ['subscriberUserId']], ['creatorUserId', 'key', ['creatorUserId']], ['startDate', 'key', ['startDate']], ['endDate', 'key', ['endDate']], ['isActive', 'key', ['isActive']]],
+    attrs: [['subscriber_id', 'string', { size: 36, required: true }], ['creator_id', 'string', { size: 36, required: true }], ['creator_username', 'string', { size: 64 }], ['subscriber_username', 'string', { size: 64 }], ['price', 'float', { defaultValue: 0 }], ['tier', 'string', { size: 32 }], ['status', 'string', { size: 16, defaultValue: 'ACTIVE' }], ['expires_at', 'datetime']],
+    indexes: [['subscriber_id', 'key', ['subscriber_id']], ['creator_id', 'key', ['creator_id']], ['status', 'key', ['status']]],
+  },
+  {
+    id: 'withdraw_requests', name: 'Withdraw Requests', permissions: [],
+    attrs: [
+      ['userId', 'string', { size: 36, required: true }], ['userName', 'string', { size: 128 }],
+      ['username', 'string', { size: 64 }], ['amountCredits', 'float', { required: true, min: 10 }],
+      ['amountLD', 'float', { required: true }], ['amountUSD', 'float', { required: true }],
+      ['method', 'string', { size: 32, required: true }], ['accountName', 'string', { size: 128, required: true }],
+      ['accountNumber', 'string', { size: 128, required: true }], ['status', 'string', { size: 16, required: true, defaultValue: 'pending' }],
+      ['reason', 'string', { size: 512 }], ['createdAt', 'datetime', { required: true }],
+      ['adminMessage', 'string', { size: 512 }], ['proofImageUrl', 'string', { size: 512 }],
+      ['reviewedBy', 'string', { size: 36 }], ['reviewedAt', 'datetime'],
+    ],
+    indexes: [['userId', 'key', ['userId']], ['status', 'key', ['status']]],
+  },
+  {
+    id: 'withdrawal_locks', name: 'Withdrawal Locks', permissions: [],
+    attrs: [['userId', 'string', { size: 36, required: true }], ['expiresAt', 'datetime', { required: true }]],
+    indexes: [['userId_unique', 'unique', ['userId']]],
+  },
+  {
+    id: 'platform_fees', name: 'Platform Fees', permissions: [],
+    attrs: [['buyerId', 'string', { size: 36, required: true }], ['creatorId', 'string', { size: 36, required: true }], ['amountCredits', 'float', { required: true }], ['purchaseType', 'string', { size: 32, required: true }], ['createdAt', 'datetime', { required: true }]],
+    indexes: [['creatorId', 'key', ['creatorId']], ['purchaseType', 'key', ['purchaseType']]],
   },
   {
     id: 'gift_items', name: 'Gift Items', permissions: [Permission.read(Role.users())],
-    attrs: [['giftId', 'string', { size: 36, required: true }], ['name', 'string', { size: 128, required: true }], ['priceLD', 'integer', { required: true, min: 50, max: 500 }], ['category', 'string', { size: 64, required: true }], ['iconUrl', 'string', { size: 512, required: true }], ['isActive', 'boolean', { required: true, defaultValue: true }]], indexes: [['giftId', 'unique', ['giftId']], ['priceLD', 'key', ['priceLD']], ['category', 'key', ['category']]],
+    attrs: [['giftId', 'string', { size: 36, required: true }], ['name', 'string', { size: 128, required: true }], ['priceCredits', 'float', { required: true, min: 0.01 }], ['category', 'string', { size: 64, required: true }], ['iconUrl', 'string', { size: 512, required: true }], ['isActive', 'boolean', { required: true, defaultValue: true }]], indexes: [['giftId', 'unique', ['giftId']], ['priceCredits', 'key', ['priceCredits']], ['category', 'key', ['category']]],
   },
 ];
 
@@ -69,6 +77,7 @@ async function createAttribute(collectionId, [key, type, options]) {
     const { size, required = false, defaultValue = null, min = null, max = null, elements } = options;
     if (type === 'string') await databases.createStringAttribute(databaseId, collectionId, key, size, required, defaultValue);
     if (type === 'integer') await databases.createIntegerAttribute(databaseId, collectionId, key, required, min, max, defaultValue);
+    if (type === 'float') await databases.createFloatAttribute(databaseId, collectionId, key, required, min, max, defaultValue);
     if (type === 'boolean') await databases.createBooleanAttribute(databaseId, collectionId, key, required, defaultValue);
     if (type === 'datetime') await databases.createDatetimeAttribute(databaseId, collectionId, key, required, defaultValue);
     if (type === 'enum') await databases.createEnumAttribute(databaseId, collectionId, key, elements, required, defaultValue);
@@ -99,16 +108,5 @@ async function ensureSchema(schema) {
   }
 }
 
-async function seedGifts() {
-  for (const [index, [name, icon, priceLD, category]] of gifts.entries()) {
-    const giftId = `gift-${String(index + 1).padStart(2, '0')}`;
-    try {
-      await databases.createDocument(databaseId, 'gift_items', giftId, { giftId, name, priceLD, category, iconUrl: `emoji:${icon}`, isActive: true });
-    } catch (error) { if (error?.code !== 409) throw error; }
-  }
-  console.log(`Seeded ${gifts.length} gift items`);
-}
-
 for (const schema of schemas) await ensureSchema(schema);
-await seedGifts();
 console.log('Appwrite monetization schema is ready');

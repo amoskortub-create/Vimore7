@@ -19,6 +19,7 @@ import {
 import Link from "next/link";
 import { NativeAdNode } from "@/components/ad/native-ad-node";
 import { cn } from "@/lib/utils";
+import { WITHDRAW_RATE_LD, WITHDRAW_RATE_USD } from "@/lib/credit-monetization";
 
 const FEATURES = [
   {
@@ -29,7 +30,7 @@ const FEATURES = [
     points: [
       { icon: Star, text: "Stars — earned by inviting friends. 5,000 Stars per referral." },
       { icon: Gem, text: "Credits — send gifts to creators, unlock posts, and subscribe to creators." },
-      { icon: TrendingUp, text: "1 Credit = $0.25 USD. Withdraw anytime to Orange or MTN MoMo." },
+      { icon: TrendingUp, text: `1 Credit = ${WITHDRAW_RATE_USD} USD = ${WITHDRAW_RATE_LD} LD. Request a withdrawal to Orange Money or MTN MoMo.` },
     ],
   },
   {
@@ -38,9 +39,9 @@ const FEATURES = [
     label: "Creator Economy",
     title: "Earning as a Creator",
     points: [
-      { icon: TrendingUp, text: "You keep 90% of everything you earn. ViMore takes only 10%." },
-      { icon: Gem, text: "Withdraw your Credits to real money via Orange or MTN MoMo." },
-      { icon: ShieldCheck, text: "Every payout is reviewed by our AI audit system for security." },
+      { icon: TrendingUp, text: "You receive 81.01% of each Credit payment; ViMore keeps the remainder." },
+      { icon: Gem, text: "Request a Credit withdrawal to Orange Money or MTN MoMo. An administrator reviews and pays requests manually." },
+      { icon: ShieldCheck, text: "Rejected withdrawals return the Credits to your balance." },
     ],
   },
   {

@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { useState } from "react";
+import { normalizeLockedCredits } from "@/lib/credit-monetization";
 
 interface MusicGridProps {
   type: "song" | "album" | "playlist" | "artist" | "hero";
@@ -51,11 +52,17 @@ export function MusicGrid({ type, items = [], title }: MusicGridProps) {
         unlockTarget.unlockPrice,
         unlockTarget.artistId || '',
         unlockTarget.artistIsVerified || false,
+        unlockTarget.songs ? 'album' : 'track',
       );
       toast({ title: "Unlocked!", description: `${unlockTarget.title} is now yours to enjoy.` });
       setTrack(unlockTarget);
     } catch (err: any) {
-      toast({ variant: "destructive", title: "Unlock Failed", description: err.message || "Please check your Credits balance." });
+      if (String(err.message || '').includes('Insufficient Credits')) {
+        toast({ variant: "destructive", title: "Insufficient Credits - Buy Credits", description: err.message });
+        window.location.assign("/currency");
+      } else {
+        toast({ variant: "destructive", title: "Unlock Failed", description: err.message || "Please try again." });
+      }
     } finally {
       setIsUnlocking(false);
       setUnlockTarget(null);
@@ -214,7 +221,7 @@ export function MusicGrid({ type, items = [], title }: MusicGridProps) {
                 <div className="h-10 w-10 rounded-full bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center">
                   <Lock className="h-5 w-5 text-cyan-400" />
                 </div>
-                <span className="text-[10px] font-black text-cyan-400 uppercase tracking-wider">◆ {item.unlockPrice?.toFixed(2)}</span>
+                <span className="text-[10px] font-black text-cyan-400 uppercase tracking-wider">◆ {normalizeLockedCredits(item.creditPrice ?? item.unlockPrice)} Credits</span>
                 <span className="text-[8px] font-bold text-white/50 uppercase">Tap to unlock</span>
               </div>
             )}
@@ -406,10 +413,10 @@ export function MusicGrid({ type, items = [], title }: MusicGridProps) {
             <div className="bg-cyan-500/5 border border-cyan-500/20 rounded-2xl p-5 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">Unlock Price</span>
-                <span className="text-2xl font-black text-cyan-400">{unlockTarget.unlockPrice?.toFixed(0)} LD</span>
+                <span className="text-2xl font-black text-cyan-400">{normalizeLockedCredits(unlockTarget.creditPrice ?? unlockTarget.unlockPrice)} Credits</span>
               </div>
               <p className="text-[11px] text-muted-foreground leading-relaxed">
-                One-time Orange Money payment to unlock this {unlockTarget.songs ? 'album' : 'track'} forever.
+                One-time Credit payment to unlock this {unlockTarget.songs ? 'album' : 'track'} forever.
               </p>
             </div>
 
@@ -420,7 +427,7 @@ export function MusicGrid({ type, items = [], title }: MusicGridProps) {
                 disabled={isUnlocking}
               >
                 {isUnlocking ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : <Lock className="h-4 w-4 mr-2" />}
-                {isUnlocking ? "Processing..." : `Unlock for ${unlockTarget.unlockPrice?.toFixed(0)} LD`}
+                {isUnlocking ? "Processing..." : `Unlock for ${normalizeLockedCredits(unlockTarget.creditPrice ?? unlockTarget.unlockPrice)} Credits`}
               </Button>
               <Button
                 variant="ghost"

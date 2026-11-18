@@ -4,7 +4,12 @@ import { getSessionUser } from '@/lib/session';
 import { rateLimit } from '@/lib/rate-limit';
 import { ID, Query } from 'node-appwrite';
 import { logSecurityEvent, extractRequestMeta } from '@/lib/security-logger';
-import { calculatePlatformFee, PLATFORM_FEE_PERCENT } from '@/lib/transaction-fee';
+import {
+  calculateSplit,
+  normalizeLegacySubscriptionCredits,
+  normalizeSubscriptionCredits,
+  roundCredits,
+} from '@/lib/credit-monetization';
 
 export const maxDuration = 30;
 
@@ -61,11 +66,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Creator not found.' }, { status: 404 });
     }
 
-    // Use server-side subscription price; fall back to 5 diamonds if not set
-    const cost: number = Math.round(Number(creatorDoc.subscription_price ?? creatorDoc.subscriptionPrice ?? 5));
-    if (cost <= 0) {
+    const parsedCost = creatorDoc.subscription_price_credits != null
+      ? normalizeSubscriptionCredits(creatorDoc.subscription_price_credits)
+      : normalizeLegacySubscriptionCredits(creatorDoc.subscription_price ?? creatorDoc.subscriptionPrice);
+    if (!Number.isFinite(parsedCost) || parsedCost <= 0) {
       return NextResponse.json({ error: 'Invalid subscription price.' }, { status: 400 });
     }
+    const cost = roundCredits(parsedCost);
 
     // Server-side subscriber balance read
     let subscriberDoc: any;
@@ -75,21 +82,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Subscriber not found.' }, { status: 404 });
     }
 
-    const subscriberBalance: number = Math.round(Number(subscriberDoc.credit_balance ?? subscriberDoc.diamond_balance ?? 0));
+    const subscriberBalance = Number(subscriberDoc.credit_balance ?? subscriberDoc.diamond_balance ?? 0);
     if (subscriberBalance < cost) {
       void logSecurityEvent({ ...meta, event_type: 'SUBSCRIBE_INSUFFICIENT_BALANCE', severity: 'WARN', user_id: session.userId, target_id: creatorId, amount: cost, currency: 'CREDIT', result: 'blocked', details: `Balance ${subscriberBalance} < cost ${cost}` });
       return NextResponse.json(
-        { error: `Insufficient Credits. You need ${cost} but have ${subscriberBalance}.` },
-        { status: 400 }
+        { error: `Insufficient Credits - Buy Credits. You need ${cost} but have ${subscriberBalance}.` },
+        { status: 402 }
       );
     }
 
-    const platformFee = calculatePlatformFee(cost);
-    const creatorShare = cost - platformFee;
+    const { platformFeeCredits: platformFee, creatorEarningsCredits: creatorShare } = calculateSplit(cost);
 
-    const subscriberNewBalance = subscriberBalance - cost;
-    const creatorCurrentBalance: number = Math.round(Number(creatorDoc.credit_balance ?? creatorDoc.diamond_balance ?? 0));
-    const creatorNewBalance = creatorCurrentBalance + creatorShare;
+    const subscriberNewBalance = roundCredits(subscriberBalance - cost);
+    const creatorCurrentBalance = Number(creatorDoc.credit_balance ?? creatorDoc.diamond_balance ?? 0);
+    const creatorNewBalance = roundCredits(creatorCurrentBalance + creatorShare);
 
     const expiresAt = new Date(Date.now() + 30 * 86_400_000).toISOString();
 
@@ -104,6 +110,9 @@ export async function POST(req: NextRequest) {
         db.createDocument(DATABASE_ID, COL.SUBSCRIPTIONS, ID.unique(), {
           subscriber_id: session.userId,
           creator_id: creatorId,
+          creator_username: creatorDoc.username || '',
+          subscriber_username: subscriberDoc.username || '',
+          price: cost,
           tier: 'STANDARD',
           expires_at: expiresAt,
           status: 'ACTIVE',
@@ -118,14 +127,15 @@ export async function POST(req: NextRequest) {
           senderUserId: session.userId,
           receiverUserId: creatorId,
           transactionType: 'subscription',
-          amountLD: cost,
+          amountLD: Math.round(cost),
+          amountCredits: cost,
           createdAt: new Date().toISOString(),
           type: 'SUBSCRIPTION',
           currency: 'CREDIT',
           amount: cost,
-          description: `Subscribed to @${creatorDoc.username || creatorId} — ${platformFee} Credits platform fee (${PLATFORM_FEE_PERCENT}%)`,
+          description: `Subscribed to @${creatorDoc.username || creatorId}`,
           reference_id: creatorId,
-          status: 'COMPLETED',
+          status: 'completed',
         }),
         db.createDocument(DATABASE_ID, COL.TRANSACTIONS, ID.unique(), {
           user_id: creatorId,
@@ -133,17 +143,25 @@ export async function POST(req: NextRequest) {
           senderUserId: session.userId,
           receiverUserId: creatorId,
           transactionType: 'subscription',
-          amountLD: creatorShare,
+          amountLD: Math.round(creatorShare),
+          amountCredits: creatorShare,
           createdAt: new Date().toISOString(),
           type: 'SUBSCRIPTION_EARNING',
           currency: 'CREDIT',
           amount: creatorShare,
-          description: `Subscription from @${subscriberDoc.username || session.userId} — kept ${100 - PLATFORM_FEE_PERCENT}% after ${platformFee} Credits platform fee`,
+          description: `Subscription from @${subscriberDoc.username || session.userId}`,
           reference_id: session.userId,
-          status: 'COMPLETED',
+          status: 'completed',
           from_user_id: session.userId,
           from_user_name: subscriberDoc.username || subscriberDoc.name || '',
           from_user_avatar: subscriberDoc.avatar || '',
+        }),
+        db.createDocument(DATABASE_ID, 'platform_fees', ID.unique(), {
+          buyerId: session.userId,
+          creatorId,
+          amountCredits: platformFee,
+          purchaseType: 'subscription',
+          createdAt: new Date().toISOString(),
         }),
         db.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
           user_id: creatorId,
@@ -167,7 +185,7 @@ export async function POST(req: NextRequest) {
       throw err;
     }
 
-    void logSecurityEvent({ ...meta, event_type: 'SUBSCRIPTION', severity: 'INFO', user_id: session.userId, target_id: creatorId, amount: cost, currency: 'CREDIT', result: 'success', details: `Fee ${platformFee} Credits (${PLATFORM_FEE_PERCENT}%, minimum 1). Creator received ${creatorShare} Credits. Expires ${expiresAt}` });
+    void logSecurityEvent({ ...meta, event_type: 'SUBSCRIPTION', severity: 'INFO', user_id: session.userId, target_id: creatorId, amount: cost, currency: 'CREDIT', result: 'success',     details: `Platform fee ${platformFee} Credits. Creator received ${creatorShare} Credits. Expires ${expiresAt}` });
 
     return NextResponse.json({
       ok: true,

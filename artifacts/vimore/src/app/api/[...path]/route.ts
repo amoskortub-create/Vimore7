@@ -39,9 +39,9 @@ import * as Withdraw from '@/server/api-impl/root/withdraw';
 import * as PostReaction from '@/server/api-impl/root/post-reaction';
 import * as MonetizationValidateCreatorEligibility from '@/server/api-impl/root/monetization/validate-creator-eligibility';
 import * as MonetizationUpdateCreatorEarnings from '@/server/api-impl/root/monetization/update-creator-earnings';
-import * as MonetizationOrangeMoneyAccount from '@/server/api-impl/root/monetization/orange-money-account';
-import * as MonetizationSubscribe from '@/server/api-impl/root/monetization/subscribe';
 import * as MonetizationEarningsSummary from '@/server/api-impl/root/monetization/earnings-summary';
+import * as MonetizationCreditPurchase from '@/server/api-impl/root/monetization/credit-purchase';
+import * as MonetizationPlatformFees from '@/server/api-impl/root/monetization/platform-fees';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -89,9 +89,9 @@ const ROUTES: Record<string, Handler> = {
   'post/reaction': PostReaction,
   'monetization/validate-creator-eligibility': MonetizationValidateCreatorEligibility,
   'monetization/update-creator-earnings': MonetizationUpdateCreatorEarnings,
-  'monetization/orange-money-account': MonetizationOrangeMoneyAccount,
-  'monetization/subscribe': MonetizationSubscribe,
   'monetization/earnings-summary': MonetizationEarningsSummary,
+  'monetization/credit-purchase': MonetizationCreditPurchase,
+  'monetization/platform-fees': MonetizationPlatformFees,
 };
 
 async function dispatch(req: NextRequest, method: string, ctx: { params: Promise<{ path: string[] }> }) {

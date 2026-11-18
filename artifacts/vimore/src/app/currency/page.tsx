@@ -35,6 +35,8 @@ import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { BiometricGate } from "@/components/layout/biometric-gate";
+import { WithdrawCredits } from "@/components/monetization/withdraw-credits";
+import { WITHDRAW_RATE_LD, WITHDRAW_RATE_USD } from "@/lib/credit-monetization";
 
 const CREDIT_PACKAGES = [
   { id: "d1", d: 25, priceLD: 1200, priceUSD: 7.00, label: "Gem Spike" },
@@ -42,7 +44,7 @@ const CREDIT_PACKAGES = [
   { id: "d3", d: 100, priceLD: 4700, priceUSD: 25.00, label: "VIP Crystalline", isVIP: true },
 ];
 
-type TabId = "credits" | "complete";
+type TabId = "credits" | "complete" | "withdraw";
 
 export default function CurrencyHub() {
   const { currentUser, initiateTransaction, pendingTransaction, cancelTransaction, triggerHaptic, createPaymentRequest, submitTicket, isLoading } = usePosts();
@@ -203,6 +205,7 @@ export default function CurrencyHub() {
 
   const TABS: { id: TabId; label: string; color: string }[] = [
     { id: "credits", label: "Buy Credits", color: "cyan" },
+    { id: "withdraw", label: "Withdraw", color: "amber" },
     { id: "complete", label: "Complete", color: "emerald" },
   ];
 
@@ -265,7 +268,7 @@ export default function CurrencyHub() {
                     <span className="text-[9px] font-black uppercase tracking-widest text-white/40">Credit Balance</span>
                   </div>
                   <p className="text-4xl font-black italic text-white tabular-nums">{(currentUser?.creditBalance ?? currentUser?.diamondBalance ?? 0).toFixed(2)}</p>
-                  <p className="text-[9px] text-white/30 font-bold uppercase mt-1">Credits are non-withdrawable and used exclusively for boosts, marketplace promotions, and verification badges.</p>
+                  <p className="text-[9px] text-white/50 font-bold mt-2">Credits can be used for Gifts, Locked Posts, Subscriptions, Boosts, Marketplace Promotions, Verification Badges, and can be withdrawn to MTN MoMo or Orange Money. 1 Credit = {WITHDRAW_RATE_USD} USD = {WITHDRAW_RATE_LD} LD.</p>
                 </div>
               </div>
             </div>
@@ -284,6 +287,7 @@ export default function CurrencyHub() {
                     isActive
                       ? tab.color === "amber" ? "bg-amber-500 text-white shadow-lg shadow-amber-500/20"
                         : tab.color === "cyan" ? "bg-cyan-600 text-white shadow-lg shadow-cyan-500/20"
+                        : tab.color === "amber" ? "bg-amber-500 text-white shadow-lg shadow-amber-500/20"
                         : "bg-emerald-600 text-white shadow-lg shadow-emerald-500/20"
                       : "text-muted-foreground hover:text-foreground"
                   )}
@@ -298,7 +302,7 @@ export default function CurrencyHub() {
           </div>
 
           {/* Currency Toggle */}
-          {activeTab !== "complete" && (
+          {activeTab === "credits" && (
             <div className="flex justify-center">
               <div className="flex items-center gap-1 bg-white dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-full p-1 shadow-sm">
                 {(["USD", "LD"] as const).map((mode) => (
@@ -318,6 +322,8 @@ export default function CurrencyHub() {
               </div>
             </div>
           )}
+
+          {activeTab === "withdraw" && <WithdrawCredits />}
 
           {/* Credit packages */}
           {activeTab === "credits" && (

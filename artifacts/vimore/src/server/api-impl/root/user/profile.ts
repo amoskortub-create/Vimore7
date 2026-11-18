@@ -20,6 +20,7 @@ const ALLOWED_PROFILE_FIELDS = new Set([
   'cover_id',
   'website',
   'subscription_price',
+  'subscription_price_credits',
   'free_post_limit',
   'post_price',
   'discord',
@@ -74,6 +75,15 @@ export async function POST(req: NextRequest) {
       if (!Number.isFinite(price) || price < 0 || price > 10_000) {
         return NextResponse.json(
           { error: 'subscription_price must be between 0 and 10,000.' },
+          { status: 400 }
+        );
+      }
+    }
+    if ('subscription_price_credits' in safeUpdate) {
+      const price = Number(safeUpdate.subscription_price_credits);
+      if (!Number.isFinite(price) || price <= 0 || price > 10_000) {
+        return NextResponse.json(
+          { error: 'subscription_price_credits must be between 0 and 10,000.' },
           { status: 400 }
         );
       }

@@ -17,6 +17,11 @@ import { clearApiResponseCache } from '@/lib/api-response-cache';
 import { loadFeedCache, loadFeedCacheAsync, offlineCache, saveFeedCache } from '@/lib/offline-cache';
 import { firePush } from '@/lib/push-fire';
 import { CREDIT_PRICES } from '@/lib/credit-pricing';
+import {
+  normalizeLegacySubscriptionCredits,
+  normalizeLockedCredits,
+  normalizeSubscriptionCredits,
+} from '@/lib/credit-monetization';
 
 const PRESENCE_TTL_MS = 90_000;
 const SESSION_REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -86,6 +91,7 @@ export interface User {
   goldBalance?: number;
   diamondBalance?: number;
   creditBalance?: number;
+  subscriptionPrice?: number;
   starBalance?: number;
   referralCount?: number;
   role?: 'SUPER' | 'FINANCIAL' | 'MODERATOR' | 'USER';
@@ -147,6 +153,7 @@ export interface Post {
   poll?: any;
   isLocked?: boolean;
   unlockPrice?: number;
+  creditPrice?: number;
   isBoosted?: boolean;
   isFeedAppend?: boolean;
   boostTargetViews?: number;
@@ -321,6 +328,8 @@ interface PostContextType {
   isPostUnliked: (postId: string) => boolean;
   isPostSaved: (postId: string) => boolean;
   isPostUnlocked: (postId: string) => boolean;
+  unlockPost: (postId: string) => Promise<void>;
+  applyCreditBalance: (balance: number) => void;
   isFollowing: (username: string) => boolean;
   toggleFollowUser: (username: string) => Promise<void>;
   isFriend: (username: string) => boolean;
@@ -465,6 +474,9 @@ function mapDocToUser(authUser: Models.User<Models.Preferences>, doc: Models.Doc
     goldBalance: doc.gold_balance || 0,
     diamondBalance: doc.diamond_balance || 0,
     creditBalance: doc.credit_balance ?? doc.diamond_balance ?? 0,
+    subscriptionPrice: doc.subscription_price_credits != null
+      ? normalizeSubscriptionCredits(doc.subscription_price_credits)
+      : normalizeLegacySubscriptionCredits(doc.subscription_price ?? doc.subscriptionPrice),
     starBalance: doc.star_balance || 0,
     referralCount: doc.referral_count || 0,
     role: (doc.role as 'SUPER' | 'FINANCIAL' | 'MODERATOR' | 'USER') || 'USER',
@@ -503,6 +515,9 @@ function mapProfileDocToUser(doc: Models.Document): User {
     goldBalance: doc.gold_balance || 0,
     diamondBalance: doc.diamond_balance || 0,
     creditBalance: doc.credit_balance ?? doc.diamond_balance ?? 0,
+    subscriptionPrice: doc.subscription_price_credits != null
+      ? normalizeSubscriptionCredits(doc.subscription_price_credits)
+      : normalizeLegacySubscriptionCredits(doc.subscription_price ?? doc.subscriptionPrice),
     starBalance: doc.star_balance || 0,
     referralCount: doc.referral_count || 0,
     role: (doc.role as 'SUPER' | 'FINANCIAL' | 'MODERATOR' | 'USER') || 'USER',
@@ -575,7 +590,10 @@ function mapDocToPost(doc: Models.Document, authorDoc?: Models.Document): Post {
     location: doc.location,
     commentsDisabled: doc.comments_disabled || false,
     isLocked: doc.is_locked || false,
-    unlockPrice: doc.unlock_price,
+    unlockPrice: doc.is_locked || doc.credit_price != null
+      ? normalizeLockedCredits(doc.credit_price ?? doc.unlock_price)
+      : undefined,
+    creditPrice: doc.credit_price != null ? normalizeLockedCredits(doc.credit_price) : undefined,
      boostExpiry: doc.boost_expiry ? new Date(doc.boost_expiry).getTime() : undefined,
      isBoosted: (doc.is_boosted || false) && (!doc.boost_expiry || new Date(doc.boost_expiry).getTime() > Date.now()),
     boostTargetViews: doc.boost_target_views,
@@ -1683,22 +1701,23 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
   const loadUserWithdrawals = useCallback(async (userId: string) => {
     try {
-      const res = await databases.listDocuments(DATABASE_ID, COL.WITHDRAWAL_REQUESTS, [
-        Query.equal('user_id', userId),
-        Query.orderDesc('$createdAt'),
-        Query.limit(50),
-      ]);
-      setWithdrawalHistory(res.documents.map((doc: any) => ({
+      const response = await authFetch('/api/withdraw');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not load withdrawals.');
+      setWithdrawalHistory((data.requests || []).map((doc: any) => ({
         ...doc,
-        username: doc.username || '',
-        accountName: doc.account_name || doc.accountName || '',
-        payoutAmount: doc.payout_amount ?? doc.payoutAmount ?? 0,
-        payoutCurrency: doc.payout_currency || doc.payoutCurrency || 'USD',
-        method: doc.method || doc.payment_method || '',
-        amount: doc.amount ?? 0,
-        currency: doc.currency || '',
+        $createdAt: doc.createdAt,
+        username: doc.username || doc.userName || '',
+        accountName: doc.accountName || '',
+        amount: doc.amountCredits || 0,
+        currency: 'Credits',
+        payoutAmount: doc.amountLD || 0,
+        payoutCurrency: 'LD',
+        status: String(doc.status || '').toUpperCase() === 'PAID' ? 'APPROVED' : String(doc.status || '').toUpperCase(),
       })));
-    } catch { /* ignore */ }
+    } catch (error) {
+      console.error('[withdraw] failed to load user history', error);
+    }
   }, []);
 
   const loadCampaigns = useCallback(async () => {
@@ -2237,6 +2256,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
     if (data.gender !== undefined) payload.gender = data.gender;
     if (data.language !== undefined) payload.language = data.language;
     if (data.phone !== undefined) payload.phone = data.phone;
+    if (data.subscriptionPrice !== undefined) payload.subscription_price_credits = data.subscriptionPrice;
 
     if (data.avatar !== undefined) {
       const fileId = extractFileId(data.avatar);
@@ -2289,7 +2309,11 @@ export function PostProvider({ children }: { children: ReactNode }) {
         databases.listDocuments(DATABASE_ID, COL.SUPPORT_TICKETS, [Query.orderDesc('$createdAt'), Query.limit(100)]),
         databases.listDocuments(DATABASE_ID, COL.AD_CAMPAIGNS, [Query.orderDesc('$createdAt'), Query.limit(100)]),
         databases.listDocuments(DATABASE_ID, COL.PAYMENT_REQUESTS, [Query.orderDesc('$createdAt'), Query.limit(100)]),
-        databases.listDocuments(DATABASE_ID, COL.WITHDRAWAL_REQUESTS, [Query.orderDesc('$createdAt'), Query.limit(100)]),
+        authFetch('/api/withdraw').then(async response => {
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'Could not load withdrawals.');
+          return data.requests || [];
+        }),
         databases.listDocuments(DATABASE_ID, COL.AUDIT_LOGS, [Query.orderDesc('$createdAt'), Query.limit(100)]),
         databases.listDocuments(DATABASE_ID, COL.USERS, [Query.notEqual('role', 'USER'), Query.limit(50)]),
       ]);
@@ -2302,15 +2326,16 @@ export function PostProvider({ children }: { children: ReactNode }) {
         packageName: doc.package_name || doc.message || 'Package',
         screenshot: doc.screenshot_id ? getFileUrl(BUCKET.PAYMENT_SCREENSHOTS, doc.screenshot_id) : '',
       })));
-      if (wdRes.status === 'fulfilled') setWithdrawalHistory(wdRes.value.documents.map((doc: any) => ({
+      if (wdRes.status === 'fulfilled') setWithdrawalHistory(wdRes.value.map((doc: any) => ({
         ...doc,
-        username: doc.username || '',
-        accountName: doc.account_name || doc.accountName || '',
-        payoutAmount: doc.payout_amount ?? doc.payoutAmount ?? 0,
-        payoutCurrency: doc.payout_currency || doc.payoutCurrency || 'USD',
-        method: doc.method || doc.payment_method || '',
-        amount: doc.amount ?? 0,
-        currency: doc.currency || '',
+        $createdAt: doc.createdAt,
+        username: doc.username || doc.userName || '',
+        accountName: doc.accountName || '',
+        amount: doc.amountCredits || 0,
+        currency: 'Credits',
+        payoutAmount: doc.amountLD || 0,
+        payoutCurrency: 'LD',
+        status: String(doc.status || '').toUpperCase() === 'PAID' ? 'APPROVED' : String(doc.status || '').toUpperCase(),
       })));
       if (logsRes.status === 'fulfilled') setAuditLogs(logsRes.value.documents);
       if (staffRes.status === 'fulfilled') setStaff(staffRes.value.documents.map(mapProfileDocToUser));
@@ -2453,6 +2478,9 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
   const addPost = async (p: any) => {
     if (!currentUser) return;
+    if (p.isLocked && (!Number.isInteger(Number(p.unlockPrice)) || Number(p.unlockPrice) < 2 || Number(p.unlockPrice) > 10)) {
+      throw new Error('Locked Posts must cost 2 to 10 Credits.');
+    }
 
     const mediaIds: string[] = [];
     let videoId: string | undefined;
@@ -2502,7 +2530,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
     if (p.imageFilter) docData.image_filter = p.imageFilter;
     if (p.feeling) docData.feeling = p.feeling;
     if (p.location) docData.location = p.location;
-    if (p.unlockPrice) docData.unlock_price = p.unlockPrice;
+    if (p.unlockPrice) docData.credit_price = p.unlockPrice;
     if (p.poll) docData.poll = JSON.stringify(p.poll);
     if (p.sharedPost) {
       docData.shared_post_data = JSON.stringify({
@@ -3361,10 +3389,37 @@ export function PostProvider({ children }: { children: ReactNode }) {
       throw new Error(data?.error || 'Subscription failed');
     }
     if (typeof data.subscriberNewBalance === 'number') {
-      setCurrentUserState(prev => prev ? { ...prev, diamondBalance: data.subscriberNewBalance } : null);
+      setCurrentUserState(prev => prev ? { ...prev, diamondBalance: data.subscriberNewBalance, creditBalance: data.subscriberNewBalance } : null);
     }
-    toast({ title: "Subscribed!", description: `${data.creatorShare ?? ''} Credits sent to @${username} · ${data.platformFee ?? ''} Credits platform fee` });
+    toast({ title: "Subscribed!", description: `${data.creatorShare ?? ''} Credits earned by @${username}.` });
   }, [currentUser, allUsers, toast]);
+
+  const unlockPost = useCallback(async (postId: string) => {
+    if (!currentUser) throw new Error('You must be logged in.');
+    const response = await authFetch('/api/monetization/credit-purchase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'locked_post', postId }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || 'Could not unlock this post.');
+    setUnlockedPostIdsState(prev => new Set(prev).add(postId));
+    if (typeof data.buyerNewBalance === 'number') {
+      setCurrentUserState(prev => prev ? {
+        ...prev,
+        creditBalance: data.buyerNewBalance,
+        diamondBalance: data.buyerNewBalance,
+      } : null);
+    }
+  }, [currentUser]);
+
+  const applyCreditBalance = useCallback((balance: number) => {
+    setCurrentUserState(prev => prev ? {
+      ...prev,
+      creditBalance: balance,
+      diamondBalance: balance,
+    } : null);
+  }, []);
 
   const cancelSubscription = useCallback(async (username: string) => {
     if (!currentUser) return;
@@ -3693,93 +3748,56 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
   const recordWithdrawal = async (n: any) => {
     if (!currentUser) return;
-    const currency: string = (n.currency || 'GOLD').toUpperCase();
-    const withdrawAmount = parseFloat(n.amount || 0);
-    const balanceField = currency === 'DIAMOND' ? 'diamondBalance' : currency === 'STAR' ? 'starBalance' : 'goldBalance';
-
-    // Unique key so duplicate taps don't double-submit
-    const idempotencyKey = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
+    const withdrawAmount = Number(n.amountCredits ?? n.amount);
     const res = await authFetch('/api/withdraw', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        currency,
-        amount: withdrawAmount,
-        method: n.method || 'MOBILE_MONEY',
+        amountCredits: withdrawAmount,
+        method: n.method || 'Orange Money',
         accountName: n.accountName || '',
-        accountNumber: n.accountNumber || n.phoneNumber || '',
-        payoutAmount: n.payoutAmount,
-        payoutCurrency: n.payoutCurrency || 'USD',
-        idempotencyKey,
+        accountNumber: n.accountNumber || '',
       }),
     });
 
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Withdrawal failed');
 
-    // Update local balance with the server-confirmed value
     setCurrentUserState(prev =>
-      prev ? { ...prev, [balanceField]: data.newBalance } : null
+      prev ? { ...prev, creditBalance: data.newBalance, diamondBalance: data.newBalance } : null
     );
 
     const wd: Record<string, any> = {
-      $id: data.withdrawalId,
+      $id: data.requestId,
       ...n,
-      status: 'PENDING',
+      status: 'pending',
       $createdAt: new Date().toISOString(),
       username: currentUser.username,
       accountName: n.accountName || '',
       method: n.method || '',
+      amount: withdrawAmount,
+      currency: 'Credits',
     };
     setWithdrawalHistory(prev => [wd, ...prev]);
   };
 
   const processWithdrawal = async (id: string, status: 'APPROVED' | 'REJECTED', adminMessage?: string, proofImageUrl?: string) => {
-    setWithdrawalHistory(prev => prev.map(w => w.$id === id ? { ...w, status } : w));
-    try {
-      await databases.updateDocument(DATABASE_ID, COL.WITHDRAWAL_REQUESTS, id, { status });
-      // Fetch the withdrawal doc to get user_id and amount for notification
-      const wdDoc = await databases.getDocument(DATABASE_ID, COL.WITHDRAWAL_REQUESTS, id);
-      const notifTitle = status === 'APPROVED' ? 'Withdrawal Approved' : 'Withdrawal Rejected';
-      const baseMsg = status === 'APPROVED'
-        ? `Your withdrawal of ${wdDoc.amount} ${wdDoc.currency} has been approved.`
-        : `Your withdrawal of ${wdDoc.amount} ${wdDoc.currency} has been rejected.`;
-      const fullMsg = adminMessage ? `${baseMsg} ${adminMessage}` : baseMsg;
-      const notifData: Record<string, any> = {
-        user_id: wdDoc.user_id,
-        type: 'SYSTEM',
-        title: notifTitle,
-        message: fullMsg,
-        content: fullMsg,
-        is_read: false,
-      };
-      if (proofImageUrl) notifData.image = proofImageUrl;
-      await databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), notifData);
-      // If REJECTED, refund the balance
-      if (status === 'REJECTED') {
-        const currency: string = wdDoc.currency || 'GOLD';
-        const dbBalanceField = currency === 'DIAMOND' ? 'diamond_balance' : currency === 'STAR' ? 'star_balance' : 'gold_balance';
-        const balanceField = currency === 'DIAMOND' ? 'diamondBalance' : currency === 'STAR' ? 'starBalance' : 'goldBalance';
-        if (wdDoc.user_id === currentUser?.$id) {
-          const currentBalance = (currentUser as any)[balanceField] || 0;
-          setCurrentUserState(prev => prev ? { ...prev, [balanceField]: currentBalance + (wdDoc.amount || 0) } : null);
-          await databases.updateDocument(DATABASE_ID, COL.USERS, wdDoc.user_id, {
-            [dbBalanceField]: currentBalance + (wdDoc.amount || 0),
-          });
-        } else {
-          // Update balance of the user whose withdrawal was rejected (admin side)
-          const userRes = await databases.listDocuments(DATABASE_ID, COL.USERS, [Query.equal('$id', wdDoc.user_id), Query.limit(1)]);
-          if (userRes.documents[0]) {
-            const userDoc = userRes.documents[0];
-            const dbBal = currency === 'DIAMOND' ? 'diamond_balance' : currency === 'STAR' ? 'star_balance' : 'gold_balance';
-            await databases.updateDocument(DATABASE_ID, COL.USERS, userDoc.$id, {
-              [dbBal]: (userDoc[dbBal] || 0) + (wdDoc.amount || 0),
-            });
-          }
-        }
-      }
-    } catch { /* ignore */ }
+    void proofImageUrl;
+    const response = await authFetch('/api/withdraw', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestId: id,
+        action: status === 'APPROVED' ? 'approve' : 'reject',
+        reason: adminMessage,
+        message: status === 'APPROVED' ? adminMessage : undefined,
+        proofImageUrl,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Could not process withdrawal.');
+    const updatedStatus = data.status === 'paid' ? 'APPROVED' : 'REJECTED';
+    setWithdrawalHistory(prev => prev.map(w => w.$id === id ? { ...w, status: updatedStatus } : w));
   };
 
   const createCluster = async (name: string, members: any[], logoFile?: File) => {
@@ -4255,6 +4273,8 @@ export function PostProvider({ children }: { children: ReactNode }) {
     isPostUnliked: (id: string) => unlikedPostIds.has(id),
     isPostSaved: (id: string) => savedPostIds.has(id),
     isPostUnlocked: (id: string) => unlockedPostIds.has(id),
+    unlockPost,
+    applyCreditBalance,
     isFollowing: (u: string) => followingUsernames.has(u),
     toggleFollowUser: async (username: string) => {
       if (!currentUser) return;

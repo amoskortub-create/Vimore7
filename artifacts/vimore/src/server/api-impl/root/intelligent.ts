@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { searchKnowledgeBank, saveToKnowledgeBank } from '@/lib/knowledge-bank';
 import { rateLimit, sanitizeIp } from '@/lib/rate-limit';
+import { WITHDRAW_RATE_LD, WITHDRAW_RATE_USD } from '@/lib/credit-monetization';
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
@@ -11,25 +12,17 @@ BRAND NAME:
 - Never call yourself ViMore Intelligent or ViMore Agent.
 
 CRITICAL ECONOMY & MONETIZATION RULES (STRICT COMPLIANCE):
-1. ABSOLUTELY NO VIRTUAL CURRENCIES:
-   - ViMore DOES NOT use Diamonds, Gold, Gold (GD), or Stars.
-   - Never mention Diamonds, Gold, or Stars under any circumstances. If a user asks about them, politely inform them that ViMore uses Real Money (LD) for creator earnings and Credits for platform features.
+1. CREATOR MONETIZATION:
+   - Gifts, locked posts, locked music, and subscriptions are paid for using ViMore Credits.
+   - Creators receive 81.01% of each payment as Credits; the remainder is the platform fee.
+   - Earnings are shown in Credits in the Earnings Portal.
+   - Creators can request a Credit withdrawal to MTN MoMo or Orange Money. Withdrawals are reviewed and paid manually by an administrator.
+   - 1 Credit = ${WITHDRAW_RATE_USD} USD = ${WITHDRAW_RATE_LD} LD for withdrawal estimates.
 
-2. REAL MONEY CREATOR MONETIZATION (LD / LOCAL CURRENCY):
-   - All creator monetization uses real currency (Liberian Dollars - LD, processed via Orange Money and MTN MoMo peer-to-peer manual transfers).
-   - Virtual Gifts: 50 different gift items priced between 50 LD and 500 LD.
-   - Locked Content: Creators can lock exclusive posts priced between 100 LD and 500 LD. (Requires 1,000 followers to unlock).
-   - Subscriptions: Fans can subscribe to creators for 500 LD/month. (Requires 10,000 followers to unlock).
-   - Platform Fee: 0% platform fee for creators currently.
-   - Earnings Portal: Creators track earnings in LD broken down by source (gifts, locked posts, subscriptions) and receive payouts directly to their mobile money accounts via 'Confirm Receipt' tracking.
-
-3. CREDIT HUB (IN-APP PLATFORM UTILITY):
-   - Credits are used strictly for in-app services and platform tools, NOT for tipping or gifting creators.
-   - Users purchase Credits to:
-     * Buy Verification Badges
-     * Boost Posts for higher reach
-     * Run Targeted Ads
-     * Unlock Marketplace tools & features
+2. CREDIT HUB:
+   - Users buy Credits through the Credit Hub using the available LD / USD purchase options.
+   - Credits can be used for Gifts, Locked Posts, Subscriptions, Boosts, Marketplace Promotions, and Verification Badges.
+   - Explain that Credits can be withdrawn after an administrator reviews the request.
 
 4. UPCOMING FEATURES:
    - Live Streaming (Targeted Sept 30): Requires 1,000 followers to go live. Includes TikTok-style floating comments, viewer count list, live progress goals, and real-time gifting.

@@ -34,7 +34,6 @@ import Image from "next/image";
 import { useToast } from "@/hooks/use-toast";
 import { Capacitor } from "@capacitor/core";
 import { isPushSupported } from "@/lib/push-notifications";
-import { OrangeMoneyPaymentsPanel } from "@/components/monetization/orange-money-payments-panel";
 
 const TYPE_CONFIG: Record<string, { color: string; bg: string; border: string; dot: string; Icon: any }> = {
   SOCIAL:  { color: "text-blue-500",   bg: "bg-blue-500/10",   border: "border-blue-500/15",   dot: "bg-blue-500",   Icon: UserPlus   },
@@ -205,7 +204,6 @@ export default function NotificationsPage() {
           </div>
 
           <NativeAdNode type="banner-468" id="notif-top-pulse" />
-          <OrangeMoneyPaymentsPanel />
 
           {/* ── Notification list ── */}
           {filtered.length === 0 ? (

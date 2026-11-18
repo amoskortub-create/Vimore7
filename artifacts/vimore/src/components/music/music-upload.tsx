@@ -56,7 +56,7 @@ export function MusicUpload({ onCancel }: { onCancel: () => void }) {
   const [releaseDate, setReleaseDate] = useState("");
   const [isPublishing, setIsPublishing] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
-  const [unlockPrice, setUnlockPrice] = useState(100);
+  const [unlockPrice, setUnlockPrice] = useState(2);
 
   const [tracks, setTracks] = useState<TrackSlot[]>(
     Array.from({ length: 12 }, (_, i) => ({
@@ -128,6 +128,10 @@ export function MusicUpload({ onCancel }: { onCancel: () => void }) {
 
   const handlePublish = async () => {
     if (!isReady || isPublishing) { triggerHaptic(50); return; }
+    if (isLocked && isPaywallEligible && (!Number.isInteger(unlockPrice) || unlockPrice < 2 || unlockPrice > 10)) {
+      toast({ variant: "destructive", title: "Invalid Credits price", description: "Locked Music must cost 2 to 10 Credits." });
+      return;
+    }
     setIsPublishing(true);
     triggerHaptic(100);
     toast({ title: "Publishing…", description: "Uploading your music to the network." });
@@ -487,15 +491,15 @@ export function MusicUpload({ onCancel }: { onCancel: () => void }) {
                 <Zap className="h-4 w-4 text-primary shrink-0" />
                 <Input
                   type="number"
-                  min="100"
-                  max="500"
+                  min="2"
+                  max="10"
                   step="1"
                   value={unlockPrice}
                   onChange={e => setUnlockPrice(parseFloat(e.target.value))}
                   className="h-10 rounded-xl text-sm font-bold bg-card flex-1"
-                  placeholder="Price in LD"
+                  placeholder="Price in Credits"
                 />
-                <span className="text-[11px] font-black text-muted-foreground shrink-0">LD</span>
+                <span className="text-[11px] font-black text-muted-foreground shrink-0">Credits</span>
               </div>
             )}
           </div>

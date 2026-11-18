@@ -332,7 +332,7 @@ export function GlobalRealtimeListener() {
 
     const adminChannels = [
       `databases.${DATABASE_ID}.collections.${COL.PAYMENT_REQUESTS}.documents`,
-      `databases.${DATABASE_ID}.collections.${COL.WITHDRAWAL_REQUESTS}.documents`,
+      `databases.${DATABASE_ID}.collections.${COL.WITHDRAW_REQUESTS}.documents`,
       `databases.${DATABASE_ID}.collections.${COL.SUPPORT_TICKETS}.documents`,
     ];
 
@@ -345,7 +345,7 @@ export function GlobalRealtimeListener() {
       const isUpdate = events.some(e => e.endsWith('.update'));
 
       const isPaymentEvent    = events.some(e => e.includes(`.${COL.PAYMENT_REQUESTS}.`));
-      const isWithdrawalEvent = events.some(e => e.includes(`.${COL.WITHDRAWAL_REQUESTS}.`));
+      const isWithdrawalEvent = events.some(e => e.includes(`.${COL.WITHDRAW_REQUESTS}.`));
       const isTicketEvent     = events.some(e => e.includes(`.${COL.SUPPORT_TICKETS}.`));
 
       if (isPaymentEvent && isCreate) {

@@ -1,20 +1,10 @@
-"use client";
+import { Suspense } from "react";
+import ClientPage from "./_client";
 
-import { useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
-
-export default function ChatRedirectPage() {
-  const userId = useParams<{ userId: string }>()?.userId ?? '';
-  const router = useRouter();
-
-  useEffect(() => {
-    if (!userId) return;
-    router.replace(`/messages?open=${encodeURIComponent(userId)}`);
-  }, [userId, router]);
-
+export default function Page() {
   return (
-    <div className="min-h-screen flex items-center justify-center text-muted-foreground text-xs uppercase tracking-widest">
-      Opening chat...
-    </div>
+    <Suspense fallback={null}>
+      <ClientPage />
+    </Suspense>
   );
 }

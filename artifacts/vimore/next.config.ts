@@ -28,6 +28,7 @@ const csp = [
 ].join('; ');
 
 const nextConfig: NextConfig = {
+  distDir: IS_DEV ? '.next-dev' : '.next',
   output: 'standalone',
   images: {
     unoptimized: true,

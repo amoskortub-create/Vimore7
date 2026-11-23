@@ -1,11 +1,10 @@
-"use client";
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense } from "react";
+import ClientPage from "./_client";
 
-export default function DashboardRedirect() {
-  const router = useRouter();
-  useEffect(() => {
-    router.replace("/profile");
-  }, [router]);
-  return null;
+export default function Page() {
+  return (
+    <Suspense fallback={null}>
+      <ClientPage />
+    </Suspense>
+  );
 }

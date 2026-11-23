@@ -1,0 +1,171 @@
+{
+  "node": {
+    "4009ba846c5cb577f300d0feaa78a06cb43f10b439": {
+      "workers": {
+        "app/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/login/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/profile/[username]/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/post/[id]/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/join/[username]/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        }
+      },
+      "layer": {
+        "app/page": "action-browser",
+        "app/login/page": "action-browser",
+        "app/profile/[username]/page": "action-browser",
+        "app/post/[id]/page": "action-browser",
+        "app/join/[username]/page": "action-browser"
+      },
+      "filename": "app/actions/ai.ts",
+      "exportedName": "aiSuggestHashtagsAction"
+    },
+    "404be4e70d517866361c36d04e369bd2059fe2df69": {
+      "workers": {
+        "app/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/login/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/profile/[username]/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/post/[id]/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/join/[username]/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        }
+      },
+      "layer": {
+        "app/page": "action-browser",
+        "app/login/page": "action-browser",
+        "app/profile/[username]/page": "action-browser",
+        "app/post/[id]/page": "action-browser",
+        "app/join/[username]/page": "action-browser"
+      },
+      "filename": "app/actions/ai.ts",
+      "exportedName": "aiGenerateCaptionAction"
+    },
+    "40821fb9467807e2859bf00adcb2692b323831e225": {
+      "workers": {
+        "app/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/login/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/profile/[username]/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/post/[id]/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/join/[username]/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        }
+      },
+      "layer": {
+        "app/page": "action-browser",
+        "app/login/page": "action-browser",
+        "app/profile/[username]/page": "action-browser",
+        "app/post/[id]/page": "action-browser",
+        "app/join/[username]/page": "action-browser"
+      },
+      "filename": "app/actions/ai.ts",
+      "exportedName": "aiSuggestCaptionsFromImagesAction"
+    },
+    "40972a29dcf4ffc227e63ed9201024a4bc9025f49d": {
+      "workers": {
+        "app/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/login/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/profile/[username]/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/post/[id]/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/join/[username]/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        }
+      },
+      "layer": {
+        "app/page": "action-browser",
+        "app/login/page": "action-browser",
+        "app/profile/[username]/page": "action-browser",
+        "app/post/[id]/page": "action-browser",
+        "app/join/[username]/page": "action-browser"
+      },
+      "filename": "app/actions/ai.ts",
+      "exportedName": "aiAnalyzeVibeAction"
+    },
+    "40fa7948b092b7dec1420ea7ef9951916d5053dbd2": {
+      "workers": {
+        "app/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/login/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/profile/[username]/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/post/[id]/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/join/[username]/page": {
+          "moduleId": "(action-browser)/../../node_modules/.bun/next@15.5.29+9b6e4d39c37e28e6/node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fapp%2Fapplet%2Fartifacts%2Fvimore%2Fsrc%2Fapp%2Factions%2Fai.ts%22%2C%5B%7B%22id%22%3A%224009ba846c5cb577f300d0feaa78a06cb43f10b439%22%2C%22exportedName%22%3A%22aiSuggestHashtagsAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%22404be4e70d517866361c36d04e369bd2059fe2df69%22%2C%22exportedName%22%3A%22aiGenerateCaptionAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240821fb9467807e2859bf00adcb2692b323831e225%22%2C%22exportedName%22%3A%22aiSuggestCaptionsFromImagesAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240972a29dcf4ffc227e63ed9201024a4bc9025f49d%22%2C%22exportedName%22%3A%22aiAnalyzeVibeAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%2C%7B%22id%22%3A%2240fa7948b092b7dec1420ea7ef9951916d5053dbd2%22%2C%22exportedName%22%3A%22aiTranslatePostAction%22%2C%22filename%22%3A%22app%2Factions%2Fai.ts%22%7D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        }
+      },
+      "layer": {
+        "app/page": "action-browser",
+        "app/login/page": "action-browser",
+        "app/profile/[username]/page": "action-browser",
+        "app/post/[id]/page": "action-browser",
+        "app/join/[username]/page": "action-browser"
+      },
+      "filename": "app/actions/ai.ts",
+      "exportedName": "aiTranslatePostAction"
+    }
+  },
+  "edge": {},
+  "encryptionKey": "xqbO7ngrl3HyiQFDZNEbxKwX/1UqDswr8AGFUrebimc="
+}

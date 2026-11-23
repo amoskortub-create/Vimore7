@@ -1,36 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Query } from 'node-appwrite';
 import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { getSessionUser } from '@/lib/session';
-
-const PAGE_SIZE = 50;
+import { COL } from '@/lib/appwrite';
+import { requireAdminUser } from '@/lib/server-helpers';
 
 export async function GET(req: NextRequest) {
-  const session = await getSessionUser(req);
-  if (!session || session.role !== 'SUPER') {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
-  }
-
-  const cursor = req.nextUrl.searchParams.get('cursor');
-  if (cursor && !/^[a-zA-Z0-9._-]{1,64}$/.test(cursor)) {
-    return NextResponse.json({ error: 'Invalid cursor.' }, { status: 400 });
-  }
-
   try {
-    const queries: string[] = [Query.orderDesc('$createdAt'), Query.limit(PAGE_SIZE)];
-    if (cursor) queries.push(Query.cursorAfter(cursor));
+    const admin = await requireAdminUser(req);
+    if (!admin) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
-    const page = await getAdminDatabases().listDocuments(
-      DATABASE_ID,
-      'security_events',
-      queries,
-    );
+    const limit = 40;
+    const cursor = req.nextUrl.searchParams.get('cursor');
+    const queries: string[] = [
+      Query.orderDesc('$createdAt'),
+      Query.limit(limit + 1),
+    ];
+    if (cursor) {
+      queries.push(Query.cursorAfter(cursor));
+    }
 
-    return NextResponse.json(
-      { documents: page.documents, hasMore: page.documents.length === PAGE_SIZE },
-      { headers: { 'Cache-Control': 'private, no-store' } },
-    );
-  } catch {
-    return NextResponse.json({ error: 'Unable to load security events.' }, { status: 500 });
+    const db = getAdminDatabases();
+    const res = await db.listDocuments(DATABASE_ID, COL.SECURITY_EVENTS, queries);
+    const hasMore = res.documents.length > limit;
+    const documents = hasMore ? res.documents.slice(0, limit) : res.documents;
+
+    return NextResponse.json({ documents, hasMore });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message || 'Failed to load security events' }, { status: 500 });
   }
 }

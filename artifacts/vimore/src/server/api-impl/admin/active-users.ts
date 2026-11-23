@@ -1,85 +1,71 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Query } from 'node-appwrite';
 import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { getSessionUser } from '@/lib/session';
-
-const COL_ID = 'user_activity';
+import { COL } from '@/lib/appwrite';
+import { requireAdminUser } from '@/lib/server-helpers';
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getSessionUser(req);
-    if (!session || session.role !== 'SUPER') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const admin = await requireAdminUser(req, ['SUPER']);
+    if (!admin) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
     const db = getAdminDatabases();
-    const today = new Date().toISOString().slice(0, 10);
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const res = await db.listDocuments(DATABASE_ID, COL.USER_ACTIVITY, [
+      Query.orderDesc('$updatedAt'),
+      Query.limit(500),
+    ]);
 
-    // Paginate through all activity docs so DAU/MAU does not silently
-    // undercount once the collection grows past the first 5,000 records.
-    let allDocs: any[] = [];
-    let cursor: string | undefined;
-    do {
-      const queries: string[] = [Query.limit(500), Query.orderDesc('last_seen')];
-      if (cursor) queries.push(Query.cursorAfter(cursor));
-      const page = await db.listDocuments(DATABASE_ID, COL_ID, queries);
-      allDocs = allDocs.concat(page.documents);
-      cursor = page.documents.length === 500 ? page.documents[page.documents.length - 1].$id : undefined;
-    } while (cursor);
+    const now = Date.now();
+    const oneDayAgo = now - 24 * 60 * 60 * 1000;
+    const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
 
-    // DAU — unique users today
     const dauSet = new Set<string>();
-    for (const doc of allDocs) {
-      if (doc.session_date === today) dauSet.add(doc.user_id);
-    }
-
-    // MAU — unique users in last 30 days
     const mauSet = new Set<string>();
-    for (const doc of allDocs) {
-      if (doc.last_seen >= thirtyDaysAgo) mauSet.add(doc.user_id);
-    }
+    const totalSet = new Set<string>();
+    const byDay = new Map<string, Set<string>>();
 
-    // Build per-user latest record (IP + last_seen)
-    const userMap = new Map<string, { username: string; ip_address: string; last_seen: string; user_agent: string }>();
-    for (const doc of allDocs) {
-      const existing = userMap.get(doc.user_id);
-      if (!existing || doc.last_seen > existing.last_seen) {
-        userMap.set(doc.user_id, {
-          username: doc.username,
-          ip_address: doc.ip_address,
-          last_seen: doc.last_seen,
-          user_agent: doc.user_agent || '',
-        });
-      }
-    }
-
-    const userList = Array.from(userMap.entries())
-      .map(([user_id, info]) => ({ user_id, ...info }))
-      .sort((a, b) => b.last_seen.localeCompare(a.last_seen));
-
-    // Daily breakdown for chart (last 14 days)
-    const dailyMap = new Map<string, Set<string>>();
-    for (const doc of allDocs) {
-      if (!dailyMap.has(doc.session_date)) dailyMap.set(doc.session_date, new Set());
-      dailyMap.get(doc.session_date)!.add(doc.user_id);
-    }
-
-    const dailyChart: { date: string; count: number }[] = [];
     for (let i = 13; i >= 0; i--) {
-      const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
-      dailyChart.push({ date: d, count: dailyMap.get(d)?.size ?? 0 });
+      const d = new Date(now - i * 86_400_000).toISOString().slice(0, 10);
+      byDay.set(d, new Set());
     }
+
+    const userList = res.documents.map((doc: any) => {
+      const lastSeen = doc.last_seen || doc.$updatedAt || doc.$createdAt;
+      const ts = new Date(lastSeen).getTime();
+      const uid = doc.user_id || doc.$id;
+      totalSet.add(uid);
+      if (ts >= oneDayAgo) dauSet.add(uid);
+      if (ts >= thirtyDaysAgo) mauSet.add(uid);
+
+      const dayKey = new Date(lastSeen).toISOString().slice(0, 10);
+      if (byDay.has(dayKey)) {
+        byDay.get(dayKey)!.add(uid);
+      }
+
+      return {
+        user_id: uid,
+        username: doc.username || 'unknown',
+        ip_address: doc.ip_address || '0.0.0.0',
+        last_seen: lastSeen,
+        user_agent: doc.user_agent || '',
+      };
+    });
+
+    const dailyChart = Array.from(byDay.entries()).map(([date, set]) => ({
+      date,
+      count: set.size,
+    }));
 
     return NextResponse.json({
       dau: dauSet.size,
       mau: mauSet.size,
-      totalTracked: userMap.size,
-      userList,
+      totalTracked: totalSet.size,
       dailyChart,
+      userList,
     });
   } catch (err: any) {
-    console.error('[ActiveUsers] Error:', err?.message);
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
+    return NextResponse.json({ error: err?.message || 'Failed to fetch active users' }, { status: 500 });
   }
 }

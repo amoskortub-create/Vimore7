@@ -1,138 +1,75 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { getSessionUser } from '@/lib/session';
-import { rateLimit, sanitizeIp } from '@/lib/rate-limit';
 import { ID } from 'node-appwrite';
-import { CREDIT_PRICES } from '@/lib/credit-pricing';
+import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
+import { COL } from '@/lib/appwrite';
+import { getAuthenticatedProfile, getUserBalance } from '@/lib/server-helpers';
 
-export const maxDuration = 30;
-
-const USERS_COL = 'users';
-const CAMPAIGNS_COL = 'ad_campaigns';
-const CREDITS_PER_DAY = CREDIT_PRICES.adPerDay;
-const MIN_DAYS = 5;
-const MAX_DAYS = 90;
+const COST_PER_DAY = 50;
 
 export async function POST(req: NextRequest) {
   try {
-    /* ── Rate limit: 10 campaign submissions per hour per IP ── */
-    const ip = sanitizeIp(req.headers.get('x-forwarded-for')?.split(',')[0].trim());
-    const rl = rateLimit(`advertise:${ip}`, 10, 60 * 60_000);
-    if (!rl.allowed) {
-      return NextResponse.json({ error: 'Too many requests. Please wait before submitting again.' }, { status: 429 });
+    const session = await getAuthenticatedProfile(req);
+    if (!session?.profileDoc) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    /* ── Verify session — identity comes from the cookie, not the body ── */
-    const session = await getSessionUser(req);
-    if (!session) {
-      return NextResponse.json({ error: 'You must be logged in to create a campaign.' }, { status: 401 });
+    const body = await req.json().catch(() => ({}));
+    const businessName = String(body.businessName || '').trim();
+    const details = String(body.details || '').trim();
+    const actionUrl = String(body.actionUrl || '').trim();
+    const actionLabel = String(body.actionLabel || 'Learn More').trim();
+    const placement = body.placement === 'reels' ? 'reels' : 'feed';
+    const days = Math.max(1, Math.floor(Number(body.days || 1)));
+    const mediaUrl = String(body.mediaUrl || '').trim();
+    const mediaId = String(body.mediaId || '').trim();
+    const contactType = String(body.contactType || 'url').trim();
+
+    if (!businessName || !details || !mediaUrl) {
+      return NextResponse.json({ error: 'Missing required campaign fields' }, { status: 400 });
     }
 
-    const body = await req.json();
-    const {
-      businessName,
-      details,
-      actionUrl,
-      actionLabel,
-      placement,
-      days,
-      mediaUrl,
-      mediaId,
-      contactType,
-    } = body;
+    const cost = days * COST_PER_DAY;
+    const current = getUserBalance(session.profileDoc);
 
-    if (!businessName || !details || !actionUrl || !actionLabel || !placement || !days || !mediaUrl || !mediaId) {
-      return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
-    }
-
-    const parsedDays = Number(days);
-    if (!Number.isInteger(parsedDays) || parsedDays < MIN_DAYS || parsedDays > MAX_DAYS) {
-      return NextResponse.json({ error: `Campaign duration must be between ${MIN_DAYS} and ${MAX_DAYS} days.` }, { status: 400 });
-    }
-
-    if (!['feed', 'reel'].includes(placement)) {
-      return NextResponse.json({ error: 'Placement must be feed or reel.' }, { status: 400 });
+    if (current < cost) {
+      return NextResponse.json(
+        {
+          error: 'INSUFFICIENT_BALANCE',
+          current,
+          required: cost,
+          message: `You need ${cost} Credits for a ${days}-day campaign, but your current balance is ${current} Credits.`,
+        },
+        { status: 400 }
+      );
     }
 
     const db = getAdminDatabases();
-    const totalCost = parsedDays * CREDITS_PER_DAY;
-
-    /* ── Server-side balance read using the verified session userId ── */
-    let userDoc: any;
-    try {
-      userDoc = await db.getDocument(DATABASE_ID, USERS_COL, session.userId);
-    } catch {
-      return NextResponse.json({ error: 'User not found.' }, { status: 404 });
-    }
-
-    const realBalance: number = userDoc.credit_balance ?? userDoc.diamond_balance ?? 0;
-
-    if (realBalance < totalCost) {
-      return NextResponse.json({
-        error: 'INSUFFICIENT_BALANCE',
-        message: `Insufficient Credits. This campaign costs ${totalCost} Credits (${parsedDays} days × ${CREDITS_PER_DAY} Credits/day). Your actual balance is ${realBalance} Credits. You are short by ${totalCost - realBalance} Credits.`,
-        needed: totalCost,
-        current: realBalance,
-        shortfall: totalCost - realBalance,
-      }, { status: 402 });
-    }
-
-    const newBalance = realBalance - totalCost;
-    await db.updateDocument(DATABASE_ID, USERS_COL, session.userId, {
+    const newBalance = current - cost;
+    await db.updateDocument(DATABASE_ID, COL.USERS, session.authUser.$id, {
       credit_balance: newBalance,
       diamond_balance: newBalance,
     });
 
-    const expires = new Date();
-    expires.setDate(expires.getDate() + parsedDays);
+    const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+    const campaign = await db.createDocument(DATABASE_ID, COL.AD_CAMPAIGNS, ID.unique(), {
+      user_id: session.authUser.$id,
+      username: session.profileDoc.username || '',
+      business_name: businessName,
+      details,
+      action_url: actionUrl,
+      action_label: actionLabel,
+      placement,
+      days,
+      cost,
+      media_url: mediaUrl,
+      media_id: mediaId,
+      contact_type: contactType,
+      status: 'ACTIVE',
+      expires_at: expiresAt,
+    });
 
-    let campaignDoc: any;
-    try {
-      campaignDoc = await db.createDocument(DATABASE_ID, CAMPAIGNS_COL, ID.unique(), {
-        user_id: session.userId,
-        title: String(businessName).trim(),
-        content: String(details).trim(),
-        media_url: String(mediaUrl),
-        media_id: String(mediaId),
-        placement: String(placement),
-        type: 'video',
-        status: 'ACTIVE',
-        is_active: true,
-        impressions: 0,
-        clicks: 0,
-        action_url: String(actionUrl),
-        action_label: String(actionLabel).trim(),
-        budget: totalCost,
-        spent: totalCost,
-        expires_at: expires.toISOString(),
-        contact_type: String(contactType || 'url'),
-        days_purchased: parsedDays,
-        credits_spent: totalCost,
-      });
-    } catch (campaignErr: any) {
-      try {
-        await db.updateDocument(DATABASE_ID, USERS_COL, session.userId, { credit_balance: realBalance, diamond_balance: realBalance });
-      } catch { /* best-effort refund */ }
-      return NextResponse.json({ error: `Campaign creation failed: ${campaignErr?.message || 'unknown error'}. Your Credits have been refunded.` }, { status: 500 });
-    }
-
-    const textToScan = [businessName, details].filter(Boolean).join(' ').trim();
-    if (textToScan || mediaUrl) {
-      fetch(`${req.nextUrl.origin}/api/moderate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          docId: campaignDoc.$id,
-          collection: CAMPAIGNS_COL,
-          text: textToScan,
-          userId: session.userId,
-          mediaUrl: mediaUrl || undefined,
-        }),
-      }).catch(() => {});
-    }
-
-    return NextResponse.json({ ok: true, campaign: campaignDoc, newBalance, totalCost });
+    return NextResponse.json({ ok: true, campaign, newBalance });
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Internal server error.' }, { status: 500 });
+    return NextResponse.json({ error: err?.message || 'Ad submission failed' }, { status: 500 });
   }
 }

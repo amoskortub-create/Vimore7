@@ -1717,15 +1717,15 @@ export function PostProvider({ children }: { children: ReactNode }) {
       void Promise.allSettled([
         loadFeed(),
         loadSocialGraph(authUser.$id),
-        loadConnections(authUser.$id, profileDoc.username || ''),
+        loadConnections(authUser.$id, profileDoc?.username || ''),
         loadStories(),
         loadClusters(authUser.$id),
         loadUserWithdrawals(authUser.$id),
         loadCampaigns(),
         loadChatReadReceipts(authUser.$id),
       ]).then(() => {
-        loadUnreadSignals(authUser.$id, profileDoc.username || '').catch(() => {});
-        loadConversationMetadata(authUser.$id, profileDoc.username || '').catch(() => {});
+        loadUnreadSignals(authUser.$id, profileDoc?.username || '').catch(() => {});
+        loadConversationMetadata(authUser.$id, profileDoc?.username || '').catch(() => {});
       });
     } catch (err: any) {
       // Network failure (offline) but we have a cached session → go offline mode
@@ -2038,15 +2038,15 @@ export function PostProvider({ children }: { children: ReactNode }) {
       void Promise.allSettled([
         loadFeed(),
         loadSocialGraph(authUser.$id),
-        loadConnections(authUser.$id, profileDoc.username || ''),
+        loadConnections(authUser.$id, profileDoc?.username || ''),
         loadStories(),
         loadClusters(authUser.$id),
         loadUserWithdrawals(authUser.$id),
         loadCampaigns(),
         loadChatReadReceipts(authUser.$id),
       ]).then(() => {
-        loadUnreadSignals(authUser.$id, profileDoc.username || '').catch(() => {});
-        loadConversationMetadata(authUser.$id, profileDoc.username || '').catch(() => {});
+        loadUnreadSignals(authUser.$id, profileDoc?.username || '').catch(() => {});
+        loadConversationMetadata(authUser.$id, profileDoc?.username || '').catch(() => {});
       });
       console.log("[login] success", user.$id);
       toast({ title: "Welcome back!", description: "You are now signed in." });
@@ -2097,8 +2097,9 @@ export function PostProvider({ children }: { children: ReactNode }) {
       } as any;
 
       const parts = data.name.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/);
-      const username = parts.length >= 2 ? `${parts[0]}.${parts[parts.length - 1]}` : parts[0] || 'user';
-      const referralCode = `VM${username.toUpperCase().slice(0, 6)}${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+      const idLocal = (vimoreId.split('@')[0] || '').toLowerCase().replace(/[^a-z0-9._]/g, '');
+      const username = idLocal || (parts.length >= 2 ? `${parts[0]}.${parts[parts.length - 1]}` : parts[0]) || 'user';
+      const referralCode = `VM${username.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)}${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
 
       // Create the user profile document server-side (admin key bypasses collection perms)
       const { authFetch } = await import('@/lib/auth-fetch');
@@ -2114,17 +2115,20 @@ export function PostProvider({ children }: { children: ReactNode }) {
           dob: data.dob || '',
           gender: data.gender || '',
           referralCode,
+          referredBy: data.referredBy || '',
         }),
       });
       if (!profileRes.ok) {
         const profileErr = await profileRes.json().catch(() => ({}));
-        throw new Error(profileErr.error || 'Failed to create user profile.');
+        throw Object.assign(new Error(profileErr.error || 'Failed to create user profile.'), {
+          code: typeof profileErr.code === 'number' ? profileErr.code : profileRes.status,
+        });
       }
       const profileResult = await profileRes.json();
       const assignedRole = profileResult.role || 'USER';
 
-      // Fetch the profile doc we just created to build the local user object
-      const newDoc = await databases.getDocument(DATABASE_ID, COL.USERS, authUser.$id);
+      // Use the server-returned profile doc directly (avoids browser SDK platform scope failures)
+      const newDoc = profileResult.profileDoc || await databases.getDocument(DATABASE_ID, COL.USERS, authUser.$id);
       const user = mapDocToUser(authUser, newDoc);
       setCurrentUserState(user);
 

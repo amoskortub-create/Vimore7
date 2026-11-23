@@ -1,83 +1,71 @@
-import { getAdminDatabases, DATABASE_ID } from './appwrite-server';
+import 'server-only';
+import { Client, Account } from 'node-appwrite';
 import type { NextRequest } from 'next/server';
 
-const ENDPOINT = (process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || 'https://appwrite.mediatechliberia.online/v1').replace(/\/$/, '');
+const ENDPOINT = (
+  process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || 'https://appwrite.mediatechliberia.online/v1'
+).replace(/\/$/, '');
 const PROJECT_ID = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || 'vimore123';
 
 export interface SessionUser {
-  userId: string;
-  role: string | null;
-  authUser: {
-    $id: string;
-    email: string;
-    name: string;
-    emailVerification: boolean;
-    $createdAt: string;
-  };
+  $id: string;
+  email: string;
+  name: string;
+  emailVerification: boolean;
+  $createdAt: string;
 }
 
-/** Validate the browser session with Appwrite's REST endpoint. */
-async function resolveUser(authHeader: Record<string, string>): Promise<SessionUser | null> {
+function readCookieSession(req: Request | NextRequest): string | null {
+  if ('cookies' in req && typeof req.cookies?.get === 'function') {
+    const val = req.cookies.get(`a_session_${PROJECT_ID}`)?.value;
+    if (val) return val;
+  }
+  const cookieHeader = req.headers.get('cookie');
+  if (!cookieHeader) return null;
+  const escaped = PROJECT_ID.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)a_session_${escaped}=([^;]+)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+export async function getSessionUser(req: Request | NextRequest): Promise<SessionUser | null> {
+  const sessionHeader = req.headers.get('x-appwrite-session')?.trim();
+  const authHeader = req.headers.get('authorization')?.trim();
+  const jwt = authHeader?.toLowerCase().startsWith('bearer ')
+    ? authHeader.slice(7).trim()
+    : null;
+  const cookieSession = readCookieSession(req);
+
+  const client = new Client().setEndpoint(ENDPOINT).setProject(PROJECT_ID);
+
+  if (sessionHeader) {
+    client.setSession(sessionHeader);
+  } else if (jwt) {
+    client.setJWT(jwt);
+  } else if (cookieSession) {
+    client.setSession(cookieSession);
+  } else {
+    return null;
+  }
+
   try {
-    const response = await fetch(ENDPOINT + '/account', {
-      method: 'GET',
-      headers: { 'X-Appwrite-Project': PROJECT_ID, ...authHeader },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!response.ok) {
-      console.warn('[session] Appwrite rejected the supplied session (HTTP ' + response.status + ')');
-      return null;
-    }
-
-    const accountUser = await response.json();
-    if (typeof accountUser?.$id !== 'string' || !accountUser.$id) return null;
-
-    let role: string | null = null;
-    try {
-      const userDoc = await getAdminDatabases().getDocument(DATABASE_ID, 'users', accountUser.$id);
-      role = userDoc?.role ?? null;
-    } catch {
-      // Session validity must not depend on the optional admin role lookup.
-    }
-
+    const account = new Account(client);
+    const user = await account.get();
     return {
-      userId: accountUser.$id,
-      role,
-      authUser: {
-        $id: accountUser.$id,
-        email: typeof accountUser.email === 'string' ? accountUser.email : '',
-        name: typeof accountUser.name === 'string' ? accountUser.name : '',
-        emailVerification: Boolean(accountUser.emailVerification),
-        $createdAt: typeof accountUser.$createdAt === 'string' ? accountUser.$createdAt : '',
-      },
+      $id: user.$id,
+      email: user.email,
+      name: user.name,
+      emailVerification: user.emailVerification,
+      $createdAt: user.$createdAt,
     };
-  } catch (err: any) {
-    console.error('[session] Appwrite account validation failed:', err?.message ?? err);
+  } catch {
     return null;
   }
 }
 
-export async function getSessionUser(req: NextRequest): Promise<SessionUser | null> {
-  const sessionHeader = req.headers.get('x-appwrite-session');
-  if (sessionHeader) {
-    const user = await resolveUser({ 'X-Appwrite-Session': sessionHeader });
-    if (user) return user;
-  }
-
-  const authorization = req.headers.get('authorization');
-  if (authorization?.startsWith('Bearer ')) {
-    const user = await resolveUser({ Authorization: authorization });
-    if (user) return user;
-  }
-
-  const projectId = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || 'vimore123';
-  const cookieSession = req.cookies.get('a_session_' + projectId)?.value
-    || req.cookies.get('a_session_' + projectId + '_legacy')?.value;
-  if (cookieSession) {
-    const user = await resolveUser({ 'X-Appwrite-Session': cookieSession });
-    if (user) return user;
-  }
-
-  return null;
+export function extractRequestSessionToken(req: Request | NextRequest): string | null {
+  return (
+    req.headers.get('x-appwrite-session')?.trim() ||
+    readCookieSession(req) ||
+    null
+  );
 }

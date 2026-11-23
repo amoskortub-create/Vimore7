@@ -1,19 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionUser } from '@/lib/session';
-
-export const maxDuration = 15;
-
-const ADMIN_ROLES = new Set(['SUPER', 'FINANCIAL', 'MODERATOR']);
+import { requireAdminUser } from '@/lib/server-helpers';
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getSessionUser(req);
-    if (!session) {
-      return NextResponse.json({ authorized: false, role: null }, { status: 401 });
+    const admin = await requireAdminUser(req);
+    if (!admin) {
+      return NextResponse.json({ authorized: false }, { status: 401 });
     }
-    const authorized = ADMIN_ROLES.has(session.role ?? '');
-    return NextResponse.json({ authorized, role: session.role ?? 'USER' });
+    return NextResponse.json({
+      authorized: true,
+      role: admin.role,
+      userId: admin.authUser.$id,
+    });
   } catch {
-    return NextResponse.json({ authorized: false, role: null }, { status: 500 });
+    return NextResponse.json({ authorized: false }, { status: 500 });
   }
 }

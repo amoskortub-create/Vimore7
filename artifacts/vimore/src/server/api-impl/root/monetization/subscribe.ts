@@ -1,42 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ID, Query } from 'node-appwrite';
-import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { getSessionUser } from '@/lib/session';
-import { generateUSSD, isValidOrangeMoneyNumber } from '@/lib/ld-monetization';
+import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
+import { COL } from '@/lib/appwrite';
+import { generateUSSD } from '@/lib/ld-monetization';
+import { getAuthenticatedProfile } from '@/lib/server-helpers';
 
-const PRICE_LD = 500;
+const DEFAULT_SUB_LD = 250;
 
 export async function POST(req: NextRequest) {
-  const session = await getSessionUser(req);
-  if (!session) return NextResponse.json({ error: 'You must be logged in to subscribe.' }, { status: 401 });
-  const { creatorUserId } = await req.json();
-  if (!creatorUserId || creatorUserId === session.userId) return NextResponse.json({ error: 'A valid creator is required.' }, { status: 400 });
+  try {
+    const session = await getAuthenticatedProfile(req);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-  const db = getAdminDatabases();
-  const creator = await db.getDocument(DATABASE_ID, 'users', creatorUserId);
-  const followers = Number(creator.followers_count ?? creator.followers ?? 0);
-  if (followers < 10000) return NextResponse.json({ error: `Subscriptions require 10,000 followers. This creator has ${followers}.` }, { status: 403 });
+    const body = await req.json().catch(() => ({}));
+    const creatorUserId = String(body.creatorUserId || '').trim();
+    if (!creatorUserId) {
+      return NextResponse.json({ error: 'creatorUserId required' }, { status: 400 });
+    }
 
-  const accounts = await db.listDocuments(DATABASE_ID, 'creator_orange_money_accounts', [Query.equal('userId', creatorUserId), Query.equal('isVerified', true), Query.limit(1)]);
-  const number = String(accounts.documents[0]?.orangeMoneyNumber || '');
-  if (!isValidOrangeMoneyNumber(number)) return NextResponse.json({ error: 'This creator has no verified Orange Money account.' }, { status: 404 });
+    const db = getAdminDatabases();
+    const accounts = await db.listDocuments(DATABASE_ID, COL.CREATOR_ORANGE_MONEY_ACCOUNTS, [
+      Query.equal('user_id', creatorUserId),
+      Query.limit(1),
+    ]);
+    const account = accounts.documents[0];
+    if (!account?.orange_money_number) {
+      return NextResponse.json(
+        { error: 'Creator Orange Money account is not available.' },
+        { status: 404 }
+      );
+    }
 
-  const transactionId = ID.unique();
-  await db.createDocument(DATABASE_ID, 'transactions', transactionId, {
-    transactionId,
-    user_id: session.userId,
-    type: 'SUBSCRIPTION',
-    amount: PRICE_LD,
-    currency: 'LD',
-    description: `Subscription payment to @${creator.username || creatorUserId}`,
-    reference_id: creatorUserId,
-    senderUserId: session.userId,
-    receiverUserId: creatorUserId,
-    transactionType: 'subscription',
-    amountLD: PRICE_LD,
-    status: 'pending',
-    createdAt: new Date().toISOString(),
-  });
-  const ussd = generateUSSD(number, PRICE_LD);
-  return NextResponse.json({ ok: true, transactionId, amountLD: PRICE_LD, dialerUri: `tel:${ussd.replace('#', '%23')}` });
+    const amountLD = Math.max(50, Number(body.amountLD || DEFAULT_SUB_LD));
+    const ussd = generateUSSD(account.orange_money_number, amountLD);
+    const dialerUri = `tel:${encodeURIComponent(ussd)}`;
+
+    await db.createDocument(DATABASE_ID, COL.TRANSACTIONS, ID.unique(), {
+      sender_id: session.authUser.$id,
+      receiver_id: creatorUserId,
+      transaction_type: 'subscription',
+      amount_ld: amountLD,
+      status: 'INITIATED',
+      created_at: new Date().toISOString(),
+    }).catch(() => {});
+
+    return NextResponse.json({ ok: true, dialerUri, ussd, amountLD });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message || 'Monetization subscribe failed' }, { status: 500 });
+  }
 }

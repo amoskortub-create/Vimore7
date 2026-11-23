@@ -1,24 +1,27 @@
-import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
+import { APPWRITE_ENDPOINT, APPWRITE_PROJECT_ID } from '@/lib/server-helpers';
+import { extractRequestSessionToken } from '@/lib/session';
 
-const PROJECT_ID = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || 'vimore123';
+export async function POST(req: NextRequest) {
+  const token = extractRequestSessionToken(req);
 
-/**
- * Clear the same-origin session backup used by the Android WebView.
- *
- * Appwrite session deletion is still attempted by the client, but it can
- * fail when the JavaScript context has been recreated and the SDK no longer
- * has its in-memory session. Clearing this cookie must not depend on that SDK
- * call succeeding.
- */
-export async function POST(_req: NextRequest) {
+  if (token) {
+    try {
+      await fetch(`${APPWRITE_ENDPOINT}/account/sessions/current`, {
+        method: 'DELETE',
+        headers: {
+          'X-Appwrite-Project': APPWRITE_PROJECT_ID,
+          'X-Appwrite-Session': token,
+          Cookie: `a_session_${APPWRITE_PROJECT_ID}=${encodeURIComponent(token)}`,
+        },
+        cache: 'no-store',
+      });
+    } catch {
+      // Ignore upstream errors during logout
+    }
+  }
+
   const response = NextResponse.json({ ok: true });
-  response.cookies.set(`a_session_${PROJECT_ID}`, '', {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 0,
-  });
+  response.cookies.delete(`a_session_${APPWRITE_PROJECT_ID}`);
   return response;
 }

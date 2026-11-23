@@ -1,54 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { getSessionUser } from '@/lib/session';
-import { rateLimit } from '@/lib/rate-limit';
-
-export const maxDuration = 30;
-
-const ALLOWED_ROLES = new Set(['SUPER', 'MODERATOR']);
+import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
+import { COL } from '@/lib/appwrite';
+import { requireAdminUser, safeNotify } from '@/lib/server-helpers';
 
 export async function POST(req: NextRequest) {
+  const admin = await requireAdminUser(req, ['SUPER', 'FINANCIAL']);
+  if (!admin) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
   try {
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'unknown';
-    const rl = rateLimit(`payment:reject:${ip}`, 30, 60_000);
-    if (!rl.allowed) {
-      return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
-    }
-
-    const session = await getSessionUser(req);
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    if (!ALLOWED_ROLES.has(session.role ?? '')) {
-      return NextResponse.json({ error: 'Forbidden — admin role required' }, { status: 403 });
-    }
-
-    const { requestId } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const requestId = String(body.requestId || '').trim();
+    const reason = String(body.reason || 'Payment proof could not be verified.').trim();
     if (!requestId) {
-      return NextResponse.json({ error: 'requestId is required' }, { status: 400 });
+      return NextResponse.json({ error: 'requestId required' }, { status: 400 });
     }
 
     const db = getAdminDatabases();
+    const paymentReq = await db.getDocument(DATABASE_ID, COL.PAYMENT_REQUESTS, requestId);
 
-    let reqDoc: any;
-    try {
-      reqDoc = await db.getDocument(DATABASE_ID, 'payment_requests', requestId);
-    } catch {
-      return NextResponse.json({ error: 'Payment request not found' }, { status: 404 });
-    }
-
-    if (reqDoc.status !== 'PENDING') {
-      return NextResponse.json(
-        { error: `Cannot reject a request with status: ${reqDoc.status}` },
-        { status: 409 }
-      );
-    }
-
-    await db.updateDocument(DATABASE_ID, 'payment_requests', requestId, {
+    await db.updateDocument(DATABASE_ID, COL.PAYMENT_REQUESTS, requestId, {
       status: 'REJECTED',
-      rejected_by: session.userId,
-      rejected_at: new Date().toISOString(),
+      rejection_reason: reason,
+      reviewed_by: admin.profileDoc.username || admin.authUser.$id,
+      reviewed_at: new Date().toISOString(),
     });
+
+    if (paymentReq.user_id) {
+      await safeNotify({
+        user_id: paymentReq.user_id,
+        type: 'SYSTEM',
+        title: 'Payment Rejected',
+        content: reason,
+        action_href: '/earnings',
+      });
+    }
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {

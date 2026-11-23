@@ -1,24 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { revokeAccessToken } from '@/lib/oauth-server';
 
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS });
-}
-
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const token = body.token;
-    if (!token) return NextResponse.json({ error: 'missing token' }, { status: 400, headers: CORS });
+    const body = await req.json().catch(() => ({}));
+    const token = String(body.token || '').trim();
+    if (!token) {
+      return NextResponse.json({ error: 'token is required' }, { status: 400 });
+    }
     await revokeAccessToken(token);
-    return NextResponse.json({ ok: true }, { headers: CORS });
-  } catch {
-    return NextResponse.json({ error: 'server_error' }, { status: 500, headers: CORS });
+    return NextResponse.json({ ok: true });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message || 'Revoke failed' }, { status: 500 });
   }
 }

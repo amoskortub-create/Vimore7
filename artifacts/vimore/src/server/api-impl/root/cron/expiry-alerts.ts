@@ -1,159 +1,90 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { Query, ID } from 'node-appwrite';
-import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { getSessionUser } from '@/lib/session';
+import { NextResponse } from 'next/server';
+import { Query } from 'node-appwrite';
+import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
+import { COL } from '@/lib/appwrite';
+import { safeNotify } from '@/lib/server-helpers';
 
-const COL = {
-  POSTS: 'posts',
-  TRACKS: 'tracks',
-  USERS: 'users',
-  NOTIFICATIONS: 'notifications',
-};
-
-const ALERT_TYPE = 'EXPIRY_ALERT';
-const WINDOW_MS = 72 * 60 * 60 * 1000;
-const DEDUP_HOURS = 20;
-const ADMIN_ROLES = new Set(['SUPER', 'MODERATOR']);
-
-function expiryTime(value: unknown): number | null {
-  if (!value) return null;
-  if (typeof value === 'number') return value;
-  const asNumber = Number(value);
-  return Number.isFinite(asNumber) ? asNumber : Date.parse(String(value));
-}
-
-async function alreadyAlerted(
-  db: ReturnType<typeof getAdminDatabases>,
-  userId: string,
-  title: string
-): Promise<boolean> {
-  try {
-    const cutoff = new Date(Date.now() - DEDUP_HOURS * 60 * 60 * 1000).toISOString();
-    const res = await db.listDocuments(DATABASE_ID, COL.NOTIFICATIONS, [
-      Query.equal('user_id', userId),
-      Query.equal('type', ALERT_TYPE),
-      Query.equal('title', title),
-      Query.greaterThan('$createdAt', cutoff),
-      Query.limit(1),
-    ]);
-    return res.documents.length > 0;
-  } catch {
-    return false;
-  }
-}
-
-async function sendNotification(
-  db: ReturnType<typeof getAdminDatabases>,
-  userId: string,
-  title: string,
-  content: string,
-  actionHref: string
-) {
-  await db.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
-    user_id: userId,
-    type: ALERT_TYPE,
-    title,
-    content,
-    message: content,
-    is_read: false,
-    from_user_id: 'system',
-    from_user_name: 'ViMore',
-    from_user_avatar: '',
-    action_href: actionHref,
-    action_label: 'Renew Now',
-  });
-}
-
-function hoursLeft(expiry: number): number {
-  return Math.max(0, Math.round((expiry - Date.now()) / 3600000));
-}
-
-export async function GET(req: NextRequest) {
-  const session = await getSessionUser(req);
-  if (!session || !ADMIN_ROLES.has(session.role ?? '')) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
+export async function GET() {
   try {
     const db = getAdminDatabases();
-    const now = Date.now();
-    const windowEnd = now + WINDOW_MS;
-    let postAlerts = 0, trackAlerts = 0, userAlerts = 0;
+    const now = new Date();
+    const in72h = new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString();
+    const nowIso = now.toISOString();
 
-    // Boosted posts expiring soon
-    {
-      let cursor: string | undefined;
-      do {
-        const queries: string[] = [Query.equal('is_boosted', true), Query.limit(100)];
-        if (cursor) queries.push(Query.cursorAfter(cursor));
-        const page = await db.listDocuments(DATABASE_ID, COL.POSTS, queries);
-        for (const doc of page.documents) {
-          const expiry = expiryTime(doc.boost_expiry);
-          if (!expiry || expiry <= now || expiry > windowEnd) continue;
-          const ownerId = doc.user_id;
-          if (!ownerId) continue;
-          const hrs = hoursLeft(expiry);
-          const title = '🚀 Post Boost Expiring Soon';
-          const content = `Your boosted post expires in ${hrs} hour${hrs !== 1 ? 's' : ''}. Renew to keep your reach going!`;
-          if (await alreadyAlerted(db, ownerId, title)) continue;
-          await sendNotification(db, ownerId, title, content, '/dashboard');
-          postAlerts++;
+    let posts = 0;
+    let tracks = 0;
+    let users = 0;
+
+    try {
+      const expiringPosts = await db.listDocuments(DATABASE_ID, COL.POSTS, [
+        Query.equal('is_boosted', true),
+        Query.greaterThan('boost_expiry', nowIso),
+        Query.lessThan('boost_expiry', in72h),
+        Query.limit(50),
+      ]);
+      for (const p of expiringPosts.documents) {
+        if (p.user_id) {
+          await safeNotify({
+            user_id: p.user_id,
+            type: 'SYSTEM',
+            title: 'Post Boost Expiring Soon',
+            content: 'Your boosted post campaign expires within 72 hours.',
+            post_id: p.$id,
+          });
+          posts += 1;
         }
-        cursor = page.documents.length === 100 ? page.documents[page.documents.length - 1].$id : undefined;
-      } while (cursor);
+      }
+    } catch {
+      // ignore
     }
 
-    // Boosted tracks expiring soon
-    {
-      let cursor: string | undefined;
-      do {
-        const queries: string[] = [Query.equal('is_boosted', true), Query.limit(100)];
-        if (cursor) queries.push(Query.cursorAfter(cursor));
-        const page = await db.listDocuments(DATABASE_ID, COL.TRACKS, queries);
-        for (const doc of page.documents) {
-          const expiry = expiryTime(doc.boost_expiry);
-          if (!expiry || expiry <= now || expiry > windowEnd) continue;
-          const ownerId = doc.user_id;
-          if (!ownerId) continue;
-          const hrs = hoursLeft(expiry);
-          const title = '🎵 Track Boost Expiring Soon';
-          const content = `Your boosted track "${doc.title || 'track'}" expires in ${hrs} hour${hrs !== 1 ? 's' : ''}. Renew to stay on the charts!`;
-          if (await alreadyAlerted(db, ownerId, title)) continue;
-          await sendNotification(db, ownerId, title, content, '/music');
-          trackAlerts++;
+    try {
+      const expiringTracks = await db.listDocuments(DATABASE_ID, COL.TRACKS, [
+        Query.equal('is_boosted', true),
+        Query.greaterThan('boost_expiry', nowIso),
+        Query.lessThan('boost_expiry', in72h),
+        Query.limit(50),
+      ]);
+      for (const t of expiringTracks.documents) {
+        if (t.user_id) {
+          await safeNotify({
+            user_id: t.user_id,
+            type: 'SYSTEM',
+            title: 'Track Boost Expiring Soon',
+            content: 'Your promoted music track boost expires within 72 hours.',
+          });
+          tracks += 1;
         }
-        cursor = page.documents.length === 100 ? page.documents[page.documents.length - 1].$id : undefined;
-      } while (cursor);
+      }
+    } catch {
+      // ignore
     }
 
-    // Verification badges expiring soon
-    {
-      let cursor: string | undefined;
-      do {
-        const queries: string[] = [Query.equal('is_verified', true), Query.limit(100)];
-        if (cursor) queries.push(Query.cursorAfter(cursor));
-        const page = await db.listDocuments(DATABASE_ID, COL.USERS, queries);
-        for (const doc of page.documents) {
-          const expiry = expiryTime(doc.verification_expiry);
-          if (!expiry || expiry <= now || expiry > windowEnd) continue;
-          const hrs = hoursLeft(expiry);
-          const title = '✅ Verification Badge Expiring Soon';
-          const content = `Your verified badge expires in ${hrs} hour${hrs !== 1 ? 's' : ''}. Renew now to keep your checkmark!`;
-          if (await alreadyAlerted(db, doc.$id, title)) continue;
-          await sendNotification(db, doc.$id, title, content, '/verification');
-          userAlerts++;
-        }
-        cursor = page.documents.length === 100 ? page.documents[page.documents.length - 1].$id : undefined;
-      } while (cursor);
+    try {
+      const expiringUsers = await db.listDocuments(DATABASE_ID, COL.USERS, [
+        Query.equal('is_verified', true),
+        Query.greaterThan('verification_expiry', nowIso),
+        Query.lessThan('verification_expiry', in72h),
+        Query.limit(50),
+      ]);
+      for (const u of expiringUsers.documents) {
+        await safeNotify({
+          user_id: u.$id,
+          type: 'SYSTEM',
+          title: 'Verification Expiring Soon',
+          content: 'Your ViMore verification badge expires within 72 hours. Renew to keep it active.',
+        });
+        users += 1;
+      }
+    } catch {
+      // ignore
     }
 
-    const sent = { posts: postAlerts, tracks: trackAlerts, users: userAlerts };
-    if (postAlerts + trackAlerts + userAlerts > 0) {
-      console.log('[ExpiryAlerts] Sent:', sent);
-    }
-    return NextResponse.json({ ok: true, sent });
+    return NextResponse.json({
+      ok: true,
+      sent: { posts, tracks, users },
+    });
   } catch (err: any) {
-    console.error('[ExpiryAlerts] Error:', err?.message);
-    return NextResponse.json({ error: 'Alert failed' }, { status: 500 });
+    return NextResponse.json({ error: err?.message || 'Expiry alerts failed' }, { status: 500 });
   }
 }

@@ -1,88 +1,85 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { OAUTH_COL } from '@/lib/oauth-server';
+import { OAUTH_COL, getOAuthClient, revokeAccessToken } from '@/lib/oauth-server';
 
-// GET /api/oauth/connected?user_id=xxx
-// Returns all active connected apps for a user.
-// Fetches all tokens and filters client-side — no index required.
 export async function GET(req: NextRequest) {
-  const user_id = req.nextUrl.searchParams.get('user_id');
-  if (!user_id) return NextResponse.json({ error: 'user_id required' }, { status: 400 });
-
-  const db = getAdminDatabases();
-
   try {
-    // Fetch all access tokens and filter client-side
-    const tokensRes = await db.listDocuments(DATABASE_ID, OAUTH_COL.ACCESS_TOKENS, []);
-    const now = new Date();
+    const userId = req.nextUrl.searchParams.get('user_id') || '';
+    if (!userId) {
+      return NextResponse.json({ error: 'user_id is required' }, { status: 400 });
+    }
 
-    const activeTokens = tokensRes.documents.filter(
+    const db = getAdminDatabases();
+    const res = await db.listDocuments(DATABASE_ID, OAUTH_COL.ACCESS_TOKENS, []);
+    const activeTokens = res.documents.filter(
       (d: any) =>
-        d.user_id === user_id &&
+        d.user_id === userId &&
         !d.revoked &&
-        new Date(d.expires_at) > now,
+        (!d.expires_at || new Date(d.expires_at) > new Date())
     );
 
-    // Deduplicate client IDs
-    const clientIds: string[] = [...new Set(activeTokens.map((d: any) => d.client_id as string))];
+    const grouped = new Map<string, { scopes: Set<string>; granted_at: string; token_ids: string[] }>();
+    for (const tok of activeTokens as any[]) {
+      const cid = tok.client_id;
+      if (!cid) continue;
+      if (!grouped.has(cid)) {
+        grouped.set(cid, {
+          scopes: new Set(),
+          granted_at: tok.$createdAt || new Date().toISOString(),
+          token_ids: [],
+        });
+      }
+      const entry = grouped.get(cid)!;
+      String(tok.scopes || '')
+        .split(' ')
+        .filter(Boolean)
+        .forEach((s) => entry.scopes.add(s));
+      entry.token_ids.push(tok.$id);
+    }
 
-    // Direct getDocument() per client — $id === client_id, no query needed
-    const clients: Record<string, any> = {};
-    await Promise.all(
-      clientIds.map(async (cid) => {
-        try {
-          clients[cid] = await db.getDocument(DATABASE_ID, OAUTH_COL.CLIENTS, cid);
-        } catch {}
-      }),
+    const connected = await Promise.all(
+      Array.from(grouped.entries()).map(async ([client_id, info]) => {
+        const client: any = await getOAuthClient(client_id);
+        return {
+          client_id,
+          name: client?.name || client_id,
+          logo_url: client?.logo_url || '',
+          website_url: client?.website_url || '',
+          scopes: Array.from(info.scopes).join(' '),
+          granted_at: info.granted_at,
+          token_ids: info.token_ids,
+        };
+      })
     );
 
-    const grouped = clientIds.map((cid) => {
-      const tokens = activeTokens.filter((d: any) => d.client_id === cid);
-      const latestToken = tokens[0];
-      const client = clients[cid] || {};
-      return {
-        client_id:  cid,
-        name:       client.name || cid,
-        logo_url:   client.logo_url || '',
-        website_url: client.website_url || '',
-        scopes:     latestToken?.scopes || 'profile',
-        granted_at: latestToken?.$createdAt || '',
-        token_ids:  tokens.map((t: any) => t.$id),
-      };
-    });
-
-    return NextResponse.json({ connected: grouped });
+    return NextResponse.json({ connected });
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 });
+    return NextResponse.json({ error: err?.message || 'Failed to load connected apps' }, { status: 500 });
   }
 }
 
-// DELETE /api/oauth/connected
-// Revokes all tokens a user has granted to a specific app.
-// Fetches all tokens and filters client-side — no index required.
 export async function DELETE(req: NextRequest) {
-  const db = getAdminDatabases();
   try {
-    const { client_id, user_id } = await req.json();
-    if (!client_id || !user_id) {
-      return NextResponse.json({ error: 'client_id and user_id required' }, { status: 400 });
+    const body = await req.json().catch(() => ({}));
+    const clientId = String(body.client_id || '').trim();
+    const userId = String(body.user_id || '').trim();
+
+    if (!clientId || !userId) {
+      return NextResponse.json({ error: 'client_id and user_id are required' }, { status: 400 });
     }
 
-    // Fetch all tokens and filter client-side
-    const tokensRes = await db.listDocuments(DATABASE_ID, OAUTH_COL.ACCESS_TOKENS, []);
-    const toRevoke = tokensRes.documents.filter(
-      (d: any) => d.client_id === client_id && d.user_id === user_id,
+    const db = getAdminDatabases();
+    const res = await db.listDocuments(DATABASE_ID, OAUTH_COL.ACCESS_TOKENS, []);
+    const matches = res.documents.filter(
+      (d: any) => d.client_id === clientId && d.user_id === userId && !d.revoked
     );
 
-    // $id === token — direct update per token, no query needed
-    await Promise.all(
-      toRevoke.map((d: any) =>
-        db.updateDocument(DATABASE_ID, OAUTH_COL.ACCESS_TOKENS, d.$id, { revoked: true }),
-      ),
-    );
+    for (const doc of matches) {
+      await revokeAccessToken(doc.$id);
+    }
 
-    return NextResponse.json({ ok: true, revoked: toRevoke.length });
+    return NextResponse.json({ ok: true, revoked: matches.length });
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 });
+    return NextResponse.json({ error: err?.message || 'Failed to revoke access' }, { status: 500 });
   }
 }

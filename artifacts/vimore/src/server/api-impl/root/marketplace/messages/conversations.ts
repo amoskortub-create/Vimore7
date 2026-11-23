@@ -1,67 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { getSessionUser } from '@/lib/session';
 import { Query } from 'node-appwrite';
+import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
+import { COL } from '@/lib/appwrite';
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const sellerId = searchParams.get('sellerId');
-
-  if (!sellerId) {
-    return NextResponse.json({ error: 'Missing sellerId' }, { status: 400 });
-  }
-
-  // IDOR protection: only the seller can list their own conversations
-  const session = await getSessionUser(req);
-  if (!session) {
-    return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
-  }
-
-  if (session.userId !== sellerId) {
-    return NextResponse.json(
-      { error: 'Access denied: you can only view your own conversations.' },
-      { status: 403 }
-    );
-  }
-
   try {
-    const db = getAdminDatabases();
-
-    const result = await db.listDocuments(DATABASE_ID, 'messages', [
-      Query.equal('receiver_id', sellerId),
-      Query.orderDesc('$createdAt'),
-      Query.limit(500),
-    ]);
-
-    const mktPrefix = `mkt_${sellerId}_`;
-    const convMap = new Map<string, Record<string, unknown>>();
-    for (const doc of result.documents) {
-      const cid = String(doc.cluster_id || '');
-      if (!cid.startsWith(mktPrefix)) continue;
-      if (!convMap.has(cid)) {
-        convMap.set(cid, doc as unknown as Record<string, unknown>);
-      }
+    const sellerId = req.nextUrl.searchParams.get('sellerId') || '';
+    if (!sellerId) {
+      return NextResponse.json({ error: 'sellerId required' }, { status: 400 });
     }
 
-    const conversations = Array.from(convMap.entries()).map(([cid, doc]) => {
-      const buyerId = cid.slice(mktPrefix.length);
-      return {
-        clusterId: cid,
-        buyerId,
-        senderName: String(doc.sender_name || 'Buyer'),
-        lastMessage: String(
-          doc.text ||
-          (doc.type === 'photo' ? '📷 Photo' : doc.type === 'voice' ? '🎙️ Voice message' : '📎 Media')
-        ),
-        lastTime: String(doc.$createdAt || ''),
-        isRead: Boolean(doc.is_read),
-        type: String(doc.type || 'text'),
-      };
-    });
+    const db = getAdminDatabases();
+    const res = await db.listDocuments(DATABASE_ID, COL.MESSAGES, [
+      Query.startsWith('cluster_id', `mkt_${sellerId}_`),
+      Query.orderDesc('$createdAt'),
+      Query.limit(200),
+    ]);
 
-    return NextResponse.json({ conversations });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Failed to fetch conversations';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    const byCluster = new Map<string, any>();
+    for (const msg of res.documents) {
+      const cid = String(msg.cluster_id || '');
+      if (!cid || byCluster.has(cid)) continue;
+      const prefix = `mkt_${sellerId}_`;
+      const buyerId = cid.startsWith(prefix) ? cid.slice(prefix.length) : msg.sender_id;
+      byCluster.set(cid, {
+        clusterId: cid,
+        productId: msg.product_id || null,
+        buyerId,
+        senderName:
+          msg.sender_id === sellerId ? msg.receiver_name || 'Buyer' : msg.sender_name || 'Buyer',
+        lastMessage:
+          msg.text ||
+          (msg.type === 'voice' ? 'Voice message' : msg.type === 'photo' ? 'Photo' : 'Attachment'),
+        lastTime: msg.$createdAt,
+        isRead: Boolean(msg.is_read) || msg.sender_id === sellerId,
+        type: msg.type || 'text',
+      });
+    }
+
+    return NextResponse.json({ conversations: Array.from(byCluster.values()) });
+  } catch (err: any) {
+    return NextResponse.json({ conversations: [], error: err?.message });
   }
 }

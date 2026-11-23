@@ -7,20 +7,18 @@ async function callGemini(systemPrompt: string, userPrompt: string, maxTokens = 
   const key = process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GEMINI_API_KEY;
   if (!key) return null;
   try {
-    const { GoogleGenerativeAI } = await import('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(key);
-    const model = genAI.getGenerativeModel({
+    const { GoogleGenAI } = await import('@google/genai');
+    const ai = new GoogleGenAI({ apiKey: key });
+    const response = await ai.models.generateContent({
       model: GEMINI_MODEL,
-      systemInstruction: systemPrompt,
-    });
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-      generationConfig: {
+      contents: userPrompt,
+      config: {
+        systemInstruction: systemPrompt,
         maxOutputTokens: maxTokens,
         temperature: 0.7,
       },
     });
-    const text = result.response.text().trim();
+    const text = (response.text || '').trim();
     return text || null;
   } catch (err) {
     console.error('[Gemini callGemini error]', err);
@@ -135,26 +133,26 @@ export async function aiSuggestCaptionsFromImagesAction({
   const key = process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GEMINI_API_KEY;
   if (!key) return { captions: fallback };
   try {
-    const { GoogleGenerativeAI } = await import('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(key);
-    const model = genAI.getGenerativeModel({
+    const { GoogleGenAI } = await import('@google/genai');
+    const ai = new GoogleGenAI({ apiKey: key });
+    const response = await ai.models.generateContent({
       model: GEMINI_MODEL,
-      systemInstruction: `You are a social media caption expert for ViMore, a creator platform popular in Africa and globally. Generate exactly 3 short, engaging captions for the given ${isVideo ? 'video thumbnail' : 'image'}. Each caption should be on its own line, no numbering, no bullets, no quotes. Each must include 2-3 relevant emojis and 2-3 hashtags (one must be #ViMore). Keep each caption under 180 characters including hashtags.`,
-    });
-    const result = await model.generateContent({
-      contents: [{
-        role: 'user',
-        parts: [
-          { inlineData: { mimeType, data: imageBase64 } },
-          { text: `Generate 3 engaging social media captions for this ${isVideo ? 'video' : 'photo'}, one per line.` },
-        ],
-      }],
-      generationConfig: {
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType, data: imageBase64 } },
+            { text: `Generate 3 engaging social media captions for this ${isVideo ? 'video' : 'photo'}, one per line.` },
+          ],
+        },
+      ],
+      config: {
+        systemInstruction: `You are a social media caption expert for ViMore, a creator platform popular in Africa and globally. Generate exactly 3 short, engaging captions for the given ${isVideo ? 'video thumbnail' : 'image'}. Each caption should be on its own line, no numbering, no bullets, no quotes. Each must include 2-3 relevant emojis and 2-3 hashtags (one must be #ViMore). Keep each caption under 180 characters including hashtags.`,
         maxOutputTokens: 400,
         temperature: 0.9,
       },
     });
-    const text = result.response.text().trim();
+    const text = (response.text || '').trim();
     const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 10);
     const captions = lines.slice(0, 3);
     if (captions.length < 1) return { captions: fallback };

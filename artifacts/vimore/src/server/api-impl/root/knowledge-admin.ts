@@ -1,63 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionUser } from '@/lib/session';
-import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { rateLimit, sanitizeIp } from '@/lib/rate-limit';
+import { Query } from 'node-appwrite';
+import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
+import { requireAdminUser } from '@/lib/server-helpers';
 
 const COLLECTION = 'ai_knowledge_bank';
 
 export async function GET(req: NextRequest) {
-  const ip = sanitizeIp(req.headers.get('x-forwarded-for')?.split(',')[0].trim());
-  const rl = rateLimit(`knowledge-admin:${ip}`, 30, 60_000);
-  if (!rl.allowed) return NextResponse.json({ error: 'Too many requests.' }, { status: 429 });
-
-  const session = await getSessionUser(req);
-  if (!session || session.role !== 'SUPER') {
+  const admin = await requireAdminUser(req);
+  if (!admin) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  if (!process.env.APPWRITE_API_KEY) {
-    return NextResponse.json({ error: 'Not configured' }, { status: 503 });
-  }
-
-  const { searchParams } = new URL(req.url);
-  const limit = Math.min(100, parseInt(searchParams.get('limit') || '50'));
-  const offset = Math.max(0, parseInt(searchParams.get('offset') || '0'));
-
   try {
+    const limit = Math.min(100, Math.max(1, Number(req.nextUrl.searchParams.get('limit') || 50)));
+    const offset = Math.max(0, Number(req.nextUrl.searchParams.get('offset') || 0));
     const db = getAdminDatabases();
-    const data = await db.listDocuments(DATABASE_ID, COLLECTION, []);
-    return NextResponse.json(data);
+    const res = await db.listDocuments(DATABASE_ID, COLLECTION, [
+      Query.orderDesc('$createdAt'),
+      Query.limit(limit),
+      Query.offset(offset),
+    ]);
+    return NextResponse.json({ documents: res.documents, total: res.total });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ documents: [], total: 0, error: err?.message });
   }
 }
 
 export async function DELETE(req: NextRequest) {
-  const ip = sanitizeIp(req.headers.get('x-forwarded-for')?.split(',')[0].trim());
-  const rl = rateLimit(`knowledge-admin-del:${ip}`, 20, 60_000);
-  if (!rl.allowed) return NextResponse.json({ error: 'Too many requests.' }, { status: 429 });
-
-  const session = await getSessionUser(req);
-  if (!session || session.role !== 'SUPER') {
+  const admin = await requireAdminUser(req);
+  if (!admin) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  if (!process.env.APPWRITE_API_KEY) {
-    return NextResponse.json({ error: 'Not configured' }, { status: 503 });
-  }
-
-  const { searchParams } = new URL(req.url);
-  const docId = searchParams.get('id');
-
-  if (!docId || typeof docId !== 'string' || docId.length > 64) {
-    return NextResponse.json({ error: 'id required' }, { status: 400 });
+  const id = req.nextUrl.searchParams.get('id') || '';
+  if (!id) {
+    return NextResponse.json({ error: 'id is required' }, { status: 400 });
   }
 
   try {
     const db = getAdminDatabases();
-    await db.deleteDocument(DATABASE_ID, COLLECTION, docId);
-    return NextResponse.json({ success: true });
+    await db.deleteDocument(DATABASE_ID, COLLECTION, id);
+    return NextResponse.json({ ok: true });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err?.message || 'Delete failed' }, { status: 500 });
   }
 }

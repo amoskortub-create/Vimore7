@@ -1,58 +1,67 @@
-import { NextResponse } from 'next/server';
-import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
+import { NextRequest, NextResponse } from 'next/server';
 import { ID, Query } from 'node-appwrite';
+import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
+import { COL } from '@/lib/appwrite';
+import { getAuthenticatedProfile } from '@/lib/server-helpers';
 
-const COLLECTION = 'creator_earnings';
-const TRANSACTIONS = 'transactions';
-
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const userId = body?.userId;
+    const session = await getAuthenticatedProfile(req);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const creatorUserId = String(body.creatorUserId || session.authUser.$id).trim();
+    const transactionType = String(body.transactionType || 'gift');
+    const amountLD = Math.max(0, Number(body.amountLD || 0));
+
     const db = getAdminDatabases();
-
-    if (!userId) {
-      return NextResponse.json({ error: 'userId is required.' }, { status: 400 });
-    }
-
-    const res = await db.listDocuments(DATABASE_ID, TRANSACTIONS, [
-      Query.equal('receiverUserId', userId),
-      Query.equal('status', 'completed'),
-      Query.limit(500),
-    ]);
-
-    const totals = { totalEarningsLD: 0, giftsEarningsLD: 0, subscriptionsEarningsLD: 0, lockedPostsEarningsLD: 0, lockedMusicEarningsLD: 0 };
-
-    for (const tx of res.documents) {
-      const amount = Number(tx.amountLD || 0);
-      totals.totalEarningsLD += amount;
-      if (tx.transactionType === 'gift') totals.giftsEarningsLD += amount;
-      if (tx.transactionType === 'subscription') totals.subscriptionsEarningsLD += amount;
-      if (tx.transactionType === 'unlock_post') totals.lockedPostsEarningsLD += amount;
-      if (tx.transactionType === 'unlock_music') totals.lockedMusicEarningsLD += amount;
-    }
-
-    const payload = {
-      userId,
-      totalEarningsLD: totals.totalEarningsLD,
-      giftsEarningsLD: totals.giftsEarningsLD,
-      subscriptionsEarningsLD: totals.subscriptionsEarningsLD,
-      lockedPostsEarningsLD: totals.lockedPostsEarningsLD,
-      lockedMusicEarningsLD: totals.lockedMusicEarningsLD,
-      lastUpdated: new Date().toISOString(),
-    };
-
-    const existing = await db.listDocuments(DATABASE_ID, COLLECTION, [
-      Query.equal('userId', userId),
+    const existing = await db.listDocuments(DATABASE_ID, COL.CREATOR_EARNINGS, [
+      Query.equal('user_id', creatorUserId),
       Query.limit(1),
     ]);
 
-    const saved = existing.documents[0]
-      ? await db.updateDocument(DATABASE_ID, COLLECTION, existing.documents[0].$id, payload)
-      : await db.createDocument(DATABASE_ID, COLLECTION, ID.unique(), payload);
+    const current = existing.documents[0];
+    const now = new Date().toISOString();
 
-    return NextResponse.json({ ok: true, earnings: saved });
-  } catch (error: any) {
-    return NextResponse.json({ error: error?.message || 'Could not update creator earnings.' }, { status: 500 });
+    if (current) {
+      const updates: Record<string, any> = {
+        total_earnings_ld: Number(current.total_earnings_ld || 0) + amountLD,
+        last_updated: now,
+      };
+      if (transactionType === 'gift') {
+        updates.gifts_earnings_ld = Number(current.gifts_earnings_ld || 0) + amountLD;
+      } else if (transactionType === 'subscription') {
+        updates.subscriptions_earnings_ld =
+          Number(current.subscriptions_earnings_ld || 0) + amountLD;
+      } else if (transactionType === 'locked_post') {
+        updates.locked_posts_earnings_ld = Number(current.locked_posts_earnings_ld || 0) + amountLD;
+      } else if (transactionType === 'locked_music') {
+        updates.locked_music_earnings_ld = Number(current.locked_music_earnings_ld || 0) + amountLD;
+      }
+
+      const updated = await db.updateDocument(
+        DATABASE_ID,
+        COL.CREATOR_EARNINGS,
+        current.$id,
+        updates
+      );
+      return NextResponse.json({ ok: true, earnings: updated });
+    }
+
+    const created = await db.createDocument(DATABASE_ID, COL.CREATOR_EARNINGS, ID.unique(), {
+      user_id: creatorUserId,
+      total_earnings_ld: amountLD,
+      gifts_earnings_ld: transactionType === 'gift' ? amountLD : 0,
+      subscriptions_earnings_ld: transactionType === 'subscription' ? amountLD : 0,
+      locked_posts_earnings_ld: transactionType === 'locked_post' ? amountLD : 0,
+      locked_music_earnings_ld: transactionType === 'locked_music' ? amountLD : 0,
+      last_updated: now,
+    });
+
+    return NextResponse.json({ ok: true, earnings: created });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message || 'Earnings update failed' }, { status: 500 });
   }
 }

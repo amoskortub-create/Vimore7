@@ -1,46 +1,35 @@
-import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { getSessionUser } from '@/lib/session';
-import { rateLimit, sanitizeIp } from '@/lib/rate-limit';
-
-const NOTIFICATIONS_COLLECTION = 'notifications';
+import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
+import { COL } from '@/lib/appwrite';
+import { getAuthenticatedProfile } from '@/lib/server-helpers';
 
 export async function POST(req: NextRequest) {
   try {
-    const ip = sanitizeIp(req.headers.get('x-forwarded-for')?.split(',')[0].trim());
-    const rl = rateLimit(`notifications-read:${ip}`, 60, 60_000);
-    if (!rl.allowed) {
-      return NextResponse.json({ error: 'Rate limit exceeded.' }, { status: 429 });
-    }
-
-    const session = await getSessionUser(req);
+    const session = await getAuthenticatedProfile(req);
     if (!session) {
-      return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const body = await req.json().catch(() => ({}));
-    const ids = Array.isArray(body.notificationIds)
-      ? body.notificationIds.filter((id: unknown): id is string => typeof id === 'string').slice(0, 100)
-      : [];
-    if (ids.length === 0) return NextResponse.json({ ok: true, updated: 0 });
-
+    const ids: string[] = Array.isArray(body.notificationIds) ? body.notificationIds : [];
     const db = getAdminDatabases();
     let updated = 0;
-    await Promise.all(ids.map(async (id: string) => {
+
+    for (const id of ids.slice(0, 100)) {
+      if (!id || id.startsWith('notif_')) continue;
       try {
-        const doc: any = await db.getDocument(DATABASE_ID, NOTIFICATIONS_COLLECTION, id);
-        if (doc.user_id !== session.userId && doc.recipient_id !== session.userId) return;
-        if (doc.is_read === true) return;
-        await db.updateDocument(DATABASE_ID, NOTIFICATIONS_COLLECTION, id, { is_read: true });
-        updated += 1;
+        const doc = await db.getDocument(DATABASE_ID, COL.NOTIFICATIONS, id);
+        if (doc.user_id === session.authUser.$id && !doc.is_read) {
+          await db.updateDocument(DATABASE_ID, COL.NOTIFICATIONS, id, { is_read: true });
+          updated += 1;
+        }
       } catch {
-        // A stale/deleted notification should not make the whole batch fail.
+        // ignore missing
       }
-    }));
+    }
 
     return NextResponse.json({ ok: true, updated });
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Bad request' }, { status: 400 });
+    return NextResponse.json({ error: err?.message || 'Mark read failed' }, { status: 500 });
   }
 }

@@ -1,96 +1,65 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { getSessionUser } from '@/lib/session';
-import { rateLimit, sanitizeIp } from '@/lib/rate-limit';
-import { ID } from 'node-appwrite';
-import { logSecurityEvent, extractRequestMeta } from '@/lib/security-logger';
-
-export const maxDuration = 30;
-
-const ALLOWED_ROLES = new Set(['SUPER', 'MODERATOR']);
-const COL = {
-  USERS: 'users',
-  VERIFICATION_RECORDS: 'verification_records',
-  NOTIFICATIONS: 'notifications',
-};
+import { COL } from '@/lib/appwrite';
+import { requireAdminUser, safeNotify, getUserBalance } from '@/lib/server-helpers';
 
 export async function POST(req: NextRequest) {
-  const meta = extractRequestMeta(req);
   try {
-    const ip = sanitizeIp(req.headers.get('x-forwarded-for')?.split(',')[0].trim());
-    const rl = rateLimit(`verify-reject:${ip}`, 30, 60_000);
-    if (!rl.allowed) {
-      return NextResponse.json({ error: 'Too many requests.' }, { status: 429 });
+    const admin = await requireAdminUser(req, ['SUPER', 'MODERATOR']);
+    if (!admin) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const session = await getSessionUser(req);
-    if (!session) {
-      void logSecurityEvent({ ...meta, event_type: 'ADMIN_AUTH_FAILURE', severity: 'WARN', result: 'blocked', details: 'Unauthenticated verify-reject attempt' });
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    if (!ALLOWED_ROLES.has(session.role ?? '')) {
-      void logSecurityEvent({ ...meta, event_type: 'ADMIN_FORBIDDEN', severity: 'CRITICAL', actor_id: session.userId, actor_role: session.role ?? 'none', result: 'blocked', details: 'Insufficient role for verification rejection' });
-      return NextResponse.json({ error: 'Forbidden — admin role required' }, { status: 403 });
-    }
-
-    const { recordId, reason } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const recordId = String(body.recordId || '').trim();
+    const reason = String(body.reason || 'Verification requirements not met.').trim();
     if (!recordId) {
-      return NextResponse.json({ error: 'recordId is required' }, { status: 400 });
+      return NextResponse.json({ error: 'Missing recordId' }, { status: 400 });
     }
 
     const db = getAdminDatabases();
-
-    let recordDoc: any;
-    try {
-      recordDoc = await db.getDocument(DATABASE_ID, COL.VERIFICATION_RECORDS, recordId);
-    } catch {
-      return NextResponse.json({ error: 'Verification record not found' }, { status: 404 });
-    }
-
-    if (recordDoc.status !== 'PENDING') {
-      return NextResponse.json({ error: `Cannot reject a record with status: ${recordDoc.status}` }, { status: 409 });
-    }
-
-    const userId: string = recordDoc.user_id;
-    const currency: string = recordDoc.currency ?? 'DIAMOND';
-    const amount: number = Number(recordDoc.amount ?? 0);
+    const record: any = await db.getDocument(DATABASE_ID, COL.VERIFICATION_RECORDS, recordId);
+    const userId = record.user_id;
+    const cost = Number(record.cost || 0);
 
     await db.updateDocument(DATABASE_ID, COL.VERIFICATION_RECORDS, recordId, {
       status: 'REJECTED',
-      rejected_by: session.userId,
-      rejected_at: new Date().toISOString(),
-      rejection_reason: reason || 'Does not meet verification requirements',
+      rejection_reason: reason,
+      reviewed_by: admin.authUser.$id,
+      reviewed_at: new Date().toISOString(),
     });
 
-    // Refund the fee if amount was recorded
-    if (amount > 0) {
-      const balanceField = currency === 'STAR' ? 'star_balance' : 'diamond_balance';
+    if (userId && cost > 0 && record.status === 'PENDING') {
       try {
-        const userDoc = await db.getDocument(DATABASE_ID, COL.USERS, userId);
-        const currentBalance = Math.round(Number(userDoc[balanceField] ?? 0));
-        await db.updateDocument(DATABASE_ID, COL.USERS, userId, {
-          [balanceField]: currentBalance + Math.round(amount),
-        });
-      } catch { /* best-effort refund */ }
+        const userDoc: any = await db.getDocument(DATABASE_ID, COL.USERS, userId);
+        const currency = String(record.currency || 'DIAMOND').toUpperCase();
+        if (currency === 'STAR') {
+          await db.updateDocument(DATABASE_ID, COL.USERS, userId, {
+            star_balance: Number(userDoc.star_balance || 0) + cost,
+          });
+        } else {
+          const nextBal = getUserBalance(userDoc) + cost;
+          await db.updateDocument(DATABASE_ID, COL.USERS, userId, {
+            diamond_balance: nextBal,
+            credit_balance: nextBal,
+          });
+        }
+      } catch {
+        // non-fatal
+      }
     }
 
-    try {
-      await db.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
+    if (userId) {
+      await safeNotify({
         user_id: userId,
-        from_user_id: session.userId,
         type: 'SYSTEM',
-        title: 'Verification Not Approved',
-        content: `Your verification request was not approved. Reason: ${reason || 'Does not meet verification requirements'}. Your fee has been refunded.`,
-        message: `Your verification request was not approved. Reason: ${reason || 'Does not meet verification requirements'}. Your fee has been refunded.`,
-        is_read: false,
+        title: 'Verification Rejected',
+        content: `Your verification request was declined (${reason}). Any fee has been refunded.`,
       });
-    } catch { /* non-fatal */ }
+    }
 
-    void logSecurityEvent({ ...meta, event_type: 'ADMIN_VERIFY_REJECT', severity: 'INFO', actor_id: session.userId, actor_role: session.role ?? '', target_id: userId, result: 'success', details: `Verification record ${recordId} rejected. Reason: ${reason || 'Does not meet requirements'}. Fee refunded: ${amount} ${currency}` });
-
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, status: 'REJECTED' });
   } catch (err: any) {
-    void logSecurityEvent({ ...meta, event_type: 'ADMIN_VERIFY_REJECT_ERROR', severity: 'ERROR', result: 'failure', details: err?.message ?? 'Unhandled error' });
     return NextResponse.json({ error: err?.message || 'Rejection failed' }, { status: 500 });
   }
 }

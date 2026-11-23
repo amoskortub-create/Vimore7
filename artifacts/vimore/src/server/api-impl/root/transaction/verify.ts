@@ -1,143 +1,83 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { getSessionUser } from '@/lib/session';
-import { rateLimit } from '@/lib/rate-limit';
-import { ID } from 'node-appwrite';
-import { CREDIT_PRICES } from '@/lib/credit-pricing';
-
-export const maxDuration = 30;
-
-const COL = {
-  USERS: 'users',
-  TRANSACTIONS: 'transactions',
-  VERIFICATION_RECORDS: 'verification_records',
-};
-
-const VERIFY_PRICES: Record<string, number> = {
-  DIAMOND: CREDIT_PRICES.verification,
-  STAR: 25000,
-};
+import { ID, Query } from 'node-appwrite';
+import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
+import { COL } from '@/lib/appwrite';
+import { getAuthenticatedProfile, getUserBalance, safeNotify } from '@/lib/server-helpers';
 
 export async function POST(req: NextRequest) {
   try {
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'unknown';
-    const rl = rateLimit(`verify:${ip}`, 5, 60_000);
-    if (!rl.allowed) {
-      return NextResponse.json({ error: 'Too many requests.' }, { status: 429 });
+    const session = await getAuthenticatedProfile(req);
+    if (!session?.profileDoc) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const session = await getSessionUser(req);
-    if (!session) {
-      return NextResponse.json({ error: 'You must be logged in.' }, { status: 401 });
-    }
-
-    const { currency } = await req.json();
-    if (!currency) {
-      return NextResponse.json({ error: 'currency is required.' }, { status: 400 });
-    }
-
-    const normalizedCurrency = String(currency).toUpperCase();
-    if (!['DIAMOND', 'STAR'].includes(normalizedCurrency)) {
-      return NextResponse.json({ error: 'currency must be CREDIT or STAR.' }, { status: 400 });
-    }
-
-    const parsedCost = VERIFY_PRICES[normalizedCurrency];
-    if (!parsedCost) {
-      return NextResponse.json(
-        { error: 'Unsupported verification currency.' },
-        { status: 400 }
-      );
-    }
-
-    const db = getAdminDatabases();
-
-    let userDoc: any;
-    try {
-      userDoc = await db.getDocument(DATABASE_ID, COL.USERS, session.userId);
-    } catch {
-      return NextResponse.json({ error: 'User not found.' }, { status: 404 });
-    }
-
-    if (userDoc.is_verified === true) {
+    if (session.profileDoc.is_verified) {
       return NextResponse.json({ ok: true, alreadyVerified: true });
     }
 
-    const balanceField = normalizedCurrency === 'DIAMOND' ? 'diamond_balance' : 'star_balance';
-    const currentBalance: number = Math.round(Number(userDoc[balanceField] ?? 0));
+    const body = await req.json().catch(() => ({}));
+    const currency = String(body.currency || 'DIAMOND').toUpperCase();
+    const cost = Math.max(1, Math.floor(Number(body.cost || 100)));
 
-    if (currentBalance < parsedCost) {
-      return NextResponse.json(
-        { error: `Insufficient balance. You need ${parsedCost} ${normalizedCurrency} but have ${currentBalance}.` },
-        { status: 400 }
-      );
+    const db = getAdminDatabases();
+    const pending = await db.listDocuments(DATABASE_ID, COL.VERIFICATION_RECORDS, [
+      Query.equal('user_id', session.authUser.$id),
+      Query.equal('status', 'PENDING'),
+      Query.limit(1),
+    ]);
+    if (pending.documents[0]) {
+      return NextResponse.json({
+        ok: true,
+        status: 'PENDING',
+        newBalance:
+          currency === 'STAR'
+            ? Number(session.profileDoc.star_balance || 0)
+            : getUserBalance(session.profileDoc),
+      });
     }
 
-    const newBalance = currentBalance - parsedCost;
-    const verificationExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-    const verificationRecordId = ID.unique();
-    const transactionId = ID.unique();
-
-    await db.updateDocument(DATABASE_ID, COL.USERS, session.userId, {
-      [balanceField]: newBalance,
-      ...(normalizedCurrency === 'DIAMOND'
-        ? { credit_balance: newBalance, diamond_balance: newBalance }
-        : {}),
-      is_verified: true,
-      has_ever_been_verified: true,
-      verification_expiry: verificationExpiry,
-    });
-
-    try {
-      await Promise.all([
-        db.createDocument(DATABASE_ID, COL.VERIFICATION_RECORDS, verificationRecordId, {
-          user_id: session.userId,
-          type: 'CREATOR',
-          status: 'APPROVED',
-          currency: normalizedCurrency,
-          amount: parsedCost,
-          submitted_at: new Date().toISOString(),
-          reviewed_by: 'SYSTEM',
-          approved_by: 'SYSTEM',
-          approved_at: new Date().toISOString(),
-        } as any),
-        db.createDocument(DATABASE_ID, COL.TRANSACTIONS, transactionId, {
-          user_id: session.userId,
-          transactionId,
-          senderUserId: session.userId,
-          receiverUserId: session.userId,
-          transactionType: 'verification',
-          amountLD: parsedCost,
-          createdAt: new Date().toISOString(),
-          type: 'VERIFICATION_FEE',
-          currency: normalizedCurrency,
-          amount: parsedCost,
-          description: 'Creator verification fee',
-          status: 'COMPLETED',
-        } as any),
-      ]);
-    } catch {
-      try {
-        await db.updateDocument(DATABASE_ID, COL.USERS, session.userId, {
-          [balanceField]: currentBalance,
-          ...(normalizedCurrency === 'DIAMOND'
-            ? { credit_balance: currentBalance, diamond_balance: currentBalance }
-            : {}),
-          is_verified: userDoc.is_verified ?? false,
-          has_ever_been_verified: userDoc.has_ever_been_verified ?? false,
-          verification_expiry: userDoc.verification_expiry ?? null,
-        });
-      } catch { }
-      throw new Error('Failed to create verification record.');
+    let newBalance = 0;
+    if (currency === 'STAR') {
+      const current = Number(session.profileDoc.star_balance || 0);
+      if (current < cost) {
+        return NextResponse.json({ error: 'Insufficient Star balance' }, { status: 400 });
+      }
+      newBalance = current - cost;
+      await db.updateDocument(DATABASE_ID, COL.USERS, session.authUser.$id, {
+        star_balance: newBalance,
+      });
+    } else {
+      const current = getUserBalance(session.profileDoc);
+      if (current < cost) {
+        return NextResponse.json({ error: 'Insufficient Credit balance' }, { status: 400 });
+      }
+      newBalance = current - cost;
+      await db.updateDocument(DATABASE_ID, COL.USERS, session.authUser.$id, {
+        credit_balance: newBalance,
+        diamond_balance: newBalance,
+      });
     }
 
-    return NextResponse.json({
-      ok: true,
-      status: 'ACTIVE',
-      newBalance,
-      verificationExpiry,
-      verificationRecordId,
+    await db.createDocument(DATABASE_ID, COL.VERIFICATION_RECORDS, ID.unique(), {
+      user_id: session.authUser.$id,
+      username: String(session.profileDoc.username || ''),
+      name: String(session.profileDoc.name || ''),
+      currency,
+      cost,
+      status: 'PENDING',
+      submitted_at: new Date().toISOString(),
     });
+
+    await safeNotify({
+      user_id: session.authUser.$id,
+      type: 'SYSTEM',
+      title: 'Verification Submitted',
+      content: 'Your verification application is pending administrator review.',
+      action_href: '/settings',
+    });
+
+    return NextResponse.json({ ok: true, status: 'PENDING', newBalance });
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Verification failed.' }, { status: 500 });
+    return NextResponse.json({ error: err?.message || 'Verification failed' }, { status: 500 });
   }
 }

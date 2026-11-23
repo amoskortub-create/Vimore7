@@ -1,75 +1,130 @@
-import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDatabases, getAdminUsers, DATABASE_ID } from '@/lib/appwrite-server';
-import { getSessionUser } from '@/lib/session';
-
-const COL_USERS = 'users';
+import { Query, ID } from 'node-appwrite';
+import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
+import { COL } from '@/lib/appwrite';
+import { getAuthenticatedProfile } from '@/lib/server-helpers';
 
 export async function POST(req: NextRequest) {
   try {
-    // Verify the caller is an authenticated Appwrite user
-    const sessionUser = await getSessionUser(req);
-    if (!sessionUser) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const session = await getAuthenticatedProfile(req);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized', code: 401 }, { status: 401 });
     }
 
-    const userId = sessionUser.userId;
     const db = getAdminDatabases();
-
-    // Idempotent: if the profile document already exists, return it
-    try {
-      const existing = await db.getDocument(DATABASE_ID, COL_USERS, userId);
-      return NextResponse.json({ success: true, role: existing.role, existing: true });
-    } catch {
-      // Document doesn't exist yet — continue to create it
+    if (session.profileDoc) {
+      return NextResponse.json({
+        ok: true,
+        role: String(session.profileDoc.role || 'USER'),
+        profileDoc: session.profileDoc,
+      });
     }
 
-    const body = await req.json();
-    const {
-      name, username, email, phone, nationality, dob, gender,
-      referralCode,
-    } = body;
+    const body = await req.json().catch(() => ({}));
+    const email = String(body.email || session.authUser.email || '').trim().toLowerCase();
+    const emailLocal = (email.split('@')[0] || 'user')
+      .toLowerCase()
+      .replace(/[^a-z0-9._]/g, '');
 
-    const bootstrapAdminId = process.env.SUPER_ADMIN_USER_ID?.trim();
-    const assignedRole = bootstrapAdminId === userId ? 'SUPER' : 'USER';
+    let username = String(body.username || emailLocal || 'user')
+      .toLowerCase()
+      .replace(/[^a-z0-9._]/g, '')
+      .slice(0, 28);
+    if (!username) username = `user_${session.authUser.$id.slice(0, 8)}`;
 
-    const docData: Record<string, any> = {
-      name,
+    const existingUsername = await db.listDocuments(DATABASE_ID, COL.USERS, [
+      Query.equal('username', username),
+      Query.limit(1),
+    ]);
+    if (
+      existingUsername.documents.length > 0 &&
+      existingUsername.documents[0].$id !== session.authUser.$id
+    ) {
+      if (emailLocal && emailLocal !== username) {
+        const alt = await db.listDocuments(DATABASE_ID, COL.USERS, [
+          Query.equal('username', emailLocal),
+          Query.limit(1),
+        ]);
+        username =
+          alt.documents.length === 0
+            ? emailLocal
+            : `${username.slice(0, 20)}.${session.authUser.$id.slice(-4)}`;
+      } else {
+        username = `${username.slice(0, 20)}.${session.authUser.$id.slice(-4)}`;
+      }
+    }
+
+    const referralCode =
+      String(body.referralCode || body.referral_code || '').trim() ||
+      `VM${username.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)}${Math.random()
+        .toString(36)
+        .slice(2, 5)
+        .toUpperCase()}`;
+
+    const now = new Date().toISOString();
+    const phone = body.phone ? String(body.phone).trim() : '';
+
+    const profileData: Record<string, any> = {
+      name: String(body.name || session.authUser.name || username).trim(),
       username,
       email,
-      bio: '',
-      category: '',
-      is_verified: false,
-      has_ever_been_verified: false,
+      ...(phone ? { phone } : {}),
+      nationality: String(body.nationality || '').trim(),
+      date_of_birth: String(body.dob || body.date_of_birth || '').trim(),
+      gender: String(body.gender || '').trim(),
+      referral_code: referralCode,
+      referral_count: 0,
+      role: 'USER',
+      diamond_balance: 0,
+      credit_balance: 0,
+      gold_balance: 0,
+      star_balance: 0,
       followers_count: 0,
       following_count: 0,
       friends_count: 0,
       posts_count: 0,
-      gold_balance: 0,
-      diamond_balance: 0,
-      credit_balance: 0,
-      star_balance: 0,
-      role: assignedRole,
-      join_date: new Date().toISOString(),
-      nationality: nationality || '',
-      date_of_birth: dob || '',
-      gender: gender || '',
-      referral_code: referralCode || '',
-      referral_count: 0,
-      language: 'en',
+      is_verified: false,
+      has_ever_been_verified: false,
+      is_online: true,
+      last_seen_at: now,
+      join_date: now,
     };
 
-    if (phone) {
-      docData.phone = phone.replace(/[\s\-().]/g, '');
+    const profileDoc = await db.createDocument(
+      DATABASE_ID,
+      COL.USERS,
+      session.authUser.$id,
+      profileData
+    );
+
+    const referredByCode = String(body.referredBy || '').trim();
+    if (referredByCode) {
+      try {
+        const referrers = await db.listDocuments(DATABASE_ID, COL.USERS, [
+          Query.equal('username', referredByCode.replace(/^@/, '')),
+          Query.limit(1),
+        ]);
+        if (referrers.documents[0]) {
+          await db.createDocument(DATABASE_ID, COL.REFERRALS, ID.unique(), {
+            referrer_id: referrers.documents[0].$id,
+            referee_id: session.authUser.$id,
+            referral_code: referralCode,
+            status: 'COMPLETED',
+          });
+        }
+      } catch {
+        // non-fatal
+      }
     }
 
-    await db.createDocument(DATABASE_ID, COL_USERS, userId, docData);
-
-    return NextResponse.json({ success: true, role: assignedRole });
+    return NextResponse.json({
+      ok: true,
+      role: 'USER',
+      profileDoc,
+    });
   } catch (err: any) {
-    console.error('[create-profile]', err);
     return NextResponse.json(
-      { error: err?.message || 'Failed to create user profile.' },
+      { error: err?.message || 'Profile creation failed.', code: Number(err?.code) || 500 },
       { status: 500 }
     );
   }

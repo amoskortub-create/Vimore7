@@ -1,31 +1,42 @@
-import { NextResponse } from 'next/server';
-import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { generateUSSD, isValidOrangeMoneyNumber } from '@/lib/ld-monetization';
+import { NextRequest, NextResponse } from 'next/server';
 import { Query } from 'node-appwrite';
+import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
+import { COL } from '@/lib/appwrite';
+import { generateUSSD } from '@/lib/ld-monetization';
+import { getAuthenticatedProfile } from '@/lib/server-helpers';
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const creatorUserId = String(body?.creatorUserId || '');
-    const amountLD = Number(body?.amountLD || 0);
-    if (!creatorUserId || !Number.isInteger(amountLD) || amountLD < 1) {
-      return NextResponse.json({ error: 'creatorUserId and a positive integer amountLD are required.' }, { status: 400 });
+    const session = await getAuthenticatedProfile(req);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const accounts = await getAdminDatabases().listDocuments(DATABASE_ID, 'creator_orange_money_accounts', [
-      Query.equal('userId', creatorUserId),
-      Query.equal('isVerified', true),
+    const body = await req.json().catch(() => ({}));
+    const creatorUserId = String(body.creatorUserId || '').trim();
+    const amountLD = Number(body.amountLD || 0);
+
+    if (!creatorUserId || amountLD <= 0) {
+      return NextResponse.json({ error: 'creatorUserId and positive amountLD required' }, { status: 400 });
+    }
+
+    const db = getAdminDatabases();
+    const accounts = await db.listDocuments(DATABASE_ID, COL.CREATOR_ORANGE_MONEY_ACCOUNTS, [
+      Query.equal('user_id', creatorUserId),
       Query.limit(1),
     ]);
-    const orangeMoneyNumber = String(accounts.documents[0]?.orangeMoneyNumber || '');
-
-    if (!isValidOrangeMoneyNumber(orangeMoneyNumber)) {
-      return NextResponse.json({ error: 'This creator has no verified Orange Money account.' }, { status: 404 });
+    const account = accounts.documents[0];
+    if (!account?.orange_money_number) {
+      return NextResponse.json(
+        { error: 'Creator has not configured an Orange Money payout number.' },
+        { status: 404 }
+      );
     }
 
-    const code = generateUSSD(orangeMoneyNumber, amountLD);
-    return NextResponse.json({ ussd: code, dialerUri: `tel:${code.replace('#', '%23')}`, amountLD });
-  } catch (error: any) {
-    return NextResponse.json({ error: error?.message || 'Could not generate USSD code.' }, { status: 400 });
+    const ussd = generateUSSD(account.orange_money_number, amountLD);
+    const dialerUri = `tel:${encodeURIComponent(ussd)}`;
+    return NextResponse.json({ ok: true, ussd, dialerUri });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message || 'USSD generation failed' }, { status: 500 });
   }
 }

@@ -1,145 +1,185 @@
-import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionCookieExpiresAt, getSessionCookieMaxAge } from '@/lib/session-cookie';
 import { Query } from 'node-appwrite';
-import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
+import { DATABASE_ID, getAdminDatabases, getAdminUsers } from '@/lib/appwrite-server';
+import { COL } from '@/lib/appwrite';
+import {
+  APPWRITE_ENDPOINT,
+  APPWRITE_PROJECT_ID,
+  extractSessionCookie,
+  getClientIp,
+  logSecurityEvent,
+} from '@/lib/server-helpers';
 
-const ENDPOINT = (
-  process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || 'https://appwrite.mediatechliberia.online/v1'
-).replace(/\/$/, '');
-const PROJECT_ID = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || 'vimore123';
+function buildPhoneCandidates(raw: string): string[] {
+  const trimmed = raw.trim();
+  const compact = trimmed.replace(/[\s\-()]/g, '');
+  const digitsOnly = compact.replace(/^\+/, '');
+  const candidates = new Set<string>([trimmed, compact, digitsOnly]);
 
-/**
- * Server-side login — proxies the credential check directly to Appwrite's
- * REST API so it is a server-to-server call with no CORS / platform-domain
- * restrictions. The client SDK path suffers from "general_unauthorized_scope"
- * when the Replit preview domain is not registered as an Appwrite platform.
- *
- * Appwrite 1.6 no longer returns the session secret in the JSON body when
- * called server-to-server. Instead it sets a Set-Cookie header whose value is
- * a base64-encoded JSON { id, secret }. We extract that cookie value and
- * return it as `secret` so the client can store it in cookieFallback and send
- * it back as X-Appwrite-Session on every authenticated API call.
- */
+  if (compact.startsWith('+')) {
+    candidates.add(compact.slice(1));
+  } else if (digitsOnly.length >= 6) {
+    candidates.add(`+${digitsOnly}`);
+  }
 
-/**
- * Extract the Appwrite session cookie value from a Set-Cookie header string.
- * The cookie value is a base64-encoded JSON { id, secret } that Appwrite
- * accepts as X-Appwrite-Session for subsequent requests.
- */
-function getSafeDiagnostic(err: any): { code: number | null; type: string | null } {
-  const code = Number.isInteger(err?.code) ? err.code : null;
-  const type = typeof err?.type === 'string' && /^[a-z0-9_]{1,64}$/.test(err.type) ? err.type : null;
-  return { code, type };
+  // Liberian (+231) local <-> E.164 variants (e.g. 0778451835 <-> +231778451835 <-> 778451835)
+  if (digitsOnly.startsWith('0') && digitsOnly.length >= 9) {
+    const local = digitsOnly.slice(1);
+    candidates.add(local);
+    candidates.add(`231${local}`);
+    candidates.add(`+231${local}`);
+  } else if (digitsOnly.startsWith('231') && digitsOnly.length >= 11) {
+    const local = digitsOnly.slice(3);
+    candidates.add(`0${local}`);
+    candidates.add(local);
+    candidates.add(`+${digitsOnly}`);
+  } else if (/^[578]\d{7,8}$/.test(digitsOnly)) {
+    candidates.add(`0${digitsOnly}`);
+    candidates.add(`231${digitsOnly}`);
+    candidates.add(`+231${digitsOnly}`);
+  }
+
+  return Array.from(candidates).filter(Boolean);
 }
 
-function extractSessionCookie(setCookieHeader: string | null, projectId: string): string {
-  if (!setCookieHeader) return '';
-  const pattern = new RegExp(`a_session_${projectId}=([^;,\\s]+)`);
-  const match = setCookieHeader.match(pattern);
-  return match ? decodeURIComponent(match[1]) : '';
+async function resolveEmailFromIdentifier(identifier: string): Promise<string | null> {
+  const trimmed = identifier.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.includes('@')) {
+    return trimmed.toLowerCase();
+  }
+
+  const db = getAdminDatabases();
+  const looksLikePhone = /^[+\d][\d\s\-()]{5,}$/.test(trimmed);
+
+  if (looksLikePhone) {
+    const candidates = buildPhoneCandidates(trimmed);
+    try {
+      const res = await db.listDocuments(DATABASE_ID, COL.USERS, [
+        Query.equal('phone', candidates),
+        Query.limit(1),
+      ]);
+      if (res.documents[0]?.email) {
+        return String(res.documents[0].email).trim().toLowerCase();
+      }
+    } catch {
+      // Fall through to individual/auth user lookup
+    }
+
+    for (const candidate of candidates) {
+      try {
+        const users = getAdminUsers();
+        const authList = await users.list([Query.equal('phone', candidate), Query.limit(1)]);
+        if (authList.users[0]?.email) {
+          return String(authList.users[0].email).trim().toLowerCase();
+        }
+      } catch {
+        // continue
+      }
+    }
+    return null;
+  }
+
+  const cleanUsername = trimmed.replace(/^@/, '').toLowerCase();
+  try {
+    const res = await db.listDocuments(DATABASE_ID, COL.USERS, [
+      Query.equal('username', cleanUsername),
+      Query.limit(1),
+    ]);
+    if (res.documents[0]?.email) {
+      return String(res.documents[0].email).trim().toLowerCase();
+    }
+  } catch {
+    // ignore
+  }
+
+  return `${cleanUsername}@vimore.cfd`;
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const rawIdentifier = typeof body.identifier === 'string'
-      ? body.identifier.trim()
-      : typeof body.email === 'string' ? body.email.trim() : '';
-    const password = body.password;
+    const body = await req.json().catch(() => ({}));
+    const rawIdentifier = String(body.email || body.identifier || '').trim();
+    const password = String(body.password || '');
 
     if (!rawIdentifier || !password) {
-      return NextResponse.json({ error: 'identifier and password are required' }, { status: 400 });
-    }
-
-    const isPhone = !rawIdentifier.includes('@') && /^[+\d][\d\s\-().]{5,}$/.test(rawIdentifier);
-    let email: string;
-    if (isPhone) {
-      const normalizedPhone = rawIdentifier.replace(/[\s\-().]/g, '');
-      let matchedEmail: unknown;
-      try {
-        const result = await getAdminDatabases().listDocuments(DATABASE_ID, 'users', [
-          Query.equal('phone', normalizedPhone),
-          Query.limit(1),
-        ]);
-        matchedEmail = result.documents[0]?.email;
-      } catch (err: any) {
-        const diagnostic = getSafeDiagnostic(err);
-        console.error('[auth/login:phone-lookup]', diagnostic);
-        return NextResponse.json(
-          { error: 'Phone lookup failed.', diagnostic },
-          { status: 500 },
-        );
-      }
-
-      if (typeof matchedEmail !== 'string' || !matchedEmail.includes('@')) {
-        return NextResponse.json({ error: 'No account found with that phone number.' }, { status: 404 });
-      }
-      email = matchedEmail;
-    } else {
-      email = rawIdentifier.includes('@') ? rawIdentifier : `${rawIdentifier}@vimore.cfd`;
-    }
-
-    // Direct server → Appwrite call — no platform check, no CORS.
-    // Note: do NOT send X-Appwrite-Response-Format: 1.0.0 — that header
-    // causes Appwrite to omit the Set-Cookie header we need to extract the session.
-    const res = await fetch(`${ENDPOINT}/account/sessions/email`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Appwrite-Project': PROJECT_ID,
-      },
-      body: JSON.stringify({ email, password }),
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
       return NextResponse.json(
-        {
-          error: data?.message || 'Invalid credentials.',
-          code: typeof data?.code === 'number' ? data.code : res.status,
-          type: typeof data?.type === 'string' ? data.type : undefined,
-        },
-        { status: res.status }
+        { error: 'ViMore ID, phone number, and password are required.', code: 400 },
+        { status: 400 }
       );
     }
 
-    // Appwrite 1.6+: session secret comes via Set-Cookie, not data.secret.
-    // Fall back to data.secret for forward-compatibility if a future version restores it.
-    const secret =
-      (typeof data.secret === 'string' && data.secret) ||
-      extractSessionCookie(res.headers.get('set-cookie'), PROJECT_ID);
-
-    if (!secret) {
-      console.error('[auth/login] Appwrite returned no session secret');
+    const resolvedEmail = await resolveEmailFromIdentifier(rawIdentifier);
+    if (!resolvedEmail) {
       return NextResponse.json(
-        { error: 'Login succeeded but the session could not be saved. Please try again.' },
-        { status: 502 },
+        {
+          error: 'No account was found with that phone number or ViMore ID.',
+          code: 404,
+          type: 'user_not_found',
+        },
+        { status: 401 }
+      );
+    }
+
+    const res = await fetch(`${APPWRITE_ENDPOINT}/account/sessions/email`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Appwrite-Project': APPWRITE_PROJECT_ID,
+      },
+      body: JSON.stringify({ email: resolvedEmail, password }),
+      cache: 'no-store',
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      await logSecurityEvent({
+        event_type: 'LOGIN_FAILED',
+        severity: 'WARNING',
+        username: resolvedEmail,
+        ip_address: getClientIp(req),
+        user_agent: req.headers.get('user-agent') || '',
+        details: data?.message || `HTTP ${res.status}`,
+      });
+      return NextResponse.json(
+        {
+          error: data?.message || 'Invalid credentials.',
+          code: Number(data?.code) || res.status,
+          type: data?.type,
+        },
+        { status: res.status === 429 ? 429 : 401 }
+      );
+    }
+
+    const cookieSecret = extractSessionCookie(res.headers.get('set-cookie'));
+    const secret = cookieSecret || String(data?.secret || '');
+    const userId = String(data?.userId || '');
+
+    if (!secret || !userId) {
+      return NextResponse.json(
+        { error: 'Appwrite did not return an authenticated session.', code: 500 },
+        { status: 500 }
       );
     }
 
     const response = NextResponse.json({
-      sessionId: data.$id,
+      ok: true,
       secret,
-      userId: data.userId,
-      email,
-      expire: data.expire,
+      userId,
+      email: resolvedEmail,
+      expire: data?.expire,
     });
-    // The Android WebView may recreate its JavaScript context or lose
-    // localStorage between launches. A same-origin cookie is persisted by
-    // Capacitor's cookie store and is also understood by session.ts.
-    response.cookies.set(`a_session_${PROJECT_ID}`, secret, {
+
+    response.cookies.set(`a_session_${APPWRITE_PROJECT_ID}`, secret, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
-      expires: getSessionCookieExpiresAt(),
-      maxAge: getSessionCookieMaxAge(data.expire),
+      maxAge: 60 * 60 * 24 * 30,
     });
+
     return response;
   } catch (err: any) {
-    console.error('[auth/login]', err);
-    return NextResponse.json({ error: 'Login failed. Please try again.' }, { status: 500 });
+    return NextResponse.json({ error: err?.message || 'Login failed.', code: 500 }, { status: 500 });
   }
 }

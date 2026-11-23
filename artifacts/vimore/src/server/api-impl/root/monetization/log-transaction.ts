@@ -1,61 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { getSessionUser } from '@/lib/session';
 import { ID } from 'node-appwrite';
-
-const TRANSACTIONS = 'transactions';
-const TRANSACTION_TYPES = new Set(['gift', 'subscription', 'unlock_post', 'unlock_music']);
-const ITEM_TYPES = new Set(['post', 'music', 'gift_item']);
-const LEGACY_TYPES: Record<string, string> = {
-  gift: 'GIFT_SENT',
-  subscription: 'SUBSCRIPTION',
-  unlock_post: 'POST_UNLOCK',
-  unlock_music: 'MUSIC_UNLOCK',
-};
+import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
+import { COL } from '@/lib/appwrite';
+import { getAuthenticatedProfile } from '@/lib/server-helpers';
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getSessionUser(req);
+    const session = await getAuthenticatedProfile(req);
     if (!session) {
-      return NextResponse.json({ error: 'You must be logged in to log a transaction.' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const receiverUserId = String(body.receiverUserId || '').trim();
+    const transactionType = String(body.transactionType || 'gift').trim();
+    const amountLD = Number(body.amountLD || 0);
+    const itemId = body.itemId ? String(body.itemId) : undefined;
+    const itemType = body.itemType ? String(body.itemType) : undefined;
+
+    if (!receiverUserId || amountLD <= 0) {
+      return NextResponse.json({ error: 'receiverUserId and positive amountLD required' }, { status: 400 });
+    }
+
     const db = getAdminDatabases();
-    const amountLD = Number(body?.amountLD ?? 0);
-    const transactionType = String(body?.transactionType || '');
-    const itemType = body?.itemType ? String(body.itemType) : undefined;
-    const receiverUserId = String(body?.receiverUserId || '');
-    if (!receiverUserId || receiverUserId === session.userId || !TRANSACTION_TYPES.has(transactionType) || !Number.isInteger(amountLD) || amountLD < 1 || (itemType && !ITEM_TYPES.has(itemType))) {
-      return NextResponse.json({ error: 'Invalid transaction payload.' }, { status: 400 });
-    }
+    const doc = await db.createDocument(DATABASE_ID, COL.TRANSACTIONS, ID.unique(), {
+      sender_id: session.authUser.$id,
+      receiver_id: receiverUserId,
+      transaction_type: transactionType,
+      amount_ld: amountLD,
+      item_id: itemId,
+      item_type: itemType,
+      status: 'INITIATED',
+      created_at: new Date().toISOString(),
+    });
 
-    const document = {
-      transactionId: body?.transactionId || ID.unique(),
-      // Keep the authenticated legacy owner field populated. The live
-      // transactions collection requires this field for every document.
-      user_id: session.userId,
-      type: LEGACY_TYPES[transactionType],
-      amount: amountLD,
-      currency: 'LD',
-      description: `${transactionType.replace('_', ' ')} payment`,
-      reference_id: body?.itemId || receiverUserId,
-      from_user_id: session.userId,
-      to_user_id: receiverUserId,
-      senderUserId: session.userId,
-      receiverUserId,
-      transactionType,
-      amountLD,
-      ...(body?.itemId ? { itemId: body.itemId } : {}),
-      ...(itemType ? { itemType } : {}),
-      orangeMoneyRef: body?.orangeMoneyRef || null,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-    };
-
-    const created = await db.createDocument(DATABASE_ID, TRANSACTIONS, document.transactionId, document);
-    return NextResponse.json({ ok: true, transaction: created });
-  } catch (error: any) {
-    return NextResponse.json({ error: error?.message || 'Could not log transaction.' }, { status: 500 });
+    return NextResponse.json({ ok: true, transaction: doc });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message || 'Could not log transaction' }, { status: 500 });
   }
 }

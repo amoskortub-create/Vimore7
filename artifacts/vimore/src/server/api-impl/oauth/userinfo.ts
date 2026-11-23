@@ -1,46 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken, getUserProfile } from '@/lib/oauth-server';
-
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS });
-}
+import { getFileUrl, BUCKET } from '@/lib/appwrite';
 
 export async function GET(req: NextRequest) {
-  const auth = req.headers.get('authorization') || '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  try {
+    const authHeader = req.headers.get('authorization') || '';
+    const token = authHeader.toLowerCase().startsWith('bearer ')
+      ? authHeader.slice(7).trim()
+      : '';
 
-  if (!token) {
-    return NextResponse.json({ error: 'missing_token' }, { status: 401, headers: CORS });
+    if (!token) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    }
+
+    const verified = await verifyAccessToken(token);
+    if (!verified) {
+      return NextResponse.json({ error: 'invalid_token' }, { status: 401 });
+    }
+
+    const profile: any = await getUserProfile(verified.user_id);
+    if (!profile) {
+      return NextResponse.json({ error: 'user_not_found' }, { status: 404 });
+    }
+
+    const scopes = new Set(String(verified.scopes || '').split(' ').filter(Boolean));
+    const picture = profile.avatar_id ? getFileUrl(BUCKET.AVATARS, profile.avatar_id) : '';
+
+    const payload: Record<string, any> = {
+      sub: verified.user_id,
+      name: profile.name || '',
+      username: profile.username || '',
+      picture,
+      verified: Boolean(profile.is_verified),
+    };
+
+    if (scopes.has('email') && profile.email) {
+      payload.email = profile.email;
+    }
+
+    return NextResponse.json(payload);
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message || 'userinfo_error' }, { status: 500 });
   }
-
-  const session = await verifyAccessToken(token);
-  if (!session) {
-    return NextResponse.json({ error: 'invalid_token' }, { status: 401, headers: CORS });
-  }
-
-  const profile = await getUserProfile(session.user_id) as any;
-  const scopes = session.scopes.split(' ');
-
-  const response: Record<string, any> = { sub: session.user_id };
-
-  if (scopes.includes('profile')) {
-    response.name = profile?.name || profile?.displayName || null;
-    response.username = profile?.vimoreId || null;
-    response.picture = profile?.avatar_id
-      ? `${process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || 'https://appwrite.mediatechliberia.online/v1'}/storage/buckets/avatars/files/${profile.avatar_id}/view?project=${process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || 'vimore123'}`
-      : null;
-    response.verified = profile?.is_verified || false;
-  }
-
-  if (scopes.includes('email')) {
-    response.email = profile?.email || null;
-  }
-
-  return NextResponse.json(response, { headers: CORS });
 }

@@ -28,7 +28,9 @@ const csp = [
 ].join('; ');
 
 const nextConfig: NextConfig = {
+  output: 'standalone',
   images: {
+    unoptimized: true,
     formats: ['image/webp', 'image/avif'],
   },
   async rewrites() {

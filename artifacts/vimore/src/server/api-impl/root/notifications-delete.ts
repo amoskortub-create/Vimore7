@@ -1,31 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { getSessionUser } from '@/lib/session';
-
-const NOTIFICATIONS_COLLECTION = 'notifications';
+import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
+import { COL } from '@/lib/appwrite';
+import { getAuthenticatedProfile } from '@/lib/server-helpers';
 
 export async function DELETE(req: NextRequest) {
   try {
-    const session = await getSessionUser(req);
+    const session = await getAuthenticatedProfile(req);
     if (!session) {
-      return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { notificationId } = await req.json().catch(() => ({}));
-    if (!notificationId || typeof notificationId !== 'string') {
-      return NextResponse.json({ error: 'Missing notificationId' }, { status: 400 });
+    const body = await req.json().catch(() => ({}));
+    const notificationId = String(body.notificationId || '').trim();
+    if (!notificationId) {
+      return NextResponse.json({ error: 'notificationId required' }, { status: 400 });
+    }
+
+    if (notificationId.startsWith('notif_')) {
+      return NextResponse.json({ ok: true });
     }
 
     const db = getAdminDatabases();
-    const doc: any = await db.getDocument(DATABASE_ID, NOTIFICATIONS_COLLECTION, notificationId);
-    if (doc.recipient_id !== session.userId && doc.user_id !== session.userId) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    try {
+      const doc = await db.getDocument(DATABASE_ID, COL.NOTIFICATIONS, notificationId);
+      if (doc.user_id !== session.authUser.$id) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+      await db.deleteDocument(DATABASE_ID, COL.NOTIFICATIONS, notificationId);
+    } catch {
+      // already deleted
     }
 
-    await db.deleteDocument(DATABASE_ID, NOTIFICATIONS_COLLECTION, notificationId);
-
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ ok: true });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: err?.message || 'Notification delete failed' }, { status: 500 });
   }
 }

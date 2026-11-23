@@ -1,170 +1,97 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { getSessionUser } from '@/lib/session';
-import { rateLimit } from '@/lib/rate-limit';
-import { ID } from 'node-appwrite';
-
-export const maxDuration = 30;
-
-const COL_WITHDRAWALS = 'withdrawal_requests';
-const COL_USERS = 'users';
-
-const CURRENCY_CONFIG: Record<string, {
-  dbField: string;
-  minAmount: number;
-}> = {
-  DIAMOND: { dbField: 'diamond_balance', minAmount: 10 },
-  GOLD:    { dbField: 'gold_balance',    minAmount: 100 },
-  STAR:    { dbField: 'star_balance',    minAmount: 100 },
-};
-
-/* ─── Idempotency cache: userId:key → result, TTL 24 h ─────────────────── */
-interface IdemEntry { result: object; expiresAt: number }
-const idemStore = new Map<string, IdemEntry>();
-if (typeof setInterval !== 'undefined') {
-  setInterval(() => {
-    const now = Date.now();
-    for (const [k, v] of idemStore) if (now > v.expiresAt) idemStore.delete(k);
-  }, 60 * 60_000);
-}
+import { ID, Query } from 'node-appwrite';
+import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
+import { COL } from '@/lib/appwrite';
+import { getAuthenticatedProfile, getUserBalance } from '@/lib/server-helpers';
 
 export async function POST(req: NextRequest) {
   try {
-    /* ── 1. Rate limit: 5 withdrawal attempts per hour per IP ── */
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'unknown';
-    const rl = rateLimit(`withdraw:${ip}`, 5, 60 * 60_000);
-    if (!rl.allowed) {
-      return NextResponse.json(
-        { error: 'Too many withdrawal requests. Please wait before trying again.' },
-        {
-          status: 429,
-          headers: { 'Retry-After': String(Math.ceil((rl.resetAt - Date.now()) / 1000)) },
-        }
-      );
+    const session = await getAuthenticatedProfile(req);
+    if (!session?.profileDoc) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    /* ── 2. Verify the caller's session — never trust body for identity ── */
-    const session = await getSessionUser(req);
-    if (!session) {
-      return NextResponse.json({ error: 'You must be logged in to withdraw.' }, { status: 401 });
-    }
+    const body = await req.json().catch(() => ({}));
+    const currency = String(body.currency || 'DIAMOND').toUpperCase();
+    const amount = Number(body.amount || 0);
+    const method = String(body.method || 'MOBILE_MONEY').trim();
+    const accountName = String(body.accountName || '').trim();
+    const accountNumber = String(body.accountNumber || '').trim();
+    const payoutAmount = Number(body.payoutAmount || 0);
+    const payoutCurrency = String(body.payoutCurrency || 'USD').trim();
+    const idempotencyKey = String(body.idempotencyKey || '').trim();
 
-    /* ── 3. Parse and validate inputs ── */
-    const body = await req.json();
-    const {
-      currency,
-      amount,
-      method,
-      accountName,
-      accountNumber,
-      payoutAmount,
-      payoutCurrency,
-      idempotencyKey,
-    } = body;
-
-    if (!currency || !amount || !method || !accountNumber) {
+    if (!Number.isFinite(amount) || amount <= 0 || !accountName || !accountNumber) {
       return NextResponse.json(
-        { error: 'currency, amount, method and accountNumber are required.' },
+        { error: 'Valid amount, accountName, and accountNumber are required' },
         { status: 400 }
       );
     }
 
-    const config = CURRENCY_CONFIG[String(currency).toUpperCase()];
-    if (!config) {
-      return NextResponse.json({ error: 'Invalid currency type.' }, { status: 400 });
-    }
+    const db = getAdminDatabases();
 
-    const withdrawAmount = parseFloat(amount);
-    if (!Number.isFinite(withdrawAmount) || withdrawAmount <= 0) {
-      return NextResponse.json({ error: 'amount must be a positive number.' }, { status: 400 });
-    }
-    if (withdrawAmount < config.minAmount) {
-      return NextResponse.json(
-        { error: `Minimum withdrawal is ${config.minAmount} ${currency}.` },
-        { status: 400 }
-      );
-    }
-
-    /* ── 4. Idempotency check ── */
     if (idempotencyKey) {
-      const iKey = `${session.userId}:${idempotencyKey}`;
-      const cached = idemStore.get(iKey);
-      if (cached && Date.now() < cached.expiresAt) {
-        return NextResponse.json(cached.result);
+      try {
+        const dup = await db.listDocuments(DATABASE_ID, COL.WITHDRAWAL_REQUESTS, [
+          Query.equal('idempotency_key', idempotencyKey),
+          Query.limit(1),
+        ]);
+        if (dup.documents[0]) {
+          return NextResponse.json({
+            ok: true,
+            withdrawalId: dup.documents[0].$id,
+            newBalance: getUserBalance(session.profileDoc),
+          });
+        }
+      } catch {
+        // ignore if idempotency_key attribute is not indexed
       }
     }
 
-    /* ── 5. Server-side balance read — never trust client balance ── */
-    const db = getAdminDatabases();
-    let userDoc: any;
-    try {
-      userDoc = await db.getDocument(DATABASE_ID, COL_USERS, session.userId);
-    } catch {
-      return NextResponse.json({ error: 'User not found.' }, { status: 404 });
+    let currentBalance = 0;
+    const updates: Record<string, any> = {};
+
+    if (currency === 'STAR') {
+      currentBalance = Number(session.profileDoc.star_balance || 0);
+      if (currentBalance < amount) {
+        return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
+      }
+      updates.star_balance = currentBalance - amount;
+    } else if (currency === 'GOLD') {
+      currentBalance = Number(session.profileDoc.gold_balance || 0);
+      if (currentBalance < amount) {
+        return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
+      }
+      updates.gold_balance = currentBalance - amount;
+    } else {
+      currentBalance = getUserBalance(session.profileDoc);
+      if (currentBalance < amount) {
+        return NextResponse.json({ error: 'Insufficient Credit balance' }, { status: 400 });
+      }
+      const next = currentBalance - amount;
+      updates.credit_balance = next;
+      updates.diamond_balance = next;
     }
 
-    const currentBalance: number = Number(userDoc[config.dbField] ?? 0);
-    if (currentBalance < withdrawAmount) {
-      return NextResponse.json(
-        {
-          error: `Insufficient balance. You have ${currentBalance} ${currency} but requested ${withdrawAmount}.`,
-        },
-        { status: 400 }
-      );
-    }
+    const newBalance = currentBalance - amount;
+    await db.updateDocument(DATABASE_ID, COL.USERS, session.authUser.$id, updates);
 
-    /* ── 6. Atomically deduct balance then create withdrawal record ── */
-    const newBalance = parseFloat((currentBalance - withdrawAmount).toFixed(8));
-
-    await db.updateDocument(DATABASE_ID, COL_USERS, session.userId, {
-      [config.dbField]: newBalance,
+    const wd = await db.createDocument(DATABASE_ID, COL.WITHDRAWAL_REQUESTS, ID.unique(), {
+      user_id: session.authUser.$id,
+      username: String(session.profileDoc.username || ''),
+      currency,
+      amount,
+      payout_amount: payoutAmount,
+      payout_currency: payoutCurrency,
+      method,
+      account_name: accountName,
+      account_number: accountNumber,
+      status: 'PENDING',
+      ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
     });
 
-    let withdrawalId: string;
-    try {
-      const wd = await db.createDocument(
-        DATABASE_ID,
-        COL_WITHDRAWALS,
-        ID.unique(),
-        {
-          user_id: session.userId,
-          username: userDoc.username || '',
-          account_name: accountName || '',
-          account_number: String(accountNumber),
-          currency: currency.toUpperCase(),
-          amount: withdrawAmount,
-          payout_amount: parseFloat(payoutAmount || 0),
-          payout_currency: payoutCurrency || 'USD',
-          method: method || 'MOBILE_MONEY',
-          payment_method: method || 'MOBILE_MONEY',
-          payment_details: String(accountNumber),
-          status: 'PENDING',
-        }
-      );
-      withdrawalId = wd.$id;
-    } catch (err) {
-      /* Rollback balance deduction if document creation fails */
-      try {
-        await db.updateDocument(DATABASE_ID, COL_USERS, session.userId, {
-          [config.dbField]: currentBalance,
-        });
-      } catch { /* best-effort rollback */ }
-      throw err;
-    }
-
-    const result = { ok: true, withdrawalId, newBalance };
-
-    /* Cache result for idempotency */
-    if (idempotencyKey) {
-      const iKey = `${session.userId}:${idempotencyKey}`;
-      idemStore.set(iKey, { result, expiresAt: Date.now() + 24 * 60 * 60_000 });
-    }
-
-    return NextResponse.json(result);
+    return NextResponse.json({ ok: true, withdrawalId: wd.$id, newBalance });
   } catch (err: any) {
-    return NextResponse.json(
-      { error: err?.message || 'Withdrawal failed. Please try again.' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: err?.message || 'Withdrawal failed' }, { status: 500 });
   }
 }

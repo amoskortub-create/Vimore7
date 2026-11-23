@@ -1,87 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { getSessionUser } from '@/lib/session';
-import { rateLimit, sanitizeIp } from '@/lib/rate-limit';
-import { ID } from 'node-appwrite';
-import { logSecurityEvent, extractRequestMeta } from '@/lib/security-logger';
-
-export const maxDuration = 30;
-
-const ALLOWED_ROLES = new Set(['SUPER', 'MODERATOR']);
-const COL = {
-  USERS: 'users',
-  VERIFICATION_RECORDS: 'verification_records',
-  NOTIFICATIONS: 'notifications',
-  TRANSACTIONS: 'transactions',
-};
+import { COL } from '@/lib/appwrite';
+import { requireAdminUser, safeNotify } from '@/lib/server-helpers';
 
 export async function POST(req: NextRequest) {
-  const meta = extractRequestMeta(req);
   try {
-    const ip = sanitizeIp(req.headers.get('x-forwarded-for')?.split(',')[0].trim());
-    const rl = rateLimit(`verify-approve:${ip}`, 30, 60_000);
-    if (!rl.allowed) {
-      return NextResponse.json({ error: 'Too many requests.' }, { status: 429 });
+    const admin = await requireAdminUser(req, ['SUPER', 'MODERATOR']);
+    if (!admin) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const session = await getSessionUser(req);
-    if (!session) {
-      void logSecurityEvent({ ...meta, event_type: 'ADMIN_AUTH_FAILURE', severity: 'WARN', result: 'blocked', details: 'Unauthenticated verify-approve attempt' });
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    if (!ALLOWED_ROLES.has(session.role ?? '')) {
-      void logSecurityEvent({ ...meta, event_type: 'ADMIN_FORBIDDEN', severity: 'CRITICAL', actor_id: session.userId, actor_role: session.role ?? 'none', result: 'blocked', details: 'Insufficient role for verification approval' });
-      return NextResponse.json({ error: 'Forbidden — admin role required' }, { status: 403 });
-    }
-
-    const { recordId } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const recordId = String(body.recordId || '').trim();
     if (!recordId) {
-      return NextResponse.json({ error: 'recordId is required' }, { status: 400 });
+      return NextResponse.json({ error: 'Missing recordId' }, { status: 400 });
     }
 
     const db = getAdminDatabases();
-
-    let recordDoc: any;
-    try {
-      recordDoc = await db.getDocument(DATABASE_ID, COL.VERIFICATION_RECORDS, recordId);
-    } catch {
-      return NextResponse.json({ error: 'Verification record not found' }, { status: 404 });
+    const record: any = await db.getDocument(DATABASE_ID, COL.VERIFICATION_RECORDS, recordId);
+    const userId = record.user_id;
+    if (!userId) {
+      return NextResponse.json({ error: 'Invalid verification record' }, { status: 400 });
     }
 
-    if (recordDoc.status !== 'PENDING') {
-      return NextResponse.json({ error: `Cannot approve a record with status: ${recordDoc.status}` }, { status: 409 });
-    }
-
-    const userId: string = recordDoc.user_id;
-
-    await db.updateDocument(DATABASE_ID, COL.VERIFICATION_RECORDS, recordId, {
-      status: 'APPROVED',
-      approved_by: session.userId,
-      approved_at: new Date().toISOString(),
-    });
+    const expiryIso = new Date(Date.now() + 365 * 86_400_000).toISOString();
 
     await db.updateDocument(DATABASE_ID, COL.USERS, userId, {
       is_verified: true,
       has_ever_been_verified: true,
+      verification_expiry: expiryIso,
     });
 
-    try {
-      await db.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
-        user_id: userId,
-        from_user_id: session.userId,
-        type: 'SYSTEM',
-        title: 'Verification Approved ✅',
-        content: 'Your creator verification has been approved by our team. You are now a verified creator on ViMore!',
-        message: 'Your creator verification has been approved by our team. You are now a verified creator on ViMore!',
-        is_read: false,
-      });
-    } catch { /* non-fatal */ }
+    await db.updateDocument(DATABASE_ID, COL.VERIFICATION_RECORDS, recordId, {
+      status: 'APPROVED',
+      reviewed_by: admin.authUser.$id,
+      reviewed_at: new Date().toISOString(),
+    });
 
-    void logSecurityEvent({ ...meta, event_type: 'ADMIN_VERIFY_APPROVE', severity: 'INFO', actor_id: session.userId, actor_role: session.role ?? '', target_id: userId, result: 'success', details: `Verification record ${recordId} approved` });
+    await safeNotify({
+      user_id: userId,
+      type: 'SYSTEM',
+      title: 'Verification Approved ✅',
+      content: 'Congratulations! Your ViMore verified badge is now active.',
+    });
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, status: 'APPROVED', verificationExpiry: expiryIso });
   } catch (err: any) {
-    void logSecurityEvent({ ...meta, event_type: 'ADMIN_VERIFY_APPROVE_ERROR', severity: 'ERROR', result: 'failure', details: err?.message ?? 'Unhandled error' });
     return NextResponse.json({ error: err?.message || 'Approval failed' }, { status: 500 });
   }
 }

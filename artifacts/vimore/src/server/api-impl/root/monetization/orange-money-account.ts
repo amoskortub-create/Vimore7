@@ -1,38 +1,85 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Query } from 'node-appwrite';
-import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { getSessionUser } from '@/lib/session';
+import { ID, Query } from 'node-appwrite';
+import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
+import { COL } from '@/lib/appwrite';
 import { isValidOrangeMoneyNumber } from '@/lib/ld-monetization';
-
-const COLLECTION = 'creator_orange_money_accounts';
+import { getAuthenticatedProfile } from '@/lib/server-helpers';
 
 export async function GET(req: NextRequest) {
-  const session = await getSessionUser(req);
-  if (!session) return NextResponse.json({ error: 'You must be logged in.' }, { status: 401 });
-  const result = await getAdminDatabases().listDocuments(DATABASE_ID, COLLECTION, [Query.equal('userId', session.userId), Query.limit(1)]);
-  return NextResponse.json({ account: result.documents[0] || null });
+  try {
+    const session = await getAuthenticatedProfile(req);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const db = getAdminDatabases();
+    const res = await db.listDocuments(DATABASE_ID, COL.CREATOR_ORANGE_MONEY_ACCOUNTS, [
+      Query.equal('user_id', session.authUser.$id),
+      Query.limit(1),
+    ]);
+    const doc = res.documents[0];
+    if (!doc) {
+      return NextResponse.json({ account: null });
+    }
+
+    return NextResponse.json({
+      account: {
+        accountName: doc.account_name || '',
+        orangeMoneyNumber: doc.orange_money_number || '',
+        isVerified: Boolean(doc.is_verified),
+      },
+    });
+  } catch (err: any) {
+    return NextResponse.json({ account: null, error: err?.message });
+  }
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getSessionUser(req);
-  if (!session) return NextResponse.json({ error: 'You must be logged in.' }, { status: 401 });
+  try {
+    const session = await getAuthenticatedProfile(req);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-  const body = await req.json();
-  const orangeMoneyNumber = String(body?.orangeMoneyNumber || '').trim();
-  const accountName = String(body?.accountName || '').trim();
-  if (!accountName || !isValidOrangeMoneyNumber(orangeMoneyNumber)) {
-    return NextResponse.json({ error: 'Enter an account name and a valid Orange Money number.' }, { status: 400 });
+    const body = await req.json().catch(() => ({}));
+    const accountName = String(body.accountName || '').trim();
+    const orangeMoneyNumber = String(body.orangeMoneyNumber || '').trim();
+
+    if (!accountName || !isValidOrangeMoneyNumber(orangeMoneyNumber)) {
+      return NextResponse.json(
+        { error: 'Valid accountName and Liberian Orange Money number (07... or +231...) required.' },
+        { status: 400 }
+      );
+    }
+
+    const db = getAdminDatabases();
+    const res = await db.listDocuments(DATABASE_ID, COL.CREATOR_ORANGE_MONEY_ACCOUNTS, [
+      Query.equal('user_id', session.authUser.$id),
+      Query.limit(1),
+    ]);
+
+    const existing = res.documents[0];
+    const doc = existing
+      ? await db.updateDocument(DATABASE_ID, COL.CREATOR_ORANGE_MONEY_ACCOUNTS, existing.$id, {
+          account_name: accountName,
+          orange_money_number: orangeMoneyNumber,
+        })
+      : await db.createDocument(DATABASE_ID, COL.CREATOR_ORANGE_MONEY_ACCOUNTS, ID.unique(), {
+          user_id: session.authUser.$id,
+          account_name: accountName,
+          orange_money_number: orangeMoneyNumber,
+          is_verified: false,
+        });
+
+    return NextResponse.json({
+      ok: true,
+      account: {
+        accountName: doc.account_name,
+        orangeMoneyNumber: doc.orange_money_number,
+        isVerified: Boolean(doc.is_verified),
+      },
+    });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message || 'Save failed' }, { status: 500 });
   }
-
-  const db = getAdminDatabases();
-  const existing = await db.listDocuments(DATABASE_ID, COLLECTION, [Query.equal('userId', session.userId), Query.limit(1)]);
-  const now = new Date().toISOString();
-  // A valid, owner-submitted number is the account verification step in the
-  // current Orange Money flow. Preserve this state when the account is edited
-  // instead of resetting it to false on every save.
-  const data = { userId: session.userId, orangeMoneyNumber, accountName, isVerified: true, createdAt: existing.documents[0]?.createdAt || now, updatedAt: now };
-  const account = existing.documents[0]
-    ? await db.updateDocument(DATABASE_ID, COLLECTION, existing.documents[0].$id, data)
-    : await db.createDocument(DATABASE_ID, COLLECTION, session.userId, data);
-  return NextResponse.json({ ok: true, account });
 }

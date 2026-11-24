@@ -2,7 +2,6 @@
 
 import { memo, useRef, useEffect, useState, useMemo, useCallback } from "react";
 import { saveCache, loadCache, pinMediaInSW, OFFLINE_KEYS } from "@/lib/offline-cache";
-import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import {
@@ -451,7 +450,7 @@ const ReelItem = memo(function ReelItem({
   index,
   isMuted,
   isActive,
-  shouldAttachVideo,
+  shouldMountVideo,
   onVideoRef,
   onContainerRef,
   onToggleMute,
@@ -463,7 +462,7 @@ const ReelItem = memo(function ReelItem({
   index: number;
   isMuted: boolean;
   isActive: boolean;
-  shouldAttachVideo: boolean;
+  shouldMountVideo: boolean;
   onVideoRef: (index: number, el: HTMLVideoElement | null) => void;
   onContainerRef: (index: number, el: HTMLDivElement | null) => void;
   onToggleMute: () => void;
@@ -508,7 +507,7 @@ const ReelItem = memo(function ReelItem({
 
   useEffect(() => {
     setHasVideoError(false);
-  }, [reel.videoUrl, shouldAttachVideo]);
+  }, [reel.videoUrl, shouldMountVideo]);
 
   const combinedVideoRef = useCallback((el: HTMLVideoElement | null) => {
     setVideoElement(el);
@@ -519,34 +518,29 @@ const ReelItem = memo(function ReelItem({
     onContainerRef(index, el);
   }, [index, onContainerRef]);
 
-  // Release hardware video decoder and buffers whenever this reel leaves the active +/-1 window or unmounts
+  // Release hardware video decoder and buffers whenever this reel is lazy-unmounted or leaves viewport
   useEffect(() => {
+    if (!shouldMountVideo) {
+      setIsPlaying(false);
+      setCurrentTime(0);
+    }
     if (!videoElement) return;
-    if (!shouldAttachVideo) {
+    return () => {
       try {
         videoElement.pause();
         videoElement.removeAttribute('src');
         videoElement.load();
       } catch { /* ignore */ }
-      setIsPlaying(false);
-      setCurrentTime(0);
-    }
-  }, [videoElement, shouldAttachVideo]);
+    };
+  }, [videoElement, shouldMountVideo]);
 
   useEffect(() => {
     return () => {
       if (singleTapTimerRef.current) clearTimeout(singleTapTimerRef.current);
       if (seekTimerRef.current) clearTimeout(seekTimerRef.current);
       if (heartTimerRef.current) clearTimeout(heartTimerRef.current);
-      if (videoElement) {
-        try {
-          videoElement.pause();
-          videoElement.removeAttribute('src');
-          videoElement.load();
-        } catch { /* ignore */ }
-      }
     };
-  }, [videoElement]);
+  }, []);
 
   useEffect(() => {
     if (!videoElement) return;
@@ -556,7 +550,7 @@ const ReelItem = memo(function ReelItem({
     const handlePause = () => setIsPlaying(false);
     const handleError = () => {
       setIsPlaying(false);
-      if (shouldAttachVideo) setHasVideoError(true);
+      if (shouldMountVideo) setHasVideoError(true);
     };
     videoElement.addEventListener('timeupdate', handleTimeUpdate);
     videoElement.addEventListener('loadedmetadata', handleLoadedMetadata);
@@ -570,7 +564,7 @@ const ReelItem = memo(function ReelItem({
       videoElement.removeEventListener('pause', handlePause);
       videoElement.removeEventListener('error', handleError);
     };
-  }, [videoElement, shouldAttachVideo]);
+  }, [videoElement, shouldMountVideo]);
 
   // Mark reel as seen after 2s of active play
   useEffect(() => {
@@ -729,18 +723,20 @@ const ReelItem = memo(function ReelItem({
         />
       )}
 
-      {/* Video — only attached for active +/- 1 reels to prevent mobile MediaCodec / OOM crashes */}
-      <video
-        ref={combinedVideoRef}
-        src={shouldAttachVideo ? reel.videoUrl : undefined}
-        poster={posterUrl}
-        loop
-        playsInline
-        muted={isMuted}
-        preload={isActive ? (netTier === 'lite' ? 'metadata' : 'auto') : 'none'}
-        className="absolute inset-0 w-full h-full object-cover"
-        style={{ filter: videoFilter, transform: videoMirror ? 'scaleX(-1)' : undefined }}
-      />
+      {/* Video — lazy-mounted by IntersectionObserver (active +/-1 window) to free off-screen memory and prevent crashes */}
+      {shouldMountVideo && reel.videoUrl && !hasVideoError ? (
+        <video
+          ref={combinedVideoRef}
+          src={reel.videoUrl}
+          poster={posterUrl}
+          loop
+          playsInline
+          muted={isMuted}
+          preload={isActive ? (netTier === 'lite' ? 'metadata' : 'auto') : 'metadata'}
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ filter: videoFilter, transform: videoMirror ? 'scaleX(-1)' : undefined }}
+        />
+      ) : null}
 
       {hasVideoError && (
         <div className="absolute inset-0 z-[2] flex flex-col items-center justify-center bg-black/70 pointer-events-none px-6 text-center">
@@ -1022,18 +1018,15 @@ const ReelItem = memo(function ReelItem({
 /* ─────────────────────────────── Main Page ─────────────────────────────── */
 
 export default function ReelsPage() {
-  const { campaigns, posts, openCommentHub, fetchComments, friendUsernames, followingUsernames, followingUserIds, settings, isOffline, fetchReels, postCountOverrides } = usePosts();
+  const { currentUser, campaigns, posts, openCommentHub, fetchComments, followingUsernames, followingUserIds, isOffline, fetchReels, postCountOverrides } = usePosts();
   const { tier: pageTier } = useNetwork();
 
   const [cachedReels] = useState<Post[]>(() => loadCache<Post>(OFFLINE_KEYS.REELS));
   const [reelsList, setReelsList] = useState<Post[]>([]);
-  const [reelsPhase, setReelsPhase] = useState<'connections' | 'global'>('connections');
-  const [reelsConnCursor, setReelsConnCursor] = useState<string | null>(null);
-  const [reelsGlobalCursor, setReelsGlobalCursor] = useState<string | null>(null);
   const [hasMoreReels, setHasMoreReels] = useState(true);
   const [isLoadingReels, setIsLoadingReels] = useState(false);
   const isLoadingReelsRef = useRef(false);
-  const reelsPhaseRef = useRef<'connections' | 'global'>('connections');
+  const reelsPhaseRef = useRef<'connections' | 'global'>('global');
   const reelsConnCursorRef = useRef<string | null>(null);
   const reelsGlobalCursorRef = useRef<string | null>(null);
 
@@ -1051,12 +1044,9 @@ export default function ReelsPage() {
     isLoadingReelsRef.current = true;
     setIsLoadingReels(true);
     const connIds = [...followingUserIds].slice(0, 100);
-    fetchReels({ phase: 'connections', connIds, connCursor: null, globalCursor: null })
+    fetchReels({ phase: 'global', connIds, connCursor: null, globalCursor: null })
       .then(({ posts, phase, connCursor, globalCursor, hasMore }) => {
         setReelsList(posts);
-        setReelsPhase(phase);
-        setReelsConnCursor(connCursor);
-        setReelsGlobalCursor(globalCursor);
         setHasMoreReels(hasMore);
         reelsPhaseRef.current = phase;
         reelsConnCursorRef.current = connCursor;
@@ -1081,10 +1071,10 @@ export default function ReelsPage() {
   useEffect(() => {
     if (isOffline || reelsList.length === 0) return;
     const toCache = reelsList.slice(0, 15).map(r => ({
-      $id: r.$id, user: r.user, content: r.content,
+      $id: r.$id, $createdAt: r.$createdAt, user: r.user, content: r.content,
       videoUrl: r.videoUrl, image: r.image,
       likes: r.likes, unlikes: r.unlikes,
-      comments: r.comments, views: r.views, time: r.time,
+      comments: r.comments, shares: r.shares, views: r.views, time: r.time,
     }));
     saveCache(OFFLINE_KEYS.REELS, toCache, 15);
   }, [reelsList, isOffline]);
@@ -1095,78 +1085,86 @@ export default function ReelsPage() {
     return { ...r, ...(ov.likes !== undefined ? { likes: ov.likes } : {}), ...(ov.unlikes !== undefined ? { unlikes: ov.unlikes } : {}), ...(ov.comments !== undefined ? { comments: ov.comments } : {}), ...(ov.shares !== undefined ? { shares: ov.shares } : {}) };
   }), [reelsList, postCountOverrides]);
 
-  /* ── For You feed: unseen first (shuffled) → most viewed (shuffled) → rest ── */
+  const isOwnReel = useCallback((r: Post) =>
+    Boolean(currentUser?.$id && r.user?.$id === currentUser.$id) ||
+    Boolean(currentUser?.username && r.user?.username === currentUser.username),
+  [currentUser?.$id, currentUser?.username]);
+
+  const isFollowingAuthor = useCallback((r: Post) =>
+    !isOwnReel(r) && (
+      followingUsernames.has(r.user?.username) ||
+      followingUserIds.has(r.user?.$id)
+    ),
+  [isOwnReel, followingUsernames, followingUserIds]);
+
+  /* ── For You feed: strictly <10% user's own videos; features popular videos from BOTH following & non-following users ── */
   const forYouSorted = useMemo(() => {
     const seed = sessionSeed.current;
-    const connectionSet = new Set([...(friendUsernames || []), ...(followingUsernames || [])]);
+    const popScore = (r: Post) =>
+      (r.views || 0) + (r.likes || 0) * 5 + (r.comments || 0) * 6 + (r.shares || 0) * 8;
 
-    const unseen = reels.filter(r => !seenIds.has(r.$id));
-    const seen = reels.filter(r => seenIds.has(r.$id));
-
-    // Within unseen: connections get priority via a weighted shuffle
-    // Split unseen into connection-unseen and global-unseen, shuffle each, interleave
-    const unseenConn = unseen.filter(r => connectionSet.has(r.user.username));
-    const unseenGlobal = unseen.filter(r => !connectionSet.has(r.user.username));
-
-    // Sort global unseen by views desc, then shuffle within tiers
-    const unseenGlobalByViews = [...unseenGlobal].sort((a, b) => (b.views || 0) - (a.views || 0));
-    // Split into top-viewed and rest, shuffle each bucket separately
-    const topViewedCount = Math.ceil(unseenGlobalByViews.length / 3);
-    const topViewed = seededShuffle(unseenGlobalByViews.slice(0, topViewedCount), seed + 1);
-    const restViewed = seededShuffle(unseenGlobalByViews.slice(topViewedCount), seed + 2);
-    const shuffledUnseenConn = seededShuffle(unseenConn, seed + 3);
-
-    // Interleave: conn, top-viewed global, rest
-    const unseenOrdered: Post[] = [];
-    let ci = 0, ti = 0, ri = 0;
-    while (ci < shuffledUnseenConn.length || ti < topViewed.length || ri < restViewed.length) {
-      if (ci < shuffledUnseenConn.length) unseenOrdered.push(shuffledUnseenConn[ci++]);
-      if (ti < topViewed.length) unseenOrdered.push(topViewed[ti++]);
-      if (ci < shuffledUnseenConn.length) unseenOrdered.push(shuffledUnseenConn[ci++]);
-      if (ri < restViewed.length) unseenOrdered.push(restViewed[ri++]);
-    }
-
-    // Seen: sort by views desc, shuffle slightly so it's not identical every time
-    const seenByViews = seededShuffle(
-      [...seen].sort((a, b) => (b.views || 0) - (a.views || 0)),
-      seed + 4
-    );
-
-    return [...unseenOrdered, ...seenByViews];
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reels, friendUsernames, followingUsernames]);
-
-  /* ── Following feed: friends/following only, unseen-recent first, then seen-recent, all shuffled ── */
-  const followingSorted = useMemo(() => {
-    const seed = sessionSeed.current;
-    const friendSet = new Set([...(friendUsernames || []), ...(followingUsernames || [])]);
-    const friendReels = reels.filter(r => friendSet.has(r.user.username));
-
-    const unseen = friendReels.filter(r => !seenIds.has(r.$id));
-    const seen = friendReels.filter(r => seenIds.has(r.$id));
-
-    // Most recent first, then shuffle within a small window (groups of 5) to avoid exact same order
-    const sortByRecent = (arr: Post[]) => [...arr].sort((a, b) => {
-      const ta = typeof a.time === 'string' ? new Date(a.time).getTime() : 0;
-      const tb = typeof b.time === 'string' ? new Date(b.time).getTime() : 0;
-      return tb - ta;
-    });
-
-    const shuffleInWindows = (arr: Post[], windowSize: number) => {
+    const shuffleTieredByPopularity = (arr: Post[], offsetSeed: number) => {
+      const sorted = [...arr].sort((a, b) => popScore(b) - popScore(a));
+      const tierSize = Math.max(3, Math.ceil(sorted.length / 3));
       const result: Post[] = [];
-      for (let i = 0; i < arr.length; i += windowSize) {
-        const window = arr.slice(i, i + windowSize);
-        result.push(...seededShuffle(window, seed + i));
+      for (let i = 0; i < sorted.length; i += tierSize) {
+        result.push(...seededShuffle(sorted.slice(i, i + tierSize), seed + offsetSeed + i));
       }
       return result;
     };
 
-    const unseenOrdered = shuffleInWindows(sortByRecent(unseen), 5);
-    const seenOrdered = shuffleInWindows(sortByRecent(seen), 5);
+    const ownReels = seededShuffle(reels.filter(r => isOwnReel(r)), seed + 99);
+    const otherReels = reels.filter(r => !isOwnReel(r));
 
-    return [...unseenOrdered, ...seenOrdered];
+    const unseenOther = otherReels.filter(r => !seenIds.has(r.$id));
+    const seenOther = otherReels.filter(r => seenIds.has(r.$id));
+
+    // Popular videos from both following AND non-following users
+    const followingPopularPool = shuffleTieredByPopularity(
+      unseenOther.filter(r => isFollowingAuthor(r)),
+      11
+    );
+    const nonFollowingPopularPool = shuffleTieredByPopularity(
+      unseenOther.filter(r => !isFollowingAuthor(r)),
+      22
+    );
+
+    const unseenOrdered: Post[] = [];
+    let fi = 0;
+    let ni = 0;
+    while (fi < followingPopularPool.length || ni < nonFollowingPopularPool.length) {
+      if (ni < nonFollowingPopularPool.length) unseenOrdered.push(nonFollowingPopularPool[ni++]);
+      if (fi < followingPopularPool.length) unseenOrdered.push(followingPopularPool[fi++]);
+    }
+
+    const seenOrdered = shuffleTieredByPopularity(seenOther, 33);
+    const baseFeed = [...unseenOrdered, ...seenOrdered];
+
+    // Keep user's own videos strictly < 10% of the For You feed (0 when fewer than 12 other reels)
+    const maxOwnAllowed = baseFeed.length >= 12 ? Math.max(1, Math.floor(baseFeed.length * 0.07)) : 0;
+    const allowedOwn = ownReels.slice(0, maxOwnAllowed);
+    for (let i = 0; i < allowedOwn.length; i++) {
+      const insertAt = Math.min(baseFeed.length, 10 + i * 14);
+      baseFeed.splice(insertAt, 0, allowedOwn[i]);
+    }
+
+    return baseFeed;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reels, friendUsernames, followingUsernames]);
+  }, [reels, isOwnReel, isFollowingAuthor]);
+
+  /* ── Following feed: videos from people the user is following, ranked strictly by latest ── */
+  const followingSorted = useMemo(() => {
+    const getCreatedTime = (p: Post) => {
+      if (p.$createdAt) {
+        const ms = new Date(p.$createdAt).getTime();
+        if (!Number.isNaN(ms)) return ms;
+      }
+      return 0;
+    };
+    return reels
+      .filter(r => isFollowingAuthor(r))
+      .sort((a, b) => getCreatedTime(b) - getCreatedTime(a));
+  }, [reels, isFollowingAuthor]);
 
   /* ── Campaign injection into forYou feed (deterministic per session so live post updates never reshuffle) ── */
   const reelFeed = useMemo<ReelFeedItem[]>(() => {
@@ -1224,6 +1222,7 @@ export default function ReelsPage() {
   }, [forYouSorted, campaigns, posts]);
 
   const [activeIndex, setActiveIndex] = useState(0);
+  const [visibleWindowIndices, setVisibleWindowIndices] = useState<Set<number>>(() => new Set([0, 1]));
   const [isMuted, setIsMuted] = useState(false);
   const isMutedRef = useRef(isMuted);
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
@@ -1232,6 +1231,7 @@ export default function ReelsPage() {
 
   const activeFeed = reelTab === "following" ? followingSorted as ReelFeedItem[] : reelFeed;
 
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
   const containerRefs = useRef<(HTMLDivElement | null)[]>([]);
 
@@ -1243,8 +1243,11 @@ export default function ReelsPage() {
     containerRefs.current[index] = el;
   }, []);
 
+  // IntersectionObserver #1: active playback + pause off-screen videos immediately
+  // IntersectionObserver #2: lazy-mount/unmount video elements within a 1-viewport buffer to free memory
   useEffect(() => {
-    const observer = new IntersectionObserver(
+    const rootEl = scrollContainerRef.current;
+    const playObserver = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
           const target = entry.target as HTMLElement;
@@ -1265,13 +1268,44 @@ export default function ReelsPage() {
           }
         });
       },
-      { threshold: 0.6 }
+      { root: rootEl, threshold: 0.6 }
     );
-    containerRefs.current.forEach((el) => { if (el) observer.observe(el); });
-    return () => observer.disconnect();
+
+    const mountObserver = new IntersectionObserver(
+      (entries) => {
+        setVisibleWindowIndices((prev) => {
+          let changed = false;
+          const next = new Set(prev);
+          entries.forEach((entry) => {
+            const target = entry.target as HTMLElement;
+            const idx = parseInt(target.dataset.index || "0", 10);
+            if (entry.isIntersecting) {
+              if (!next.has(idx)) { next.add(idx); changed = true; }
+            } else if (next.has(idx)) {
+              next.delete(idx);
+              changed = true;
+            }
+          });
+          return changed ? next : prev;
+        });
+      },
+      { root: rootEl, rootMargin: "100% 0px", threshold: 0.01 }
+    );
+
+    containerRefs.current.length = activeFeed.length;
+    videoRefs.current.length = activeFeed.length;
+    containerRefs.current.forEach((el) => {
+      if (!el) return;
+      playObserver.observe(el);
+      mountObserver.observe(el);
+    });
+    return () => {
+      playObserver.disconnect();
+      mountObserver.disconnect();
+    };
   }, [activeFeed.length, pageTier, reelTab]);
 
-  // Ensure newly attached active video starts playing smoothly after scrolling into window
+  // Ensure newly mounted active video starts playing smoothly after entering viewport
   useEffect(() => {
     const video = videoRefs.current[activeIndex];
     if (!video) return;
@@ -1279,7 +1313,7 @@ export default function ReelsPage() {
     if (pageTier !== 'lite' && video.src) {
       video.play().catch(() => {});
     }
-  }, [activeIndex, isMuted, pageTier, activeFeed.length]);
+  }, [activeIndex, isMuted, pageTier, activeFeed.length, visibleWindowIndices]);
 
   // Pin only lightweight poster thumbnails (never full multi-MB videos, which double memory/bandwidth during playback)
   useEffect(() => {
@@ -1301,14 +1335,12 @@ export default function ReelsPage() {
         connIds,
         connCursor: reelsConnCursorRef.current,
         globalCursor: reelsGlobalCursorRef.current,
+        excludeIds: reelsList.map(r => r.$id),
       }).then(({ posts, phase, connCursor, globalCursor, hasMore }) => {
         setReelsList(prev => {
           const existingIds = new Set(prev.map(r => r.$id));
           return [...prev, ...posts.filter(r => !existingIds.has(r.$id))];
         });
-        setReelsPhase(phase);
-        setReelsConnCursor(connCursor);
-        setReelsGlobalCursor(globalCursor);
         setHasMoreReels(hasMore);
         reelsPhaseRef.current = phase;
         reelsConnCursorRef.current = connCursor;
@@ -1318,7 +1350,7 @@ export default function ReelsPage() {
         isLoadingReelsRef.current = false;
       });
     }
-  }, [activeIndex, activeFeed, hasMoreReels, fetchReels, followingUserIds]);
+  }, [activeIndex, activeFeed, hasMoreReels, fetchReels, followingUserIds, reelsList]);
 
   const handleOpenComment = useCallback(
     (reel: ReelFeedItem) => {
@@ -1340,9 +1372,16 @@ export default function ReelsPage() {
   const handleTabSwitch = (tab: "foryou" | "following") => {
     setReelTab(tab);
     setActiveIndex(0);
+    setVisibleWindowIndices(new Set([0, 1]));
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = 0;
+    }
     videoRefs.current.forEach(v => {
       if (!v) return;
-      try { v.pause(); } catch {}
+      try {
+        v.pause();
+        v.currentTime = 0;
+      } catch {}
     });
   };
 
@@ -1436,6 +1475,7 @@ export default function ReelsPage() {
 
       {/* ── Reel scroll container ── */}
       <div
+        ref={scrollContainerRef}
         className="h-full w-full overflow-y-scroll snap-y snap-mandatory"
         style={{ scrollbarWidth: "none" }}
       >
@@ -1444,8 +1484,8 @@ export default function ReelsPage() {
             <div className="w-20 h-20 rounded-3xl bg-white/5 border border-white/10 flex items-center justify-center mb-2">
               <Users className="w-10 h-10 text-white/20" />
             </div>
-            <p className="text-white/60 font-black text-lg">No reels from friends</p>
-            <p className="text-white/30 text-sm">Follow people to see their reels here</p>
+            <p className="text-white/60 font-black text-lg">No reels from following</p>
+            <p className="text-white/30 text-sm">Follow creators to see their latest reels here</p>
           </div>
         ) : (
           <>
@@ -1456,7 +1496,7 @@ export default function ReelsPage() {
                 index={index}
                 isMuted={isMuted}
                 isActive={activeIndex === index}
-                shouldAttachVideo={Math.abs(index - activeIndex) <= 1}
+                shouldMountVideo={visibleWindowIndices.has(index) || Math.abs(index - activeIndex) <= 1}
                 onVideoRef={registerVideoRef}
                 onContainerRef={registerContainerRef}
                 onToggleMute={handleToggleMute}

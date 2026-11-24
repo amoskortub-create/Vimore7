@@ -251,7 +251,7 @@ const MAX_CACHED_POSTS = 30;
 export default function Home() {
   const router = useRouter();
   const { t } = useTranslation();
-  const { posts, campaigns, isLoading, initError, followingUsernames, friendUsernames, seenPostIds, isAuthenticated, isOffline, currentUser, triggerHaptic, loadMoreFeed, hasMoreFeed, isFeedLoading } = usePosts();
+  const { posts, campaigns, isLoading, initError, followingUsernames, followingUserIds, friendUsernames, seenPostIds, isAuthenticated, isOffline, currentUser, triggerHaptic, loadMoreFeed, hasMoreFeed, isFeedLoading } = usePosts();
   const { currentTrack, isExpanded } = useMusic();
   const { newFollowingPostsCount, clearNewPosts, uploadProgress } = useFeedSignal();
   const [isStoryModalOpen, setIsStoryModalOpen] = useState(false);
@@ -268,6 +268,7 @@ export default function Home() {
   const endRef = useRef<HTMLDivElement | null>(null);
   const weights = useRef<Record<string, number>>({});
   const sessionSeen = useRef<Set<string>>(new Set());
+  const feedSessionSeedRef = useRef<number>(Math.floor(Math.random() * 0x7fffffff));
   const isLoadingMoreRef = useRef(false);
   const feedInsertionPositionsRef = useRef<{
     userId: string;
@@ -278,15 +279,22 @@ export default function Home() {
   const feedRelationsRef = useRef<{
     userId: string;
     following: Set<string>;
+    followingIds: Set<string>;
     friends: Set<string>;
-  }>({ userId: '', following: new Set(), friends: new Set() });
+  }>({ userId: '', following: new Set(), followingIds: new Set(), friends: new Set() });
 
-  // Keep the current page's relationship ranking stable while a friend request updates
-  // shared social state; newly fetched feed data will use the latest snapshot after reload.
-  if (!isLoading && currentUser && feedRelationsRef.current.userId !== currentUser.$id) {
+  // Snapshot following/friends once loaded so social graph actions don't abruptly jump visible cards
+  if (
+    !isLoading &&
+    currentUser &&
+    (feedRelationsRef.current.userId !== currentUser.$id ||
+      (feedRelationsRef.current.following.size === 0 && followingUsernames.size > 0) ||
+      (feedRelationsRef.current.followingIds.size === 0 && followingUserIds.size > 0))
+  ) {
     feedRelationsRef.current = {
       userId: currentUser.$id,
       following: new Set(followingUsernames),
+      followingIds: new Set(followingUserIds),
       friends: new Set(friendUsernames),
     };
   }
@@ -326,55 +334,91 @@ export default function Home() {
 
   const shuffledBoostedRegular = useMemo(() => {
     const boosted = posts.filter(p => p.isBoosted && p.type !== 'reel' && !p.isFeedAppend);
-    return [...boosted].sort(() => Math.random() - 0.5);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posts.length]);
+    return seededShuffle(boosted, feedSessionSeedRef.current + 1);
+  }, [posts]);
 
   const shuffledBoostedReels = useMemo(() => {
     const boosted = posts.filter(p => p.isBoosted && p.type === 'reel' && !p.isFeedAppend);
-    return [...boosted].sort(() => Math.random() - 0.5);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posts.length]);
+    return seededShuffle(boosted, feedSessionSeedRef.current + 2);
+  }, [posts]);
 
+  // Regular posts only (excludes ads & boosted posts):
+  // - 80% from people the user is following (4 following : 1 non-following)
+  // - Cap user's own posts so the home feed isn't flooded with own posts
+  // - Random order per session using stable per-post random weights
   const organicSorted = useMemo(() => {
     const regular = posts.filter(p => !p.isBoosted && !p.isFeedAppend);
-    const appendedPosts = posts.filter(p => p.isFeedAppend);
-    regular.forEach(p => { if (!(p.$id in weights.current)) weights.current[p.$id] = Math.random(); });
+    const appendedPosts = posts.filter(p => !p.isBoosted && p.isFeedAppend);
+    const allRegular = [...regular, ...appendedPosts];
+    allRegular.forEach(p => { if (!(p.$id in weights.current)) weights.current[p.$id] = Math.random(); });
 
-    const freshPosts = regular.filter(p => p.time === 'Just now');
+    const stableRandomSort = (arr: any[]) => [...arr].sort((a, b) => weights.current[a.$id] - weights.current[b.$id]);
+
+    const freshPosts = regular.filter(p => p.time === 'Just now').slice(0, 2);
     const freshIds = new Set(freshPosts.map(p => p.$id));
 
-    const stableSort = (arr: any[]) => [...arr].sort((a, b) => weights.current[a.$id] - weights.current[b.$id]);
+    const isOwnPost = (p: any) =>
+      Boolean(currentUser?.$id && p.user?.$id === currentUser.$id) ||
+      Boolean(currentUser?.username && p.user?.username === currentUser.username);
 
-    // Unseen posts from users the current user follows OR is friends with
-    const followingFriendUnseen = regular.filter(p =>
-      !freshIds.has(p.$id) &&
-      (feedRelationsRef.current.following.has(p.user.username) || feedRelationsRef.current.friends.has(p.user.username) || p.user.username === currentUser?.username) &&
-      !sessionSeen.current.has(p.$id)
-    );
-    const followingFriendIds = new Set(followingFriendUnseen.map(p => p.$id));
+    const isFollowedAuthor = (p: any) =>
+      !isOwnPost(p) && (
+        feedRelationsRef.current.following.has(p.user?.username) ||
+        feedRelationsRef.current.followingIds.has(p.user?.$id)
+      );
 
-    // Unseen public posts (not from following/friends)
-    const publicUnseen = regular.filter(p =>
-      !freshIds.has(p.$id) &&
-      !followingFriendIds.has(p.$id) &&
-      !sessionSeen.current.has(p.$id)
-    );
+    const pool = allRegular.filter(p => !freshIds.has(p.$id));
+    const ownRegularPool = stableRandomSort(pool.filter(p => isOwnPost(p)));
+    const otherPool = pool.filter(p => !isOwnPost(p));
 
-    // Already-seen posts (shown last)
-    const seenNodes = regular.filter(p =>
-      !freshIds.has(p.$id) &&
-      sessionSeen.current.has(p.$id)
-    );
+    const followingUnseen = stableRandomSort(otherPool.filter(p => isFollowedAuthor(p) && !sessionSeen.current.has(p.$id)));
+    const nonFollowingUnseen = stableRandomSort(otherPool.filter(p => !isFollowedAuthor(p) && !sessionSeen.current.has(p.$id)));
+    const followingSeen = stableRandomSort(otherPool.filter(p => isFollowedAuthor(p) && sessionSeen.current.has(p.$id)));
+    const nonFollowingSeen = stableRandomSort(otherPool.filter(p => !isFollowedAuthor(p) && sessionSeen.current.has(p.$id)));
 
-    return [...freshPosts, ...stableSort(followingFriendUnseen), ...stableSort(publicUnseen), ...stableSort(seenNodes), ...appendedPosts];
-  }, [posts, currentUser?.$id, currentUser?.username, isLoading]);
+    const mix80_20 = (followingArr: any[], otherArr: any[]) => {
+      if (followingArr.length === 0) return otherArr;
+      if (otherArr.length === 0) return followingArr;
+      const mixed: any[] = [];
+      let fi = 0;
+      let oi = 0;
+      while (fi < followingArr.length && oi < otherArr.length) {
+        // 4 following + 1 non-following = 80% following / 20% non-following
+        for (let k = 0; k < 4 && fi < followingArr.length; k++) {
+          mixed.push(followingArr[fi++]);
+        }
+        if (oi < otherArr.length) {
+          mixed.push(otherArr[oi++]);
+        }
+      }
+      while (fi < followingArr.length) mixed.push(followingArr[fi++]);
+      while (oi < otherArr.length) mixed.push(otherArr[oi++]);
+      return mixed;
+    };
+
+    const combined = [
+      ...freshPosts,
+      ...mix80_20(followingUnseen, nonFollowingUnseen),
+      ...mix80_20(followingSeen, nonFollowingSeen),
+    ];
+
+    // Don't show many of the user's own posts: include at most 1-2 sparsely in the feed
+    const ownToKeep = freshPosts.length > 0 ? [] : ownRegularPool.slice(0, 2);
+    if (ownToKeep.length > 0) {
+      if (combined.length >= 10) combined.splice(10, 0, ownToKeep[0]);
+      else combined.push(ownToKeep[0]);
+      if (ownToKeep.length > 1 && combined.length >= 24) {
+        combined.splice(24, 0, ownToKeep[1]);
+      }
+    }
+
+    return combined;
+  }, [posts, currentUser?.$id, currentUser?.username, followingUsernames.size, followingUserIds.size]);
 
   const shuffledFeedCampaigns = useMemo(() => {
     const active = campaigns.filter((c: any) => c.is_active && c.placement === 'feed');
-    return [...active].sort(() => Math.random() - 0.5);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaigns.length]);
+    return seededShuffle(active, feedSessionSeedRef.current + 3);
+  }, [campaigns]);
 
   const feedItems = useMemo(() => {
     if (posts.length === 0) return [];
@@ -389,16 +433,21 @@ export default function Home() {
     let musicStripInserted = false;
     let storeStripInserted = false;
 
-    // Keep insertions in fixed positions so feed updates do not move existing cards.
+    const seededUnit = (slot: number) => {
+      const h = ((feedSessionSeedRef.current ^ (slot * 2654435761)) >>> 0) % 1000;
+      return h / 1000;
+    };
+
+    // Keep insertions in fixed random positions so feed updates do not move existing cards.
     const userId = currentUser?.$id || '';
     if (!feedInsertionPositionsRef.current || feedInsertionPositionsRef.current.userId !== userId) {
       const totalLen = Math.max(organicSorted.length, 30);
       const third = Math.floor(totalLen / 3);
       feedInsertionPositionsRef.current = {
         userId,
-        storePos: 3 + Math.floor(Math.random() * Math.max(1, third - 3)),
-        suggestPos: third + Math.floor(Math.random() * Math.max(1, third)),
-        musicPos: third * 2 + Math.floor(Math.random() * Math.max(1, third)),
+        storePos: 3 + Math.floor(seededUnit(101) * Math.max(1, third - 3)),
+        suggestPos: third + Math.floor(seededUnit(102) * Math.max(1, third)),
+        musicPos: third * 2 + Math.floor(seededUnit(103) * Math.max(1, third)),
       };
     }
     const { storePos, suggestPos, musicPos } = feedInsertionPositionsRef.current;
@@ -423,23 +472,22 @@ export default function Home() {
         musicStripInserted = true;
       }
 
-      // After every 3 organic items → campaign ad (randomized order)
+      // Ads come in their same randomized slots (not subject to 80% following filter)
       if (totalOrganicCount % 3 === 0 && shuffledFeedCampaigns.length > 0) {
         result.push({ type: 'campaign', data: shuffledFeedCampaigns[campaignIdx % shuffledFeedCampaigns.length] });
         campaignIdx++;
       }
 
-      // Random ~1-in-5 chance to inject a boosted reel after at least 3 organic reels
+      // Boosted posts/reels come in their same stable random positions
       if (isReel) {
         organicReelCount++;
-        if (organicReelCount > 2 && shuffledBoostedReels.length > 0 && Math.random() < 0.2) {
+        if (organicReelCount > 2 && shuffledBoostedReels.length > 0 && seededUnit(1000 + i) < 0.2) {
           result.push({ type: 'boost', data: shuffledBoostedReels[boostedReelIdx % shuffledBoostedReels.length] });
           boostedReelIdx++;
         }
       } else {
-        // Random ~1-in-5 chance to inject a boosted post after at least 3 organic posts
         organicPostCount++;
-        if (organicPostCount > 2 && shuffledBoostedRegular.length > 0 && Math.random() < 0.2) {
+        if (organicPostCount > 2 && shuffledBoostedRegular.length > 0 && seededUnit(2000 + i) < 0.2) {
           result.push({ type: 'boost', data: shuffledBoostedRegular[boostedRegularIdx % shuffledBoostedRegular.length] });
           boostedRegularIdx++;
         }
@@ -451,7 +499,7 @@ export default function Home() {
     result.push({ type: 'load-trigger', id: 'load-trigger-end' });
 
     return result;
-  }, [organicSorted, posts, shuffledFeedCampaigns, shuffledBoostedRegular, shuffledBoostedReels, currentUser?.$id]);
+  }, [organicSorted, posts.length, shuffledFeedCampaigns, shuffledBoostedRegular, shuffledBoostedReels, currentUser?.$id]);
 
   // Preload the next batch when the end sentinel is close to the viewport.
   useEffect(() => {

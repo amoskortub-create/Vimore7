@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useState, useMemo, useCallback } from "react";
+import { memo, useRef, useEffect, useState, useMemo, useCallback } from "react";
 import { saveCache, loadCache, pinMediaInSW, OFFLINE_KEYS } from "@/lib/offline-cache";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
@@ -139,7 +139,7 @@ function MessagePickerSheet({
     await sendChatMessage(recipientId, {
       type: "video",
       mediaUrl: reel.videoUrl,
-      text: `Shared a reel from @${reel.user.username}: ${reel.content.slice(0, 80)}${reel.content.length > 80 ? "..." : ""}`,
+      text: `Shared a reel from @${reel.user?.username || 'vimore'}: ${(reel.content || '').slice(0, 80)}${(reel.content || '').length > 80 ? "..." : ""}`,
     });
     incrementShareCount?.(reel.$id);
     setSentTo((prev) => new Set(prev).add(recipientId));
@@ -186,11 +186,11 @@ function MessagePickerSheet({
               >
                 <Avatar className="h-11 w-11 border-2 border-white/10 flex-shrink-0">
                   <AvatarImage src={conn.avatar} />
-                  <AvatarFallback>{conn.name[0]}</AvatarFallback>
+                  <AvatarFallback>{conn.name?.[0] || 'V'}</AvatarFallback>
                 </Avatar>
                 <div className="flex-1 min-w-0">
-                  <p className="text-white font-bold text-sm truncate">{conn.name}</p>
-                  <p className="text-white/50 text-xs truncate">@{conn.username}</p>
+                  <p className="text-white font-bold text-sm truncate">{conn.name || 'User'}</p>
+                  <p className="text-white/50 text-xs truncate">@{conn.username || ''}</p>
                 </div>
                 <div
                   className={cn(
@@ -246,9 +246,9 @@ function ReelShareSheet({ reel, onClose }: { reel: Post; onClose: () => void }) 
     addStory({
       type: "video",
       videoUrl: reel.videoUrl,
-      image: reel.image || reel.user.avatar,
+      image: reel.image || reel.user?.avatar || "",
       background: "bg-black",
-      textOverlays: [{ text: `@${reel.user.username}`, x: 50, y: 85, color: "#FFFFFF" }],
+      textOverlays: [{ text: `@${reel.user?.username || 'vimore'}`, x: 50, y: 85, color: "#FFFFFF" }],
     });
     incrementShareCount?.(reel.$id);
     toast({ title: "Added to your story" });
@@ -286,7 +286,7 @@ function ReelShareSheet({ reel, onClose }: { reel: Post; onClose: () => void }) 
   const handleExternalShare = (platform: (typeof SHARE_PLATFORMS)[0]) => {
     triggerHaptic(15);
     const link = `https://vimore.cfd/reels/${reel.$id}`;
-    const text = encodeURIComponent(`Check this out on ViMore: ${reel.content.slice(0, 60)}`);
+    const text = encodeURIComponent(`Check this out on ViMore: ${(reel.content || '').slice(0, 60)}`);
     const encodedLink = encodeURIComponent(link);
     const urls: Record<string, string> = {
       facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodedLink}`,
@@ -346,8 +346,8 @@ function ReelShareSheet({ reel, onClose }: { reel: Post; onClose: () => void }) 
             </div>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-white font-bold text-sm">@{reel.user.username}</p>
-            <p className="text-white/50 text-xs mt-0.5 line-clamp-2">{reel.content}</p>
+            <p className="text-white font-bold text-sm">@{reel.user?.username || 'vimore'}</p>
+            <p className="text-white/50 text-xs mt-0.5 line-clamp-2">{reel.content || ''}</p>
           </div>
         </div>
         <div className="px-4 pb-3">
@@ -446,11 +446,12 @@ function ActionBtn({
   );
 }
 
-function ReelItem({
+const ReelItem = memo(function ReelItem({
   reel,
   index,
   isMuted,
   isActive,
+  shouldAttachVideo,
   onVideoRef,
   onContainerRef,
   onToggleMute,
@@ -462,14 +463,14 @@ function ReelItem({
   index: number;
   isMuted: boolean;
   isActive: boolean;
-  onVideoRef: (el: HTMLVideoElement | null) => void;
-  onContainerRef: (el: HTMLDivElement | null) => void;
+  shouldAttachVideo: boolean;
+  onVideoRef: (index: number, el: HTMLVideoElement | null) => void;
+  onContainerRef: (index: number, el: HTMLDivElement | null) => void;
   onToggleMute: () => void;
-  onOpenShare: () => void;
-  onOpenComment: () => void;
+  onOpenShare: (reel: ReelFeedItem) => void;
+  onOpenComment: (reel: ReelFeedItem) => void;
   onMarkSeen: (id: string) => void;
 }) {
-  const router = useRouter();
   const {
     currentUser,
     isPostLiked,
@@ -486,23 +487,66 @@ function ReelItem({
   const { triggerHaptic } = useMusic();
   const { toast } = useToast();
   const [showHeart, setShowHeart] = useState(false);
-  // showSoundSheet removed — "use this sound" feature deleted
   const [isDownloading, setIsDownloading] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(() => netTier !== 'lite');
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [hasVideoError, setHasVideoError] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [seekFlash, setSeekFlash] = useState<'left' | 'right' | null>(null);
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
-  const [localLikes, setLocalLikes] = useState(reel.likes);
+  const [localLikes, setLocalLikes] = useState(reel.likes || 0);
   const lastTapRef = useRef(0);
   const singleTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const seekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const heartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const soundAudioRef = useRef<HTMLAudioElement | null>(null);
   const seenMarkedRef = useRef(false);
 
+  useEffect(() => {
+    setLocalLikes(reel.likes || 0);
+  }, [reel.likes]);
+
+  useEffect(() => {
+    setHasVideoError(false);
+  }, [reel.videoUrl, shouldAttachVideo]);
+
   const combinedVideoRef = useCallback((el: HTMLVideoElement | null) => {
     setVideoElement(el);
-    onVideoRef(el);
-  }, [onVideoRef]);
+    onVideoRef(index, el);
+  }, [index, onVideoRef]);
+
+  const combinedContainerRef = useCallback((el: HTMLDivElement | null) => {
+    onContainerRef(index, el);
+  }, [index, onContainerRef]);
+
+  // Release hardware video decoder and buffers whenever this reel leaves the active +/-1 window or unmounts
+  useEffect(() => {
+    if (!videoElement) return;
+    if (!shouldAttachVideo) {
+      try {
+        videoElement.pause();
+        videoElement.removeAttribute('src');
+        videoElement.load();
+      } catch { /* ignore */ }
+      setIsPlaying(false);
+      setCurrentTime(0);
+    }
+  }, [videoElement, shouldAttachVideo]);
+
+  useEffect(() => {
+    return () => {
+      if (singleTapTimerRef.current) clearTimeout(singleTapTimerRef.current);
+      if (seekTimerRef.current) clearTimeout(seekTimerRef.current);
+      if (heartTimerRef.current) clearTimeout(heartTimerRef.current);
+      if (videoElement) {
+        try {
+          videoElement.pause();
+          videoElement.removeAttribute('src');
+          videoElement.load();
+        } catch { /* ignore */ }
+      }
+    };
+  }, [videoElement]);
 
   useEffect(() => {
     if (!videoElement) return;
@@ -510,17 +554,23 @@ function ReelItem({
     const handleLoadedMetadata = () => setDuration(videoElement.duration || 0);
     const handlePlay = () => setIsPlaying(true);
     const handlePause = () => setIsPlaying(false);
+    const handleError = () => {
+      setIsPlaying(false);
+      if (shouldAttachVideo) setHasVideoError(true);
+    };
     videoElement.addEventListener('timeupdate', handleTimeUpdate);
     videoElement.addEventListener('loadedmetadata', handleLoadedMetadata);
     videoElement.addEventListener('play', handlePlay);
     videoElement.addEventListener('pause', handlePause);
+    videoElement.addEventListener('error', handleError);
     return () => {
       videoElement.removeEventListener('timeupdate', handleTimeUpdate);
       videoElement.removeEventListener('loadedmetadata', handleLoadedMetadata);
       videoElement.removeEventListener('play', handlePlay);
       videoElement.removeEventListener('pause', handlePause);
+      videoElement.removeEventListener('error', handleError);
     };
-  }, [videoElement]);
+  }, [videoElement, shouldAttachVideo]);
 
   // Mark reel as seen after 2s of active play
   useEffect(() => {
@@ -532,9 +582,11 @@ function ReelItem({
     return () => clearTimeout(timer);
   }, [isActive, reel.$id, reel.isCampaignReel, onMarkSeen]);
 
+  const username = reel.user?.username || 'vimore';
+  const displayName = reel.user?.name || 'ViMore Creator';
   const isLiked = isPostLiked(reel.$id);
-  const isOwn = currentUser?.username === reel.user.username;
-  const isFollowing = followingUsernames.has(reel.user.username);
+  const isOwn = currentUser?.username === username;
+  const isFollowing = followingUsernames.has(username);
   const reelData = reel as unknown as Record<string, unknown>;
   const soundId = reelData.sound_id as string | undefined;
   const soundTitle = reelData.sound_title as string | undefined;
@@ -562,15 +614,17 @@ function ReelItem({
       audio.loop = true;
       audio.play().catch(() => {});
       soundAudioRef.current = audio;
-    } else {
-      if (soundAudioRef.current) {
-        soundAudioRef.current.pause();
-        soundAudioRef.current = null;
-      }
+    } else if (soundAudioRef.current) {
+      soundAudioRef.current.pause();
+      soundAudioRef.current.removeAttribute('src');
+      soundAudioRef.current.load();
+      soundAudioRef.current = null;
     }
     return () => {
       if (soundAudioRef.current) {
         soundAudioRef.current.pause();
+        soundAudioRef.current.removeAttribute('src');
+        soundAudioRef.current.load();
         soundAudioRef.current = null;
       }
     };
@@ -601,8 +655,8 @@ function ReelItem({
     }
   };
 
-  const isFriendWith = isFriend(reel.user.username);
-  const requestSent = isRequestSent(reel.user.username);
+  const isFriendWith = isFriend(username);
+  const requestSent = isRequestSent(username);
 
   const handleTap = (e: React.MouseEvent) => {
     const now = Date.now();
@@ -618,12 +672,14 @@ function ReelItem({
         triggerHaptic(20);
         if (videoElement) videoElement.currentTime = Math.max(0, videoElement.currentTime - 10);
         setSeekFlash('left');
-        setTimeout(() => setSeekFlash(null), 700);
+        if (seekTimerRef.current) clearTimeout(seekTimerRef.current);
+        seekTimerRef.current = setTimeout(() => setSeekFlash(null), 700);
       } else if (x > width * 0.65) {
         triggerHaptic(20);
         if (videoElement) videoElement.currentTime = Math.min(videoElement.duration || 0, videoElement.currentTime + 10);
         setSeekFlash('right');
-        setTimeout(() => setSeekFlash(null), 700);
+        if (seekTimerRef.current) clearTimeout(seekTimerRef.current);
+        seekTimerRef.current = setTimeout(() => setSeekFlash(null), 700);
       } else {
         triggerHaptic(30);
         if (!isLiked) {
@@ -631,7 +687,8 @@ function ReelItem({
           toggleLikePost(reel.$id);
         }
         setShowHeart(true);
-        setTimeout(() => setShowHeart(false), 900);
+        if (heartTimerRef.current) clearTimeout(heartTimerRef.current);
+        heartTimerRef.current = setTimeout(() => setShowHeart(false), 900);
       }
       lastTapRef.current = 0;
     } else {
@@ -648,31 +705,49 @@ function ReelItem({
 
   const handleFollowToggle = () => {
     triggerHaptic(20);
-    if (requestSent) cancelFriendRequest(reel.user.username);
-    else sendFriendRequest(reel.user.username);
+    if (requestSent) cancelFriendRequest(username);
+    else sendFriendRequest(username);
   };
 
   const fmt = (n: number) => (n >= 1000000 ? `${(n / 1000000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}K` : n.toString());
+  const posterUrl = getAdaptivePreview(reel.image, 'fullscreen', netTier) || reel.image || undefined;
 
   return (
     <div
-      ref={onContainerRef}
+      ref={combinedContainerRef}
       data-index={index}
       className="relative w-full flex-shrink-0 snap-start bg-black overflow-hidden"
       style={{ height: "100svh" }}
     >
-      {/* Video */}
+      {/* Lightweight poster fallback while video is windowed out */}
+      {posterUrl && (
+        <img
+          src={posterUrl}
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+          style={{ filter: videoFilter, transform: videoMirror ? 'scaleX(-1)' : undefined }}
+        />
+      )}
+
+      {/* Video — only attached for active +/- 1 reels to prevent mobile MediaCodec / OOM crashes */}
       <video
         ref={combinedVideoRef}
-        src={reel.videoUrl}
-        poster={getAdaptivePreview(reel.image, 'fullscreen', netTier) || reel.image}
+        src={shouldAttachVideo ? reel.videoUrl : undefined}
+        poster={posterUrl}
         loop
         playsInline
         muted={isMuted}
-        preload="none"
+        preload={isActive ? (netTier === 'lite' ? 'metadata' : 'auto') : 'none'}
         className="absolute inset-0 w-full h-full object-cover"
         style={{ filter: videoFilter, transform: videoMirror ? 'scaleX(-1)' : undefined }}
       />
+
+      {hasVideoError && (
+        <div className="absolute inset-0 z-[2] flex flex-col items-center justify-center bg-black/70 pointer-events-none px-6 text-center">
+          <Film className="w-10 h-10 text-white/40 mb-2" />
+          <p className="text-white/70 text-xs font-bold">Video unavailable right now</p>
+        </div>
+      )}
 
       {/* Vignette */}
       {showVignetteOverlay && (
@@ -750,12 +825,12 @@ function ReelItem({
       <div className="absolute right-3 bottom-28 z-30 flex flex-col items-center gap-3 pointer-events-auto">
         {/* Avatar + follow */}
         <div className="relative mb-1">
-          <Link href={reel.isCampaignReel ? "/" : `/profile/${reel.user.username}`}>
+          <Link href={reel.isCampaignReel ? "/" : `/profile/${username}`}>
             <div className="relative">
               <div className="absolute -inset-0.5 rounded-full bg-gradient-to-br from-primary via-purple-500 to-pink-500 opacity-80" />
               <Avatar className="h-12 w-12 border-2 border-black relative">
-                <AvatarImage src={getAdaptivePreview(reel.user.avatar, 'avatar', netTier) || reel.user.avatar} />
-                <AvatarFallback>{reel.user.name[0]}</AvatarFallback>
+                <AvatarImage src={getAdaptivePreview(reel.user?.avatar, 'avatar', netTier) || reel.user?.avatar} />
+                <AvatarFallback>{displayName[0] || 'V'}</AvatarFallback>
               </Avatar>
             </div>
           </Link>
@@ -792,16 +867,16 @@ function ReelItem({
 
             {/* Comment */}
             <ActionBtn
-              onClick={() => { triggerHaptic(10); onOpenComment(); }}
-              label={fmt(reel.comments)}
+              onClick={() => { triggerHaptic(10); onOpenComment(reel); }}
+              label={fmt(reel.comments || 0)}
             >
               <MessageCircle className="w-6 h-6 text-white" />
             </ActionBtn>
 
             {/* Share */}
             <ActionBtn
-              onClick={() => { triggerHaptic(10); onOpenShare(); }}
-              label={fmt(reel.shares)}
+              onClick={() => { triggerHaptic(10); onOpenShare(reel); }}
+              label={fmt(reel.shares || 0)}
             >
               <Share2 className="w-5 h-5 text-white" />
             </ActionBtn>
@@ -856,19 +931,19 @@ function ReelItem({
         ) : (
           <>
             <Link
-              href={`/profile/${reel.user.username}`}
+              href={`/profile/${username}`}
               className="flex items-center gap-2 mb-2 pointer-events-auto w-fit"
             >
-              <span className="text-white font-black text-sm drop-shadow">{reel.user.name}</span>
-              <span className="text-white/60 text-xs">@{reel.user.username}</span>
-              {reel.user.isVerified && (
+              <span className="text-white font-black text-sm drop-shadow">{displayName}</span>
+              <span className="text-white/60 text-xs">@{username}</span>
+              {reel.user?.isVerified && (
                 <div className="w-4 h-4 bg-primary rounded-full flex items-center justify-center flex-shrink-0">
                   <Check className="w-2.5 h-2.5 text-white" />
                 </div>
               )}
             </Link>
             <p className="text-white/90 text-sm leading-snug line-clamp-2 drop-shadow-sm font-medium">
-              {reel.content}
+              {reel.content || ''}
             </p>
             {/* Views pill */}
             {(reel.views || 0) > 0 && (
@@ -880,7 +955,7 @@ function ReelItem({
             <div className="flex items-center gap-1.5 mt-2">
               <Music2 className="w-3 h-3 text-white/60 flex-shrink-0 animate-spin [animation-duration:6s]" />
               <p className="text-white/60 text-xs truncate">
-                {soundTitle ? `${soundTitle} · ${soundArtist || reel.user.name}` : `Original Sound · ${reel.user.name}`}
+                {soundTitle ? `${soundTitle} · ${soundArtist || displayName}` : `Original Sound · ${displayName}`}
               </p>
             </div>
           </>
@@ -942,7 +1017,7 @@ function ReelItem({
 
     </div>
   );
-}
+});
 
 /* ─────────────────────────────── Main Page ─────────────────────────────── */
 
@@ -1093,15 +1168,17 @@ export default function ReelsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reels, friendUsernames, followingUsernames]);
 
-  /* ── Campaign injection into forYou feed ── */
+  /* ── Campaign injection into forYou feed (deterministic per session so live post updates never reshuffle) ── */
   const reelFeed = useMemo<ReelFeedItem[]>(() => {
-    const videoCampaignsRaw = campaigns
-      .filter((c: any) => c.is_active && c.placement === 'reel' && c.type === "video" && c.media_url)
-      .sort(() => Math.random() - 0.5);
+    const seed = sessionSeed.current;
+    const videoCampaignsRaw = seededShuffle(
+      campaigns.filter((c: any) => c.is_active && c.placement === 'reel' && c.type === "video" && c.media_url),
+      seed + 10
+    );
     const videoCampaigns = videoCampaignsRaw.map((c) => ({
       $id: c.$id,
       user: { name: "ViMore Official", username: "vimore", avatar: "/icon.svg", isVerified: true, role: "Global Node" },
-      content: c.content || c.title,
+      content: c.content || c.title || "",
       time: c.timestamp || "Now",
       likes: c.impressions || 0,
       unlikes: 0,
@@ -1115,8 +1192,10 @@ export default function ReelsPage() {
       actionLabel: c.action_label,
     } as unknown as ReelFeedItem));
 
-    const boostedReels: ReelFeedItem[] = [...(posts || []).filter((p: any) => p.isBoosted && p.type === 'reel')]
-      .sort(() => Math.random() - 0.5) as ReelFeedItem[];
+    const boostedReels: ReelFeedItem[] = seededShuffle(
+      (posts || []).filter((p: any) => p.isBoosted && p.type === 'reel'),
+      seed + 20
+    ) as ReelFeedItem[];
 
     if (videoCampaigns.length === 0 && boostedReels.length === 0) return forYouSorted as ReelFeedItem[];
 
@@ -1130,22 +1209,24 @@ export default function ReelsPage() {
       result.push(videoCampaigns[campIdx++ % videoCampaigns.length]);
     }
 
+    let step = 0;
     while (reelIdx < forYouSorted.length) {
       result.push(forYouSorted[reelIdx++] as ReelFeedItem);
       countSinceLast++;
-      // Random ~1-in-5 chance per reel after at least 2 organic reels since last injection
-      if (countSinceLast >= 2 && Math.random() < 0.2) {
+      step++;
+      if (countSinceLast >= 2 && ((seed + step) % 5 === 0)) {
         countSinceLast = 0;
         if (videoCampaigns.length > 0) result.push(videoCampaigns[campIdx++ % videoCampaigns.length]);
         if (boostedReels.length > 0) { result.push(boostedReels[boostedIdx % boostedReels.length]); boostedIdx++; }
       }
     }
     return result;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [forYouSorted, campaigns, posts]);
 
   const [activeIndex, setActiveIndex] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
+  const isMutedRef = useRef(isMuted);
+  useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
   const [shareReel, setShareReel] = useState<Post | null>(null);
   const [reelTab, setReelTab] = useState<"foryou" | "following">("foryou");
 
@@ -1154,11 +1235,11 @@ export default function ReelsPage() {
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
   const containerRefs = useRef<(HTMLDivElement | null)[]>([]);
 
-  const setVideoRef = useCallback((index: number) => (el: HTMLVideoElement | null) => {
+  const registerVideoRef = useCallback((index: number, el: HTMLVideoElement | null) => {
     videoRefs.current[index] = el;
   }, []);
 
-  const setContainerRef = useCallback((index: number) => (el: HTMLDivElement | null) => {
+  const registerContainerRef = useCallback((index: number, el: HTMLDivElement | null) => {
     containerRefs.current[index] = el;
   }, []);
 
@@ -1169,15 +1250,18 @@ export default function ReelsPage() {
           const target = entry.target as HTMLElement;
           const idx = parseInt(target.dataset.index || "0", 10);
           const video = videoRefs.current[idx];
-          if (!video) return;
           if (entry.isIntersecting) {
             setActiveIndex(idx);
-            video.muted = isMuted;
-            if (pageTier !== 'lite') video.play().catch(() => {});
-            else try { video.pause(); } catch {}
-          } else {
-            video.pause();
-            video.currentTime = 0;
+            if (video) {
+              video.muted = isMutedRef.current;
+              if (pageTier !== 'lite') video.play().catch(() => {});
+              else try { video.pause(); } catch {}
+            }
+          } else if (video) {
+            try {
+              video.pause();
+              video.currentTime = 0;
+            } catch { /* ignore */ }
           }
         });
       },
@@ -1185,19 +1269,25 @@ export default function ReelsPage() {
     );
     containerRefs.current.forEach((el) => { if (el) observer.observe(el); });
     return () => observer.disconnect();
-  }, [activeFeed.length, isMuted, pageTier]);
+  }, [activeFeed.length, pageTier, reelTab]);
 
+  // Ensure newly attached active video starts playing smoothly after scrolling into window
   useEffect(() => {
     const video = videoRefs.current[activeIndex];
-    if (video) video.muted = isMuted;
-  }, [isMuted, activeIndex]);
+    if (!video) return;
+    video.muted = isMuted;
+    if (pageTier !== 'lite' && video.src) {
+      video.play().catch(() => {});
+    }
+  }, [activeIndex, isMuted, pageTier, activeFeed.length]);
 
+  // Pin only lightweight poster thumbnails (never full multi-MB videos, which double memory/bandwidth during playback)
   useEffect(() => {
     if (isOffline) return;
-    const reel = activeFeed[activeIndex];
-    if (reel?.videoUrl) pinMediaInSW([reel.videoUrl]);
-    const next = activeFeed[activeIndex + 1];
-    if (next?.videoUrl) pinMediaInSW([next.videoUrl]);
+    const thumbs = [activeFeed[activeIndex]?.image, activeFeed[activeIndex + 1]?.image].filter(
+      (u): u is string => Boolean(u)
+    );
+    if (thumbs.length > 0) pinMediaInSW(thumbs);
   }, [activeIndex, activeFeed, isOffline]);
 
   useEffect(() => {
@@ -1231,15 +1321,29 @@ export default function ReelsPage() {
   }, [activeIndex, activeFeed, hasMoreReels, fetchReels, followingUserIds]);
 
   const handleOpenComment = useCallback(
-    (postId: string) => { openCommentHub(postId); fetchComments(postId); },
+    (reel: ReelFeedItem) => {
+      if (reel.isCampaignReel) return;
+      openCommentHub(reel.$id);
+      fetchComments(reel.$id);
+    },
     [openCommentHub, fetchComments]
   );
+
+  const handleOpenShare = useCallback((reel: ReelFeedItem) => {
+    if (!reel.isCampaignReel) setShareReel(reel);
+  }, []);
+
+  const handleToggleMute = useCallback(() => {
+    setIsMuted((m) => !m);
+  }, []);
 
   const handleTabSwitch = (tab: "foryou" | "following") => {
     setReelTab(tab);
     setActiveIndex(0);
-    // Pause all videos
-    videoRefs.current.forEach(v => { if (v) v.pause(); });
+    videoRefs.current.forEach(v => {
+      if (!v) return;
+      try { v.pause(); } catch {}
+    });
   };
 
   /* ── Loading screen ── */
@@ -1347,16 +1451,17 @@ export default function ReelsPage() {
           <>
             {activeFeed.map((reel, index) => (
               <ReelItem
-                key={`${reel.$id}-${index}`}
+                key={reel.$id ? `${reel.$id}-${index}` : `reel-${index}`}
                 reel={reel}
                 index={index}
                 isMuted={isMuted}
                 isActive={activeIndex === index}
-                onVideoRef={setVideoRef(index)}
-                onContainerRef={setContainerRef(index)}
-                onToggleMute={() => setIsMuted((m) => !m)}
-                onOpenShare={() => !reel.isCampaignReel && setShareReel(reel)}
-                onOpenComment={() => !reel.isCampaignReel && handleOpenComment(reel.$id)}
+                shouldAttachVideo={Math.abs(index - activeIndex) <= 1}
+                onVideoRef={registerVideoRef}
+                onContainerRef={registerContainerRef}
+                onToggleMute={handleToggleMute}
+                onOpenShare={handleOpenShare}
+                onOpenComment={handleOpenComment}
                 onMarkSeen={markSeen}
               />
             ))}

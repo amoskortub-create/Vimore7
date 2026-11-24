@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "installCommand": "rm -rf artifacts/vimore/node_modules && if [ -d node_modules/.pnpm ] || [ -f node_modules/.modules.yaml ] || [ -d node_modules/.bun ] || [ ! -f node_modules/next/dist/bin/next ]; then rm -rf node_modules; fi && npm install --include=dev --legacy-peer-deps --no-audit --no-fund",
+  "installCommand": "node artifacts/vimore/scripts/vercel-install.mjs",
   "buildCommand": "npm run build --workspace=artifacts/vimore",
   "outputDirectory": "artifacts/vimore/.next"
 }

@@ -44,7 +44,7 @@ export async function GET(
 
     const upstream = await fetch(upstreamUrl, {
       headers: upstreamHeaders,
-      cache: 'force-cache',
+      cache: range || !hasPreview ? 'no-store' : 'force-cache',
     });
 
     if (!upstream.ok) {

@@ -1,9 +1,5 @@
 {
   "/api/[...path]/route": "app/api/[...path]/route.js",
-  "/_not-found/page": "app/_not-found/page.js",
-  "/page": "app/page.js",
-  "/messages/page": "app/messages/page.js",
-  "/login/page": "app/login/page.js",
-  "/marketplace/page": "app/marketplace/page.js",
-  "/reels/page": "app/reels/page.js"
+  "/reels/page": "app/reels/page.js",
+  "/music/page": "app/music/page.js"
 }

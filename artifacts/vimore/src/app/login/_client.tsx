@@ -178,32 +178,45 @@ export default function LoginPage() {
 
               <div className="space-y-3 animate-in fade-in slide-in-from-bottom-6 duration-700">
                 {savedAccounts.map(acc => (
-                  <button
+                  <div
                     key={acc.vimoreId}
-                    onClick={() => setQuickAccount(acc)}
-                    className="w-full flex items-center gap-4 bg-white border border-gray-100 rounded-[1.5rem] p-4 shadow-sm hover:shadow-md hover:border-violet-200 transition-all group text-left"
+                    className="w-full flex items-center gap-3 bg-white border border-gray-100 rounded-[1.5rem] p-4 shadow-sm hover:shadow-md hover:border-violet-200 transition-all group"
                   >
-                    <div className={`h-14 w-14 rounded-2xl flex items-center justify-center shrink-0 text-white font-black text-lg ${avatarColor(acc.vimoreId)}`}>
-                      {acc.avatar
-                        ? <img src={acc.avatar} alt={acc.name} className="h-14 w-14 rounded-2xl object-cover" />
-                        : getInitials(acc.name)
-                      }
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-black text-gray-900 truncate">{acc.name}</p>
-                      <p className="text-[11px] font-medium text-[#9940E5] truncate">{acc.vimoreId}</p>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setQuickAccount(acc)}
+                      className="flex-1 min-w-0 flex items-center gap-4 text-left"
+                    >
+                      <div className={`h-14 w-14 rounded-2xl flex items-center justify-center shrink-0 text-white font-black text-lg ${avatarColor(acc.vimoreId)}`}>
+                        {acc.avatar
+                          ? <img src={acc.avatar} alt={acc.name} className="h-14 w-14 rounded-2xl object-cover" />
+                          : getInitials(acc.name)
+                        }
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-black text-gray-900 truncate">{acc.name}</p>
+                        <p className="text-[11px] font-medium text-[#9940E5] truncate">{acc.vimoreId}</p>
+                      </div>
+                    </button>
                     <div className="flex items-center gap-1 shrink-0">
                       <button
+                        type="button"
                         onClick={(e) => removeAccount(acc.vimoreId, e)}
                         className="h-7 w-7 rounded-full bg-gray-100 hover:bg-red-50 hover:text-red-500 flex items-center justify-center text-gray-400 transition-colors"
                         title="Remove account"
                       >
                         <X className="h-3.5 w-3.5" />
                       </button>
-                      <ChevronRight className="h-5 w-5 text-gray-300 group-hover:text-[#9940E5] transition-colors ml-1" />
+                      <button
+                        type="button"
+                        onClick={() => setQuickAccount(acc)}
+                        aria-label={`Continue as ${acc.name}`}
+                        className="text-gray-300 group-hover:text-[#9940E5] transition-colors ml-1"
+                      >
+                        <ChevronRight className="h-5 w-5" />
+                      </button>
                     </div>
-                  </button>
+                  </div>
                 ))}
 
                 <button

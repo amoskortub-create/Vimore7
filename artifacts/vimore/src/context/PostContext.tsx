@@ -803,6 +803,9 @@ export function PostProvider({ children }: { children: ReactNode }) {
       feedHasLoadedRef.current = true;
       setPostsState(nextPosts);
       offlineCache.savePosts(nextPosts);
+      if (typeof navigator === 'undefined' || navigator.onLine !== false) {
+        setIsOffline(false);
+      }
     } catch (err) {
       logAppwriteError('loadFeed', err);
       const cachedPosts = offlineCache.getPosts() as any[];
@@ -1671,27 +1674,61 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const checkSession = useCallback(async () => {
     if (sessionCheckInFlightRef.current) return;
     sessionCheckInFlightRef.current = true;
-    setIsLoadingState(true);
 
-    // Hard timeout: if the entire session check takes longer than 12s, bail out gracefully
+    const storedSession = getSessionFromStorage();
+    const cachedUser = offlineCache.getUser() as any | null;
+    const hasWarmSnapshot = Boolean(storedSession && cachedUser);
+
+    if (hasWarmSnapshot) {
+      try {
+        if (storedSession) client.setSession(storedSession);
+      } catch { /* ignore */ }
+      setCurrentUserState(cachedUser);
+      const cachedPosts = offlineCache.getPosts() as any[];
+      if (cachedPosts.length > 0) setPostsState(cachedPosts);
+      const cachedConns = offlineCache.getConnections() as any[];
+      if (cachedConns.length > 0) setConnectionsState(cachedConns);
+      if (typeof window !== 'undefined' && cachedUser?.$id) {
+        try {
+          const cachedSignals = localStorage.getItem(`vimore_unread_signals_${cachedUser.$id}`);
+          if (cachedSignals) setChatLastIncomingAt(JSON.parse(cachedSignals));
+        } catch { /* ignore */ }
+      }
+      setIsLoadingState(false);
+    } else {
+      setIsLoadingState(true);
+    }
+
+    // If on /login or /signup with no stored session token, skip redundant /api/auth/me round-trip
+    if (!storedSession && typeof window !== 'undefined') {
+      const path = window.location.pathname;
+      if (path === '/login' || path === '/signup') {
+        offlineCache.clearUser();
+        setCurrentUserState(null);
+        setIsLoadingState(false);
+        sessionCheckInFlightRef.current = false;
+        return;
+      }
+    }
+
+    // Hard timeout: if the entire session check takes longer than 15s, unlock UI gracefully
     const timeoutId = setTimeout(() => {
-      const cachedUser = offlineCache.getUser() as any | null;
       if (cachedUser) {
         setCurrentUserState(cachedUser);
         const cachedPosts = offlineCache.getPosts() as any[];
         if (cachedPosts.length > 0) setPostsState(cachedPosts);
-        setIsOffline(true);
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          setIsOffline(true);
+        }
       } else {
         setCurrentUserState(null);
       }
       setIsLoadingState(false);
-    }, 12000);
+    }, 15000);
 
     try {
-      // Android WebView can briefly report navigator.onLine=false while the
-      // network is already usable. Always try the live session first so that
-      // a stale local snapshot is not shown during a normal reload.
-      const meRes = await withStartupTimeout(authFetch('/api/auth/me'), 5000);
+      const feedPromise = hasWarmSnapshot ? loadFeed() : null;
+      const meRes = await withStartupTimeout(authFetch('/api/auth/me'), 12000);
       if (!meRes) throw new Error('Session check timed out');
       if (!meRes.ok) {
         if (meRes.status === 401) throw new Error('Unauthorized');
@@ -1715,7 +1752,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
       setIsLoadingState(false);
       void Promise.allSettled([
-        loadFeed(),
+        feedPromise ?? loadFeed(),
         loadSocialGraph(authUser.$id),
         loadConnections(authUser.$id, profileDoc?.username || ''),
         loadStories(),
@@ -1728,27 +1765,58 @@ export function PostProvider({ children }: { children: ReactNode }) {
         loadConversationMetadata(authUser.$id, profileDoc?.username || '').catch(() => {});
       });
     } catch (err: any) {
-      // Network failure (offline) but we have a cached session → go offline mode
-      const isNetworkError = (typeof navigator !== 'undefined' && !navigator.onLine) ||
-        (err?.message && /fetch|network|failed to fetch|timed out|session check unavailable/i.test(err.message));
-      if (isNetworkError) {
-        const cachedUser = offlineCache.getUser() as any | null;
+      const browserOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+      const msg = String(err?.message || '');
+      const isFetchFailure = /failed to fetch|networkerror|load failed|err_internet_disconnected|err_network/i.test(msg);
+      const isSlowOrTransient = /timed out|session check unavailable/i.test(msg);
+
+      if (browserOffline || isFetchFailure) {
+        // Verify genuine offline state when browser still claims online
+        let actuallyOffline = browserOffline;
+        if (!actuallyOffline && typeof window !== 'undefined') {
+          try {
+            const probe = await withStartupTimeout(
+              fetch('/manifest.json', { method: 'HEAD', cache: 'no-store' }),
+              3000
+            );
+            actuallyOffline = !probe;
+          } catch {
+            actuallyOffline = true;
+          }
+        }
         if (cachedUser) {
           setCurrentUserState(cachedUser);
           const cachedPosts = offlineCache.getPosts() as any[];
           if (cachedPosts.length > 0) setPostsState(cachedPosts);
           const cachedConns = offlineCache.getConnections() as any[];
           if (cachedConns.length > 0) setConnectionsState(cachedConns);
-          setIsOffline(true);
+          setIsOffline(actuallyOffline);
           setIsLoadingState(false);
           return;
         }
-        setIsOffline(true);
+        if (actuallyOffline) {
+          setIsOffline(true);
+          return;
+        }
+      }
+
+      // If /api/auth/me simply timed out or returned 5xx while online with a cached user,
+      // keep the user on their warm snapshot without showing a false "No internet access" banner.
+      if (isSlowOrTransient && cachedUser) {
+        setCurrentUserState(cachedUser);
+        const cachedPosts = offlineCache.getPosts() as any[];
+        if (cachedPosts.length > 0) setPostsState(cachedPosts);
+        const cachedConns = offlineCache.getConnections() as any[];
+        if (cachedConns.length > 0) setConnectionsState(cachedConns);
+        setIsOffline(false);
+        setIsLoadingState(false);
         return;
       }
+
       // Auth error or no cached session — redirect to login
       clearTimeout(timeoutId);
       offlineCache.clearUser();
+      setIsOffline(false);
       setCurrentUserState(null);
     } finally {
       clearTimeout(timeoutId);
@@ -1766,14 +1834,37 @@ export function PostProvider({ children }: { children: ReactNode }) {
     checkSession();
   }, [checkSession]);
 
-  // A WebView can start in a false offline state and recover shortly after.
-  // Reconcile the user and feed as soon as Android reports connectivity again.
+  // Keep offline state aligned with real browser connectivity and auto-recover if needed.
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const handleOnline = () => { void checkSession(); };
+    const handleOnline = () => {
+      setIsOffline(false);
+      void checkSession();
+    };
+    const handleOffline = () => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        setIsOffline(true);
+      }
+    };
     window.addEventListener('online', handleOnline);
-    return () => window.removeEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, [checkSession]);
+
+  useEffect(() => {
+    if (!isOffline || typeof window === 'undefined') return;
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
+      const timer = setTimeout(() => {
+        if (typeof navigator !== 'undefined' && navigator.onLine) {
+          void checkSession();
+        }
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [isOffline, checkSession]);
 
   useEffect(() => {
     if (!currentUser?.$id || typeof window === 'undefined') return;
@@ -2017,6 +2108,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       const profileDoc = profileData.profileDoc;
       const user = mapDocToUser(authUser, profileDoc);
       setCurrentUserState(user);
+      setIsOffline(false);
 
       try {
         const saved = JSON.parse(localStorage.getItem('vimore_saved_accounts') || '[]');
@@ -2131,6 +2223,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       const newDoc = profileResult.profileDoc || await databases.getDocument(DATABASE_ID, COL.USERS, authUser.$id);
       const user = mapDocToUser(authUser, newDoc);
       setCurrentUserState(user);
+      setIsOffline(false);
 
       try {
         const saved = JSON.parse(localStorage.getItem('vimore_saved_accounts') || '[]');

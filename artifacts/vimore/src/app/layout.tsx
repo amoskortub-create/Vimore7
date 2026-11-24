@@ -2,47 +2,24 @@ import type { Metadata, Viewport } from 'next';
 
 export const maxDuration = 30;
 import './globals.css';
-import { headers } from 'next/headers';
 import { Toaster } from "@/components/ui/toaster";
 import { PostProvider } from "@/context/PostContext";
 import { CallProvider } from "@/context/CallContext";
-import { CallExperience } from "@/components/calls/CallExperience";
 import { MusicProvider } from "@/context/MusicContext";
 import { NotificationProvider } from "@/context/NotificationContext";
 import { LanguageProvider } from "@/context/LanguageContext";
-import { MusicPlayer } from "@/components/music/music-player";
-import { AlbumDetail } from "@/components/music/album-detail";
-import { PlaylistDetail } from "@/components/music/playlist-detail";
-import { AdPortal } from "@/components/ad/ad-portal";
-import { MusicAdPortal } from "@/components/music/interstitial-portal";
-import { PostPortal } from "@/components/post/post-portal";
-import { ImageViewerPortal } from "@/components/layout/image-viewer-portal";
-import { VideoViewerPortal } from "@/components/layout/video-viewer-portal";
-import { SearchPortal } from "@/components/layout/search-portal";
 import { FontScaleWrapper } from "@/components/layout/font-scale-wrapper";
-import { CommentHub } from "@/components/post/comment-hub";
-import { GiftHub } from "@/components/post/gift-hub";
 import { AppLoadingGate } from "@/components/layout/app-loading-gate";
 import { SuspensionGate } from "@/components/layout/suspension-gate";
 import { DiagnosticErrorBoundary } from "@/components/layout/diagnostic-error-boundary";
 import { ThemeLogic } from "@/components/layout/theme-logic";
 import { ServiceWorkerRegister } from "@/components/layout/service-worker-register";
-import { SwUpdateNotifier } from "@/components/layout/sw-update-notifier";
-import { PwaInstallPrompt } from "@/components/layout/pwa-install-prompt";
-import { AppBadgeSync } from "@/components/layout/app-badge-sync";
 import { PullToRefresh } from "@/components/layout/pull-to-refresh";
-import { ActivityTracker } from "@/components/layout/ActivityTracker";
-import { ExpiryCleanup } from "@/components/layout/expiry-cleanup";
-import { PushAutoSubscribe } from "@/components/layout/push-auto-subscribe";
-import { NativePushAutoSubscribe } from "@/components/layout/native-push-auto-subscribe";
-import { NotificationScheduler } from "@/components/layout/notification-scheduler";
-import { GlobalRealtimeListener } from "@/components/layout/global-realtime";
-import { OutboxRetry } from "@/components/layout/outbox-retry";
+import { DeferredAuthListeners, DeferredGlobalPortals } from "@/components/layout/deferred-global-ui";
 import { AdminAlertsProvider } from "@/context/AdminAlertsContext";
 import { FeedSignalProvider } from "@/context/FeedSignalContext";
 import { NetworkProvider } from "@/context/NetworkContext";
 import { ReelUploadProvider } from "@/context/ReelUploadContext";
-import { ReelUploadBanner } from "@/components/reels/reel-upload-banner";
 import NextTopLoader from 'nextjs-toploader';
 
 // ── Structured data: tells Google this is a real, verified organization ────────
@@ -198,14 +175,11 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const headersList = await headers();
-  const nextUrl =
-    headersList.get("x-invoke-path") || headersList.get("x-pathname") || "";
   return (
     <html lang="en">
       <head>
@@ -247,7 +221,6 @@ export default async function RootLayout({
         suppressHydrationWarning
       >
         <ServiceWorkerRegister />
-        <PwaInstallPrompt />
         <NextTopLoader
           color="#9940E5"
           initialPosition={0.08}
@@ -273,30 +246,10 @@ export default async function RootLayout({
                         <DiagnosticErrorBoundary title="System Core">
                           <AppLoadingGate>
                               <SuspensionGate>
-                                <GlobalRealtimeListener />
-                                <CallExperience />
-                                <OutboxRetry />
-                                <NotificationScheduler />
-                                <AppBadgeSync />
-                                <PushAutoSubscribe />
-                                <NativePushAutoSubscribe />
+                                <DeferredAuthListeners />
                                 <PullToRefresh />
-                                <ActivityTracker />
-                                <ExpiryCleanup />
                                 {children}
-                                <MusicPlayer />
-                                <AlbumDetail />
-                                <PlaylistDetail />
-                                <AdPortal />
-                                <MusicAdPortal />
-                                <PostPortal />
-                                <ImageViewerPortal />
-                                <VideoViewerPortal />
-                                <SearchPortal />
-                                <CommentHub />
-                                <GiftHub />
-                                <SwUpdateNotifier />
-                                <ReelUploadBanner />
+                                <DeferredGlobalPortals />
                                 <Toaster />
                               </SuspensionGate>
                             </AppLoadingGate>

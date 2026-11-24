@@ -57,7 +57,7 @@ export function AppLoadingGate({ children }: { children: React.ReactNode }) {
     const fallbackTimer = setTimeout(() => {
       setIsVisible(false);
       setShouldRenderSplash(false);
-    }, 8000);
+    }, 4000);
 
     return () => clearTimeout(fallbackTimer);
   }, [pathname, isLoading, initError]);
@@ -70,13 +70,13 @@ export function AppLoadingGate({ children }: { children: React.ReactNode }) {
     }
   }, [isLoading, currentUser, pathname, router]);
 
-  const showSplash = !isPublicPath && shouldRenderSplash;
+  const showSplash = !isPublicPath && shouldRenderSplash && !currentUser;
 
   return (
     <>
       {showSplash && (
         <div className={cn(
-          "fixed inset-0 z-[9999] transition-opacity duration-500 ease-in-out",
+          "fixed inset-0 z-[9999] transition-opacity duration-150 ease-out",
           isVisible ? "opacity-100" : "opacity-0 pointer-events-none"
         )}>
           <KineticSplashScreen />
@@ -84,8 +84,8 @@ export function AppLoadingGate({ children }: { children: React.ReactNode }) {
       )}
       <div className={cn(
         "flex-1 flex flex-col",
-        !isPublicPath && "transition-opacity duration-1000 ease-out",
-        (isPublicPath || !isVisible) ? "opacity-100" : "opacity-0"
+        !isPublicPath && "transition-opacity duration-150 ease-out",
+        (isPublicPath || !isVisible || Boolean(currentUser)) ? "opacity-100" : "opacity-0"
       )}>
         {children}
       </div>

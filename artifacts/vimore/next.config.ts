@@ -29,7 +29,6 @@ const csp = [
 
 const nextConfig: NextConfig = {
   distDir: IS_DEV ? '.next-dev' : '.next',
-  output: 'standalone',
   images: {
     unoptimized: true,
     formats: ['image/webp', 'image/avif'],
@@ -101,7 +100,18 @@ const nextConfig: NextConfig = {
   },
   allowedDevOrigins: ['127.0.0.1', 'localhost', '*.replit.dev', '*.replit.app', '*.spock.replit.dev', '*.worf.replit.dev', '*.janeway.replit.dev'],
   experimental: {
-    optimizePackageImports: ['lucide-react', '@radix-ui/react-avatar', '@radix-ui/react-dialog', 'recharts'],
+    optimizePackageImports: [
+      'lucide-react',
+      '@radix-ui/react-avatar',
+      '@radix-ui/react-dialog',
+      '@radix-ui/react-dropdown-menu',
+      '@radix-ui/react-tabs',
+      '@radix-ui/react-tooltip',
+      '@radix-ui/react-popover',
+      '@radix-ui/react-select',
+      'date-fns',
+      'recharts',
+    ],
   },
   compress: true,
   poweredByHeader: false,

@@ -12,6 +12,9 @@
     "lint": "npm run lint --workspace=artifacts/vimore",
     "typecheck": "npm run typecheck --workspace=artifacts/vimore"
   },
+  "dependencies": {
+    "next": "^15.5.20"
+  },
   "engines": {
     "node": "22.x"
   }

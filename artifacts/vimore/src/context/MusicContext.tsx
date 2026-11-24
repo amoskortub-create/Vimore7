@@ -330,7 +330,39 @@ export function MusicProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    loadMusicData();
+    if (typeof window === 'undefined') return;
+    try {
+      const cachedSongs = localStorage.getItem('vm_offline_songs');
+      if (cachedSongs) {
+        const parsed = JSON.parse(cachedSongs);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setGlobalSongsState(parsed);
+          setQueueState(parsed);
+          setIsMusicLoadingState(false);
+        }
+      }
+      const cachedAlbums = localStorage.getItem('vm_offline_albums');
+      if (cachedAlbums) {
+        const parsed = JSON.parse(cachedAlbums);
+        if (Array.isArray(parsed) && parsed.length > 0) setGlobalAlbumsState(parsed);
+      }
+    } catch { /* ignore */ }
+
+    const path = window.location.pathname;
+    if (path === '/login' || path === '/signup' || path.startsWith('/auth/')) {
+      setIsMusicLoadingState(false);
+      return;
+    }
+
+    if (path.startsWith('/music')) {
+      void loadMusicData();
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void loadMusicData();
+    }, 600);
+    return () => window.clearTimeout(timer);
   }, [loadMusicData]);
 
   useEffect(() => {

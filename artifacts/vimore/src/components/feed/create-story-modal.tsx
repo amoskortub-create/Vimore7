@@ -34,6 +34,8 @@ export function CreateStoryModal({ isOpen, onClose }: { isOpen: boolean; onClose
   const [storyText, setStoryText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
 
+  const [mediaDuration, setMediaDuration] = useState<number>(5);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
 
@@ -42,11 +44,27 @@ export function CreateStoryModal({ isOpen, onClose }: { isOpen: boolean; onClose
     if (!file) return;
     triggerHaptic(10);
 
+    let detectedDuration = 5;
     if (type === "video") {
       const objUrl = URL.createObjectURL(file);
       const tempVid = document.createElement("video");
+      tempVid.preload = "metadata";
       tempVid.src = objUrl;
-      await new Promise<void>(r => { tempVid.onloadedmetadata = () => r(); tempVid.load(); });
+      await new Promise<void>(resolve => {
+        const done = () => {
+          tempVid.onloadedmetadata = null;
+          tempVid.onerror = null;
+          clearTimeout(timer);
+          resolve();
+        };
+        const timer = setTimeout(done, 3000);
+        tempVid.onloadedmetadata = done;
+        tempVid.onerror = done;
+        try { tempVid.load(); } catch { done(); }
+      });
+      if (Number.isFinite(tempVid.duration) && tempVid.duration > 0) {
+        detectedDuration = Math.min(80, Math.max(1, Math.round(tempVid.duration)));
+      }
       URL.revokeObjectURL(objUrl);
       if (tempVid.duration > 80) {
         toast({ title: "Video Too Long", description: "Story videos must be 1 minute 20 seconds or shorter." });
@@ -55,10 +73,12 @@ export function CreateStoryModal({ isOpen, onClose }: { isOpen: boolean; onClose
       }
     }
 
+    setMediaDuration(detectedDuration);
     setSelectedFile(file);
     setPreviewUrl(URL.createObjectURL(file));
     setMediaType(type);
     setStep("confirm");
+    e.target.value = "";
   };
 
   const handleShare = async () => {
@@ -72,15 +92,19 @@ export function CreateStoryModal({ isOpen, onClose }: { isOpen: boolean; onClose
       let finalImageUrl = "";
 
       if (selectedFile) {
-        const { uploadViaClient } = await import('@/lib/upload');
-        finalFileId = await uploadViaClient(selectedFile, BUCKET_STORIES);
+        const { uploadLargeViaClient } = await import('@/lib/upload');
+        finalFileId = await uploadLargeViaClient(selectedFile, BUCKET_STORIES, undefined, {
+          timeoutMs: 120_000,
+        });
         finalImageUrl = getFileUrl(BUCKET_STORIES, finalFileId);
       }
 
       await addStory({
         image: finalImageUrl,
         fileId: finalFileId || undefined,
-        type: mediaType || "image",
+        type: step === "text" ? "text" : (mediaType || "image"),
+        duration: mediaType === "video" ? mediaDuration : 5,
+        text: step === "text" ? storyText.trim() : undefined,
         filter: "",
         textOverlays: step === "text" ? [{ text: storyText, x: 50, y: 50, color: "#FFFFFF" }] : [],
         background: step === "text" ? selectedGradient.class : undefined,
@@ -90,7 +114,7 @@ export function CreateStoryModal({ isOpen, onClose }: { isOpen: boolean; onClose
       onClose();
       resetState();
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Upload failed", description: e.message || "Please try again." });
+      toast({ variant: "destructive", title: "Upload failed", description: e?.message || "Please try again." });
     } finally {
       setIsProcessing(false);
     }
@@ -102,6 +126,7 @@ export function CreateStoryModal({ isOpen, onClose }: { isOpen: boolean; onClose
     setSelectedFile(null);
     setPreviewUrl(null);
     setMediaType(null);
+    setMediaDuration(5);
     setStoryText("");
     setIsProcessing(false);
   };

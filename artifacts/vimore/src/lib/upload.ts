@@ -1,7 +1,7 @@
 'use client';
 
-import { storage, ID, BUCKET, getFileUrl } from './appwrite';
-import { chunkedUploadToAppwrite } from './chunked-upload';
+import { ID, BUCKET, getFileUrl } from './appwrite';
+import { chunkedUploadToAppwrite, UPLOAD_CHUNK_SIZE } from './chunked-upload';
 
 export interface LargeUploadOptions {
   signal?: AbortSignal;
@@ -15,9 +15,9 @@ export async function uploadViaClient(
   bucketId: string,
   customFileId?: string
 ): Promise<string> {
-  const fileId = customFileId || ID.unique();
-  const created = await storage.createFile(bucketId, fileId, file);
-  return created.$id;
+  return uploadLargeViaClient(file, bucketId, customFileId, {
+    chunkSize: UPLOAD_CHUNK_SIZE,
+  });
 }
 
 export async function uploadLargeViaClient(
@@ -41,7 +41,7 @@ export async function uploadLargeViaClient(
       bucketId,
       fileId,
       file,
-      chunkSize: opts?.chunkSize,
+      chunkSize: opts?.chunkSize ?? UPLOAD_CHUNK_SIZE,
       onProgress: opts?.onProgress,
       signal,
     });

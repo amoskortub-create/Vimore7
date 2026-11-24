@@ -3167,30 +3167,65 @@ export function PostProvider({ children }: { children: ReactNode }) {
     try {
       const expires_at = new Date(Date.now() + 86400000).toISOString();
       const rawMediaUrl = segment.mediaUrl || segment.image || '';
-      // Only use explicitly provided fileId (from story media uploads).
-      // Do NOT extract from post/other media URLs — those belong to different buckets.
       const mediaId: string | undefined = segment.fileId || undefined;
+      const storyText =
+        typeof segment.text === 'string' && segment.text.trim()
+          ? segment.text.trim()
+          : (typeof segment.textOverlays?.[0]?.text === 'string' ? segment.textOverlays[0].text.trim() : '');
 
-      const storyDoc = await databases.createDocument(DATABASE_ID, COL.STORIES, ID.unique(), {
-        user_id: currentUser.$id,
-        expires_at,
-        views_count: 0,
-        story_url: rawMediaUrl || '',
-      });
+      let createdStoryId = '';
+      let createdSegmentId = 'seg_tmp_' + Date.now();
+      let finalExpiresAt = expires_at;
 
-      const segData: Record<string, any> = {
-        story_id: storyDoc.$id,
-        type: segment.type || 'image',
-        order_index: 0,
-        duration: segment.duration || 5,
-        story_url: rawMediaUrl || '',
+      try {
+        const res = await authFetch('/api/stories/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            rawMediaUrl,
+            mediaId,
+            type: segment.type || 'image',
+            duration: segment.duration || 5,
+            text: storyText,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data?.error || `Story creation failed (${res.status})`);
+        }
+        createdStoryId = data?.storyDoc?.$id || '';
+        createdSegmentId = data?.segmentDoc?.$id || createdSegmentId;
+        if (data?.expires_at) finalExpiresAt = data.expires_at;
+      } catch (serverErr) {
+        // Fallback to direct client SDK if server route is temporarily unreachable
+        const storyDoc = await databases.createDocument(DATABASE_ID, COL.STORIES, ID.unique(), {
+          user_id: currentUser.$id,
+          expires_at,
+          views_count: 0,
+          story_url: rawMediaUrl || '',
+        });
+        createdStoryId = storyDoc.$id;
+
+        const segData: Record<string, any> = {
+          story_id: storyDoc.$id,
+          type: segment.type || 'image',
+          order_index: 0,
+          duration: segment.duration || 5,
+          story_url: rawMediaUrl || '',
+        };
+        if (mediaId) segData.media_id = mediaId;
+        if (storyText) segData.text = storyText;
+
+        const segDoc = await databases.createDocument(DATABASE_ID, COL.STORY_SEGMENTS, ID.unique(), segData);
+        createdSegmentId = segDoc.$id;
+      }
+
+      const newSegment = {
+        $id: createdSegmentId,
+        ...segment,
+        text: storyText || segment.text,
+        mediaUrl: rawMediaUrl || undefined,
       };
-      if (mediaId) segData.media_id = mediaId;
-      if (segment.text) segData.text = segment.text;
-
-      await databases.createDocument(DATABASE_ID, COL.STORY_SEGMENTS, ID.unique(), segData);
-
-      const newSegment = { $id: 'seg_tmp_' + Date.now(), ...segment, mediaUrl: rawMediaUrl || undefined };
       setStoriesState(prev => {
         const existingIdx = prev.findIndex(s => s.user.$id === currentUser.$id || s.user.username === currentUser.username);
         if (existingIdx >= 0) {
@@ -3198,7 +3233,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
           updated[existingIdx] = { ...updated[existingIdx], segments: [...updated[existingIdx].segments, newSegment] };
           return updated;
         }
-        return [{ $id: storyDoc.$id, user: currentUser, segments: [newSegment], expires_at, viewCount: 0 }, ...prev];
+        return [{ $id: createdStoryId || ('story_' + Date.now()), user: currentUser, segments: [newSegment], expires_at: finalExpiresAt, viewCount: 0 }, ...prev];
       });
     } catch (err: any) {
       logAppwriteError('addStory', err);

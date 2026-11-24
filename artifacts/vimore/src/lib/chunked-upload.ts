@@ -1,6 +1,7 @@
 'use client';
 
 import { account } from './appwrite';
+import { authFetch, getSessionFromStorage } from './auth-fetch';
 
 const ENDPOINT = (
   process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || 'https://appwrite.mediatechliberia.online/v1'
@@ -8,23 +9,44 @@ const ENDPOINT = (
 
 const PROJECT_ID = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || 'vimore123';
 
-export const UPLOAD_CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB per chunk
+// Keep every chunk strictly below nginx's 1 MB client_max_body_size (even with multipart headers)
+export const UPLOAD_CHUNK_SIZE = 700 * 1024; // 700 KB per chunk
 
 // ── JWT cache ──────────────────────────────────────────────────────────────
-// Avoids creating a new JWT for every single chunk while still refreshing
-// before the 15-minute Appwrite default expiry.
 let cachedJwt = '';
 let jwtExpiresAt = 0;
 let cachedJwtUserId = '';
 
-async function getJwt(userId: string): Promise<string> {
-  // Refresh 60 s before expiry so mid-upload refreshes are seamless
-  if (cachedJwtUserId === userId && Date.now() < jwtExpiresAt - 60_000) return cachedJwt;
-  const { jwt } = await account.createJWT();
-  cachedJwt = jwt;
-  cachedJwtUserId = userId;
-  jwtExpiresAt = Date.now() + 14 * 60 * 1000; // 14 min
-  return jwt;
+async function tryGetDirectAuth(): Promise<{ mode: 'jwt'; token: string } | { mode: 'server' }> {
+  const session = getSessionFromStorage();
+  try {
+    const user = await account.get();
+    if (cachedJwtUserId && cachedJwtUserId !== user.$id) {
+      cachedJwt = '';
+      jwtExpiresAt = 0;
+    }
+    if (cachedJwtUserId === user.$id && Date.now() < jwtExpiresAt - 60_000 && cachedJwt) {
+      return { mode: 'jwt', token: cachedJwt };
+    }
+    const { jwt } = await account.createJWT();
+    cachedJwt = jwt;
+    cachedJwtUserId = user.$id;
+    jwtExpiresAt = Date.now() + 14 * 60 * 1000;
+    return { mode: 'jwt', token: jwt };
+  } catch {
+    // Client-SDK account ops fail on unregistered domains or when session was restored via cookie/header.
+    // Fall back to same-origin server chunk upload using authFetch + X-Appwrite-Session.
+    if (session || typeof window !== 'undefined') {
+      return { mode: 'server' };
+    }
+    return { mode: 'server' };
+  }
+}
+
+function safeFilePart(chunk: Blob, file: File): File {
+  const name = file.name && file.name.trim() ? file.name : 'upload.bin';
+  const type = file.type && file.type.trim() ? file.type : 'application/octet-stream';
+  return new File([chunk], name, { type });
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -52,34 +74,29 @@ export async function chunkedUploadToAppwrite(
     signal,
   } = opts;
 
-  // Verify a real session before requesting the JWT used for direct uploads.
-  const user = await account.get();
-  if (cachedJwtUserId && cachedJwtUserId !== user.$id) {
-    cachedJwt = '';
-    jwtExpiresAt = 0;
-  }
-
+  const effectiveChunkSize = Math.min(chunkSize, UPLOAD_CHUNK_SIZE);
   const totalSize = file.size;
 
-  // Small files (≤ chunkSize): single request, no range header needed.
-  // This is the fast path and also the fallback when ChunkedUpload header
-  // is not supported by the Appwrite instance.
-  if (totalSize <= chunkSize) {
-    return uploadSingleChunk({ bucketId, fileId, file, userId: user.$id, onProgress, maxRetries, signal });
+  if (totalSize <= effectiveChunkSize) {
+    return uploadSingleChunk({
+      bucketId,
+      fileId,
+      file,
+      onProgress,
+      maxRetries,
+      signal,
+    });
   }
 
+  let auth = await tryGetDirectAuth();
+  let resolvedFileId = fileId;
   let offset = 0;
 
   while (offset < totalSize) {
     if (signal?.aborted) throw new Error('Upload cancelled');
 
-    const chunkEnd = Math.min(offset + chunkSize, totalSize);
-    const chunk = file.slice(offset, chunkEnd);
-    const chunkFile = new File([chunk], file.name, { type: file.type });
-
-    const formData = new FormData();
-    formData.append('fileId', fileId);
-    formData.append('file', chunkFile);
+    const chunkEnd = Math.min(offset + effectiveChunkSize, totalSize);
+    const chunkFile = safeFilePart(file.slice(offset, chunkEnd), file);
 
     let attempt = 0;
     let lastErr: Error | null = null;
@@ -87,36 +104,73 @@ export async function chunkedUploadToAppwrite(
     while (attempt < maxRetries) {
       if (signal?.aborted) throw new Error('Upload cancelled');
       try {
-        const jwt = await getJwt(user.$id);
-        const res = await fetch(`${ENDPOINT}/storage/buckets/${bucketId}/files`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'x-appwrite-project': PROJECT_ID,
-            'x-appwrite-jwt': jwt,
-            'content-range': `bytes ${offset}-${chunkEnd - 1}/${totalSize}`,
-            'x-appwrite-id': fileId,
-          },
-          body: formData,
-          signal,
-        });
+        let res: Response;
+        const contentRange = `bytes ${offset}-${chunkEnd - 1}/${totalSize}`;
 
-        if (res.status === 201 || res.status === 200) {
+        if (auth.mode === 'jwt') {
+          const formData = new FormData();
+          formData.append('fileId', resolvedFileId);
+          formData.append('file', chunkFile);
+
+          const headers: Record<string, string> = {
+            'x-appwrite-project': PROJECT_ID,
+            'x-appwrite-jwt': auth.token,
+            'content-range': contentRange,
+          };
+          if (offset > 0) headers['x-appwrite-id'] = resolvedFileId;
+
+          try {
+            res = await fetch(`${ENDPOINT}/storage/buckets/${encodeURIComponent(bucketId)}/files`, {
+              method: 'POST',
+              credentials: 'include',
+              headers,
+              body: formData,
+              signal,
+            });
+          } catch {
+            // CORS/network block on direct Appwrite upload — seamlessly switch to server proxy
+            auth = { mode: 'server' };
+            res = await uploadChunkViaServer({
+              bucketId,
+              fileId: resolvedFileId,
+              chunkFile,
+              contentRange,
+              includeAppwriteId: offset > 0,
+              signal,
+            });
+          }
+        } else {
+          res = await uploadChunkViaServer({
+            bucketId,
+            fileId: resolvedFileId,
+            chunkFile,
+            contentRange,
+            includeAppwriteId: offset > 0,
+            signal,
+          });
+        }
+
+        if (res.status === 201 || res.status === 200 || res.status === 204) {
+          const body = await res.json().catch(() => ({}));
+          if (body?.$id) resolvedFileId = body.$id;
           lastErr = null;
           break;
         }
-        // Appwrite returns 204 for intermediate chunks and 201 for the final one
-        if (res.status === 204) { lastErr = null; break; }
+
+        // If direct Appwrite rejected auth/scope/413, switch to server proxy and retry immediately
+        if (auth.mode === 'jwt' && (res.status === 401 || res.status === 403 || res.status === 413)) {
+          auth = { mode: 'server' };
+          continue;
+        }
 
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `HTTP ${res.status}`);
+        throw new Error(body.error || body.message || `HTTP ${res.status}`);
       } catch (e: any) {
         if (signal?.aborted || e?.name === 'AbortError') throw new Error('Upload cancelled');
         lastErr = e instanceof Error ? e : new Error(String(e));
         attempt++;
         if (attempt < maxRetries) {
-          // Exponential back-off: 1.5 s, 3 s, 4.5 s…
-          await new Promise(r => setTimeout(r, 1500 * attempt));
+          await new Promise(r => setTimeout(r, 1000 * attempt));
         }
       }
     }
@@ -127,15 +181,43 @@ export async function chunkedUploadToAppwrite(
     onProgress?.(offset / totalSize);
   }
 
-  return { $id: fileId };
+  return { $id: resolvedFileId };
 }
 
-// ── Single-chunk helper (no Content-Range) ─────────────────────────────────
+async function uploadChunkViaServer({
+  bucketId,
+  fileId,
+  chunkFile,
+  contentRange,
+  includeAppwriteId,
+  signal,
+}: {
+  bucketId: string;
+  fileId: string;
+  chunkFile: File;
+  contentRange?: string;
+  includeAppwriteId?: boolean;
+  signal?: AbortSignal;
+}): Promise<Response> {
+  const formData = new FormData();
+  formData.append('bucketId', bucketId);
+  formData.append('fileId', fileId);
+  formData.append('file', chunkFile);
+  if (contentRange) formData.append('contentRange', contentRange);
+  if (includeAppwriteId) formData.append('appwriteId', fileId);
+
+  return authFetch('/api/upload/chunk', {
+    method: 'POST',
+    body: formData,
+    signal,
+  });
+}
+
+// ── Single-chunk helper (≤ 700 KB) ─────────────────────────────────────────
 async function uploadSingleChunk({
   bucketId,
   fileId,
   file,
-  userId,
   onProgress,
   maxRetries = 3,
   signal,
@@ -143,14 +225,12 @@ async function uploadSingleChunk({
   bucketId: string;
   fileId: string;
   file: File;
-  userId: string;
   onProgress?: (pct: number) => void;
   maxRetries?: number;
   signal?: AbortSignal;
 }): Promise<{ $id: string }> {
-  const formData = new FormData();
-  formData.append('fileId', fileId);
-  formData.append('file', file);
+  let auth = await tryGetDirectAuth();
+  const safeFile = safeFilePart(file, file);
 
   let attempt = 0;
   let lastErr: Error | null = null;
@@ -158,29 +238,59 @@ async function uploadSingleChunk({
   while (attempt < maxRetries) {
     if (signal?.aborted) throw new Error('Upload cancelled');
     try {
-      const jwt = await getJwt(userId);
-      const res = await fetch(`${ENDPOINT}/storage/buckets/${bucketId}/files`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'x-appwrite-project': PROJECT_ID,
-          'x-appwrite-jwt': jwt,
-        },
-        body: formData,
-        signal,
-      });
+      let res: Response;
+      if (auth.mode === 'jwt') {
+        const formData = new FormData();
+        formData.append('fileId', fileId);
+        formData.append('file', safeFile);
+
+        try {
+          res = await fetch(`${ENDPOINT}/storage/buckets/${encodeURIComponent(bucketId)}/files`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'x-appwrite-project': PROJECT_ID,
+              'x-appwrite-jwt': auth.token,
+            },
+            body: formData,
+            signal,
+          });
+        } catch {
+          auth = { mode: 'server' };
+          res = await uploadChunkViaServer({
+            bucketId,
+            fileId,
+            chunkFile: safeFile,
+            signal,
+          });
+        }
+      } else {
+        res = await uploadChunkViaServer({
+          bucketId,
+          fileId,
+          chunkFile: safeFile,
+          signal,
+        });
+      }
 
       if (res.ok) {
+        const body = await res.json().catch(() => ({}));
         onProgress?.(1);
-        return { $id: fileId };
+        return { $id: body?.$id || fileId };
       }
+
+      if (auth.mode === 'jwt' && (res.status === 401 || res.status === 403 || res.status === 413)) {
+        auth = { mode: 'server' };
+        continue;
+      }
+
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.message || `HTTP ${res.status}`);
+      throw new Error(body.error || body.message || `HTTP ${res.status}`);
     } catch (e: any) {
       if (signal?.aborted || e?.name === 'AbortError') throw new Error('Upload cancelled');
       lastErr = e instanceof Error ? e : new Error(String(e));
       attempt++;
-      if (attempt < maxRetries) await new Promise(r => setTimeout(r, 1500 * attempt));
+      if (attempt < maxRetries) await new Promise(r => setTimeout(r, 1000 * attempt));
     }
   }
 

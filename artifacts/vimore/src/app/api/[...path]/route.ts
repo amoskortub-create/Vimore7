@@ -41,9 +41,11 @@ import * as PushSend from '@/server/api-impl/root/push/send';
 import * as PushSubscribe from '@/server/api-impl/root/push/subscribe';
 import * as PushUnsubscribe from '@/server/api-impl/root/push/unsubscribe';
 import * as NativePushSubscribe from '@/server/api-impl/root/push/native-subscribe';
+import * as TransactionBoost from '@/server/api-impl/root/transaction/boost';
 import * as TransactionGift from '@/server/api-impl/root/transaction/gift';
 import * as TransactionLockPost from '@/server/api-impl/root/transaction/lock-post';
 import * as TransactionSubscribe from '@/server/api-impl/root/transaction/subscribe';
+import * as TransactionUnlockMusic from '@/server/api-impl/root/transaction/unlock-music';
 import * as TransactionUnlockPost from '@/server/api-impl/root/transaction/unlock-post';
 import * as TransactionVerify from '@/server/api-impl/root/transaction/verify';
 import * as UploadChunk from '@/server/api-impl/root/upload-chunk';
@@ -53,6 +55,7 @@ import * as StoriesCreate from '@/server/api-impl/root/stories/create';
 import * as UserActivity from '@/server/api-impl/root/user/activity';
 import * as UserProfile from '@/server/api-impl/root/user/profile';
 import * as Withdraw from '@/server/api-impl/root/withdraw';
+import * as WithdrawProcess from '@/server/api-impl/root/withdraw/process';
 import * as PostReaction from '@/server/api-impl/root/post-reaction';
 import * as MonetizationValidateCreatorEligibility from '@/server/api-impl/root/monetization/validate-creator-eligibility';
 import * as MonetizationGenerateUssd from '@/server/api-impl/root/monetization/generate-ussd';
@@ -111,9 +114,11 @@ const ROUTES: Record<string, Handler> = {
   'push/native-subscribe': NativePushSubscribe,
   'push/web-subscribe': NativePushSubscribe,
   'push/web-unsubscribe': PushUnsubscribe,
+  'transaction/boost': TransactionBoost,
   'transaction/gift': TransactionGift,
   'transaction/lock-post': TransactionLockPost,
   'transaction/subscribe': TransactionSubscribe,
+  'transaction/unlock-music': TransactionUnlockMusic,
   'transaction/unlock-post': TransactionUnlockPost,
   'transaction/verify': TransactionVerify,
   'stories/create': StoriesCreate,
@@ -123,6 +128,7 @@ const ROUTES: Record<string, Handler> = {
   'user/activity': UserActivity,
   'user/profile': UserProfile,
   'withdraw': Withdraw,
+  'withdraw/process': WithdrawProcess,
   'post/reaction': PostReaction,
   'monetization/validate-creator-eligibility': MonetizationValidateCreatorEligibility,
   'monetization/generate-ussd': MonetizationGenerateUssd,

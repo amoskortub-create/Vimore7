@@ -439,7 +439,7 @@ export default function AdminDashboard() {
   };
 
   const pendingWithdrawals = useMemo(() => 
-    withdrawalHistory.filter(w => w.status === 'PENDING'), 
+    withdrawalHistory.filter(w => String(w.status || '').toUpperCase() === 'PENDING'), 
     [withdrawalHistory]
   );
 
@@ -630,14 +630,14 @@ export default function AdminDashboard() {
       });
 
       const GOLD_RATE = 0.01;
-      const DIAMOND_RATE = 0.25;
+      const DIAMOND_RATE = 0.01;
       const LD_MULTIPLIER = 190;
       const goldUSD = totalGold * GOLD_RATE;
       const diamondUSD = totalDiamond * DIAMOND_RATE;
       const totalUSD = goldUSD + diamondUSD;
       const totalLRD = totalUSD * LD_MULTIPLIER;
 
-      // Calculate platform fees from transactions (10% of all sender-side tx amounts)
+      // Calculate platform fees from transactions (20% of all sender-side tx amounts)
       let pfGold = 0, pfDiamond = 0;
       try {
         const txRes = await databases.listDocuments(DATABASE_ID, COL.TRANSACTIONS, [
@@ -1381,7 +1381,7 @@ export default function AdminDashboard() {
                             <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Account Details</p>
                             <div className="flex items-center justify-between gap-2">
                               <div>
-                                <p className="font-black text-sm">{w.accountName || '—'}</p>
+                                <p className="font-black text-sm">{w.accountName || w.account_name || '—'}</p>
                                 {accountRef && <p className="text-xs font-bold text-muted-foreground font-mono mt-0.5">{accountRef}</p>}
                               </div>
                             </div>
@@ -2745,9 +2745,9 @@ export default function AdminDashboard() {
                   <div className="flex flex-wrap gap-3 px-2">
                     {[
                       { label: "Gold Rate", value: "$0.01 / Gold", color: "text-amber-500", bg: "bg-amber-500/10" },
-                      { label: "Credit Rate", value: "$0.25 / Credit", color: "text-cyan-500", bg: "bg-cyan-500/10" },
+                      { label: "Credit Rate", value: "$0.01 / Credit", color: "text-cyan-500", bg: "bg-cyan-500/10" },
                       { label: "LRD Rate", value: "L$190 / $1 USD", color: "text-green-500", bg: "bg-green-500/10" },
-                      { label: "Platform Cut", value: "10% per tx", color: "text-primary", bg: "bg-primary/10" },
+                      { label: "Platform Cut", value: "20% per tx", color: "text-primary", bg: "bg-primary/10" },
                     ].map(r => (
                       <div key={r.label} className={`flex items-center gap-2 px-4 py-2 rounded-2xl ${r.bg}`}>
                         <span className={`text-[10px] font-black uppercase tracking-widest ${r.color}`}>{r.label}</span>
@@ -2793,7 +2793,7 @@ export default function AdminDashboard() {
                         icon: TrendingUp,
                         color: "text-green-500",
                         bg: "bg-green-500/10",
-                        desc: "10% cut from gifts, unlocks & subscriptions",
+                        desc: "20% cut from gifts, unlocks & subscriptions",
                       },
                     ].map(m => (
                       <Card key={m.label} className="bg-card/40 border-border rounded-[2rem] overflow-hidden group hover:border-primary/20 transition-all">

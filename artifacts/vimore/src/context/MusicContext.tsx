@@ -457,7 +457,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     isVerified: boolean,
   ) => {
     if (!currentUser) throw new Error('Not logged in');
-    const artistShare = isVerified ? 0.9 : 0.8;
+    const artistShare = 0.8;
     const artistAmount = Math.round(price * artistShare * 100) / 100;
     try {
       await databases.createDocument(DATABASE_ID, COL.MUSIC_UNLOCKS, ID.unique(), {

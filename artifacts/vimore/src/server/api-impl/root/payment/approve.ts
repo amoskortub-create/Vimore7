@@ -38,9 +38,8 @@ export async function POST(req: NextRequest) {
         });
       } else {
         const nextCredits =
-          Number(userDoc.credit_balance ?? userDoc.diamond_balance ?? 0) + coinAmount;
+          Number(userDoc.diamond_balance ?? userDoc.credit_balance ?? 0) + coinAmount;
         await db.updateDocument(DATABASE_ID, COL.USERS, userId, {
-          credit_balance: nextCredits,
           diamond_balance: nextCredits,
         });
       }

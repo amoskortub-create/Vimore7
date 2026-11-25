@@ -123,9 +123,10 @@ export async function logSecurityEvent(data: {
 }
 
 export function getUserBalance(doc: any): number {
-  const credit = typeof doc?.credit_balance === 'number' ? doc.credit_balance : undefined;
   const diamond = typeof doc?.diamond_balance === 'number' ? doc.diamond_balance : undefined;
-  return credit ?? diamond ?? 0;
+  const credit = typeof doc?.credit_balance === 'number' ? doc.credit_balance : undefined;
+  const raw = Number(diamond ?? credit ?? 0);
+  return Number.isFinite(raw) ? Math.round(raw * 100) / 100 : 0;
 }
 
 export async function findUserByUsername(username: string): Promise<any | null> {

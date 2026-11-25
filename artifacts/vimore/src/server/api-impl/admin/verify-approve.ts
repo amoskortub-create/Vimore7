@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid verification record' }, { status: 400 });
     }
 
-    const expiryIso = new Date(Date.now() + 365 * 86_400_000).toISOString();
+    const expiryIso = new Date(Date.now() + 30 * 86_400_000).toISOString();
 
     await db.updateDocument(DATABASE_ID, COL.USERS, userId, {
       is_verified: true,

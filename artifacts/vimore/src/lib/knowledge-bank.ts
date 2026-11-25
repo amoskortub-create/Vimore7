@@ -7,7 +7,7 @@ const COLLECTION = 'ai_knowledge_bank';
 const SIMILARITY_THRESHOLD = 0.50;
 const MAX_FETCH = 100;
 const MIN_ANSWER_LENGTH = 80;
-const LEGACY_ECONOMY_TERMS = /\b(?:diamonds?|gold|stars?|GD)\b/i;
+const LEGACY_ECONOMY_TERMS = /\b(?:diamonds?|gold|stars?|GD|liberian dollars?|90\s*%|10\s*%|2\s*[–-]\s*50\s*credits?|5\s*[–-]\s*20\s*credits?|20\s*credits?(?:\s*\/\s*mo(?:nth)?|\s+per\s+month))\b/i;
 
 const STOP_WORDS = new Set([
   'a','an','the','is','are','was','were','be','been','being','have','has','had',
@@ -185,7 +185,7 @@ export async function saveToKnowledgeBank(question: string, answer: string): Pro
     const combined = [...new Set([...questionKw, ...answerKw])].slice(0, 30);
 
     const category = detectCategory(question + ' ' + answer);
-    const isViMore = /vimore|credit hub|liberian dollar|LD\b|handshake|cluster|signal|locked content|earnings portal|command core|media tech liberia|verification badge|boost post/i.test(question + ' ' + answer);
+    const isViMore = /vimore|credit hub|handshake|cluster|signal|locked content|earnings portal|command core|media tech liberia|verification badge|boost post/i.test(question + ' ' + answer);
 
     const qualityScore = Math.min(1,
       (Math.log10(Math.max(answer.length, 10)) / Math.log10(10000)) * 0.55 +

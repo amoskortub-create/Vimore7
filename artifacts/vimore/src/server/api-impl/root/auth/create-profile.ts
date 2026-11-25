@@ -76,7 +76,6 @@ export async function POST(req: NextRequest) {
       referral_count: 0,
       role: 'USER',
       diamond_balance: 0,
-      credit_balance: 0,
       gold_balance: 0,
       star_balance: 0,
       followers_count: 0,

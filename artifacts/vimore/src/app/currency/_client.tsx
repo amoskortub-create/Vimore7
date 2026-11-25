@@ -38,9 +38,9 @@ import { BiometricGate } from "@/components/layout/biometric-gate";
 import { optimizeAndBufferImage } from "@/lib/upload";
 
 const CREDIT_PACKAGES = [
-  { id: "d1", d: 25, priceLD: 1200, priceUSD: 7.00, label: "Gem Spike" },
-  { id: "d2", d: 50, priceLD: 2350, priceUSD: 13.00, label: "Vault Refill" },
-  { id: "d3", d: 100, priceLD: 4700, priceUSD: 25.00, label: "VIP Crystalline", isVIP: true },
+  { id: "d1", d: 100, priceLD: 200, priceUSD: 1.00, label: "Gem Spike" },
+  { id: "d2", d: 500, priceLD: 1000, priceUSD: 5.00, label: "Vault Refill" },
+  { id: "d3", d: 1500, priceLD: 3000, priceUSD: 15.00, label: "VIP Crystalline", isVIP: true },
 ];
 
 type TabId = "credits" | "complete";
@@ -276,7 +276,6 @@ export default function CurrencyHub() {
                     <span className="text-[9px] font-black uppercase tracking-widest text-white/40">Credit Balance</span>
                   </div>
                   <p className="text-4xl font-black italic text-white tabular-nums">{(currentUser?.creditBalance ?? currentUser?.diamondBalance ?? 0).toFixed(2)}</p>
-                  <p className="text-[9px] text-white/30 font-bold uppercase mt-1">Credits are non-withdrawable and used exclusively for boosts, marketplace promotions, and verification badges.</p>
                 </div>
               </div>
             </div>
@@ -356,7 +355,7 @@ export default function CurrencyHub() {
                     </div>
                     <div>
                       <p className={cn("text-3xl font-black italic tracking-tight leading-none", pkg.isVIP ? "text-white" : "text-foreground")}>
-                        {pkg.d} <span className="text-base">C</span>
+                        {pkg.d.toLocaleString()} <span className="text-base">C</span>
                       </p>
                       <p className={cn("text-[10px] font-bold uppercase tracking-widest mt-1", pkg.isVIP ? "text-white/60" : "text-muted-foreground")}>{pkg.label}</p>
                     </div>
@@ -717,7 +716,7 @@ export default function CurrencyHub() {
                     }
                     <div>
                       <p className="text-3xl font-black italic text-white">
-                        {selectedPackage.gd || selectedPackage.d} {selectedPackage.type === 'Gold' ? 'GD' : 'C'}
+                        {Number(selectedPackage.gd || selectedPackage.d || 0).toLocaleString()} {selectedPackage.type === 'Gold' ? 'GD' : 'C'}
                       </p>
                       <p className="text-xs font-bold text-white/40 uppercase tracking-widest">{selectedPackage.label}</p>
                     </div>

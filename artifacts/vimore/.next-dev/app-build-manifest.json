@@ -1,5 +1,20 @@
 {
   "pages": {
+    "/api/[...path]/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/[...path]/route.js"
+    ],
+    "/api/admin/[...path]/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/admin/[...path]/route.js"
+    ],
+    "/api/oauth/[...path]/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/oauth/[...path]/route.js"
+    ],
     "/layout": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
@@ -16,15 +31,15 @@
       "static/chunks/main-app.js",
       "static/chunks/app/loading.js"
     ],
-    "/login/page": [
+    "/earnings/loading": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/login/page.js"
+      "static/chunks/app/earnings/loading.js"
     ],
-    "/page": [
+    "/earnings/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/page.js"
+      "static/chunks/app/earnings/page.js"
     ],
     "/currency/loading": [
       "static/chunks/webpack.js",
@@ -36,50 +51,30 @@
       "static/chunks/main-app.js",
       "static/chunks/app/currency/page.js"
     ],
-    "/reels/layout": [
+    "/admin/loading": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/reels/layout.js"
+      "static/chunks/app/admin/loading.js"
     ],
-    "/reels/loading": [
+    "/admin/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/reels/loading.js"
+      "static/chunks/app/admin/page.js"
     ],
-    "/reels/page": [
+    "/how-it-works/layout": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/reels/page.js"
+      "static/chunks/app/how-it-works/layout.js"
     ],
-    "/marketplace/layout": [
+    "/how-it-works/loading": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/marketplace/layout.js"
+      "static/chunks/app/how-it-works/loading.js"
     ],
-    "/marketplace/loading": [
+    "/how-it-works/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/marketplace/loading.js"
-    ],
-    "/marketplace/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/marketplace/page.js"
-    ],
-    "/messages/loading": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/messages/loading.js"
-    ],
-    "/messages/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/messages/page.js"
-    ],
-    "/api/[...path]/route": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/api/[...path]/route.js"
+      "static/chunks/app/how-it-works/page.js"
     ]
   }
 }

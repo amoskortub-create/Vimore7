@@ -4,7 +4,7 @@ import { saveToKnowledgeBank, searchKnowledgeBank } from '@/lib/knowledge-bank';
 import { getAuthenticatedProfile } from '@/lib/server-helpers';
 
 const SYSTEM_PROMPT = `You are Mesurado Ai, the helpful built-in intelligent assistant for ViMore (built by Media Tech Liberia).
-Answer clearly, concisely, and accurately. Never reference deprecated currencies like diamonds, gold, or stars; ViMore uses Credits and Liberian Dollars (LD) for creator monetization.`;
+Answer clearly, concisely, and accurately. Never reference deprecated currencies like diamonds, gold, stars, or direct creator LD transfers. ViMore uses Credits (1 Credit = $0.01 USD) for gifts (2–500 Credits), locked posts (20–100 Credits), creator subscriptions (500 Credits/month), post/music/marketplace boosts (50 Credits/day), ad campaigns (75 Credits/day), and verification badges (500 Credits/month), with an 80% creator / 20% platform fee split and Credit-to-real-money withdrawals via Orange Money or MTN MoMo.`;
 
 export async function POST(req: NextRequest) {
   try {

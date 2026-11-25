@@ -29,7 +29,7 @@ const FEATURES = [
     points: [
       { icon: Star, text: "Stars — earned by inviting friends. 5,000 Stars per referral." },
       { icon: Gem, text: "Credits — send gifts to creators, unlock posts, and subscribe to creators." },
-      { icon: TrendingUp, text: "1 Credit = $0.25 USD. Withdraw anytime to Orange or MTN MoMo." },
+      { icon: TrendingUp, text: "1 Credit = $0.01 USD. Withdraw anytime to Orange Money or MTN MoMo." },
     ],
   },
   {
@@ -38,8 +38,8 @@ const FEATURES = [
     label: "Creator Economy",
     title: "Earning as a Creator",
     points: [
-      { icon: TrendingUp, text: "You keep 90% of everything you earn. ViMore takes only 10%." },
-      { icon: Gem, text: "Withdraw your Credits to real money via Orange or MTN MoMo." },
+      { icon: TrendingUp, text: "You keep 80% of everything you earn. ViMore takes 20% platform fees." },
+      { icon: Gem, text: "Withdraw your Credits to real money via Orange Money or MTN MoMo." },
       { icon: ShieldCheck, text: "Every payout is reviewed by our AI audit system for security." },
     ],
   },
@@ -51,7 +51,7 @@ const FEATURES = [
     points: [
       { icon: Rocket, text: "Your feed is personalised by AI — it shows the content most relevant to you." },
       { icon: Zap, text: "Reels — short videos in full-screen, designed for creators to go viral." },
-      { icon: Gem, text: "Lock posts behind a Credit paywall (2–100 C) to monetise your best content." },
+      { icon: Gem, text: "Lock posts behind a Credit paywall (5–20 C) to monetise your best content." },
     ],
   },
   {
@@ -215,19 +215,19 @@ export default function HowItWorks() {
               </div>
               <div>
                 <p className="text-[10px] font-black text-white/60 uppercase tracking-widest">Creator Revenue</p>
-                <h3 className="text-lg font-black text-white leading-tight">The 90 / 10 Split</h3>
+                <h3 className="text-lg font-black text-white leading-tight">The 80 / 20 Split</h3>
               </div>
             </div>
              <p className="text-white/75 text-sm font-medium leading-relaxed">
-               Every Gold or Credit you earn from your content — gifts, unlocks, subscriptions — keeps the same 90/10 split for verified and unverified creators. Transactions under 10 Credits have a 1-Credit minimum fee.
+               Every Credit you earn from your content — gifts (2–50 C), unlocks (5–20 C), and subscriptions (20 C/month) — gives 80% directly to your Credit balance while keeping 20% as platform fees.
             </p>
             <div className="flex gap-3">
               <div className="flex-1 bg-white/10 rounded-xl p-3 text-center">
-                <p className="text-2xl font-black text-white">90%</p>
+                <p className="text-2xl font-black text-white">80%</p>
                 <p className="text-[10px] font-black text-white/60 uppercase">Yours</p>
               </div>
               <div className="flex-1 bg-white/10 rounded-xl p-3 text-center">
-                <p className="text-2xl font-black text-white/50">10%</p>
+                <p className="text-2xl font-black text-white/50">20%</p>
                 <p className="text-[10px] font-black text-white/40 uppercase">Platform</p>
               </div>
             </div>

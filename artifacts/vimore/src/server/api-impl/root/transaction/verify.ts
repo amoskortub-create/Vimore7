@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ID, Query } from 'node-appwrite';
 import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
 import { COL } from '@/lib/appwrite';
+import { CREDIT_PRICES } from '@/lib/credit-pricing';
+import { roundCredits } from '@/lib/transaction-fee';
 import { getAuthenticatedProfile, getUserBalance, safeNotify } from '@/lib/server-helpers';
 
 export async function POST(req: NextRequest) {
@@ -17,7 +19,10 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json().catch(() => ({}));
     const currency = String(body.currency || 'DIAMOND').toUpperCase();
-    const cost = Math.max(1, Math.floor(Number(body.cost || 100)));
+    const isRenewal = Boolean(session.profileDoc.has_ever_been_verified);
+    const cost = currency === 'STAR'
+      ? (isRenewal ? 20000 : 25000)
+      : CREDIT_PRICES.verification;
 
     const db = getAdminDatabases();
     const pending = await db.listDocuments(DATABASE_ID, COL.VERIFICATION_RECORDS, [
@@ -36,37 +41,53 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    let previousBalance = 0;
     let newBalance = 0;
     if (currency === 'STAR') {
-      const current = Number(session.profileDoc.star_balance || 0);
-      if (current < cost) {
+      previousBalance = Number(session.profileDoc.star_balance || 0);
+      if (previousBalance < cost) {
         return NextResponse.json({ error: 'Insufficient Star balance' }, { status: 400 });
       }
-      newBalance = current - cost;
+      newBalance = previousBalance - cost;
       await db.updateDocument(DATABASE_ID, COL.USERS, session.authUser.$id, {
         star_balance: newBalance,
       });
     } else {
-      const current = getUserBalance(session.profileDoc);
-      if (current < cost) {
-        return NextResponse.json({ error: 'Insufficient Credit balance' }, { status: 400 });
+      previousBalance = getUserBalance(session.profileDoc);
+      if (previousBalance < cost) {
+        return NextResponse.json({ error: `Insufficient Credit balance (${cost} Credits required)` }, { status: 400 });
       }
-      newBalance = current - cost;
+      newBalance = roundCredits(previousBalance - cost);
       await db.updateDocument(DATABASE_ID, COL.USERS, session.authUser.$id, {
-        credit_balance: newBalance,
         diamond_balance: newBalance,
+        credit_balance: newBalance,
       });
     }
 
-    await db.createDocument(DATABASE_ID, COL.VERIFICATION_RECORDS, ID.unique(), {
-      user_id: session.authUser.$id,
-      username: String(session.profileDoc.username || ''),
-      name: String(session.profileDoc.name || ''),
-      currency,
-      cost,
-      status: 'PENDING',
-      submitted_at: new Date().toISOString(),
-    });
+    try {
+      await db.createDocument(DATABASE_ID, COL.VERIFICATION_RECORDS, ID.unique(), {
+        user_id: session.authUser.$id,
+        username: String(session.profileDoc.username || ''),
+        name: String(session.profileDoc.name || ''),
+        currency,
+        amount: cost,
+        cost,
+        status: 'PENDING',
+        submitted_at: new Date().toISOString(),
+      });
+    } catch (recErr) {
+      if (currency === 'STAR') {
+        await db.updateDocument(DATABASE_ID, COL.USERS, session.authUser.$id, {
+          star_balance: previousBalance,
+        }).catch(() => {});
+      } else {
+        await db.updateDocument(DATABASE_ID, COL.USERS, session.authUser.$id, {
+          diamond_balance: previousBalance,
+          credit_balance: previousBalance,
+        }).catch(() => {});
+      }
+      throw recErr;
+    }
 
     await safeNotify({
       user_id: session.authUser.$id,

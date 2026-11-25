@@ -57,7 +57,7 @@ export function MusicUpload({ onCancel }: { onCancel: () => void }) {
   const [releaseDate, setReleaseDate] = useState("");
   const [isPublishing, setIsPublishing] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
-  const [unlockPrice, setUnlockPrice] = useState(100);
+  const [unlockPrice, setUnlockPrice] = useState(5);
 
   const [tracks, setTracks] = useState<TrackSlot[]>(
     Array.from({ length: 12 }, (_, i) => ({
@@ -499,15 +499,15 @@ export function MusicUpload({ onCancel }: { onCancel: () => void }) {
                 <Zap className="h-4 w-4 text-primary shrink-0" />
                 <Input
                   type="number"
-                  min="100"
-                  max="500"
+                  min="5"
+                  max="20"
                   step="1"
                   value={unlockPrice}
                   onChange={e => setUnlockPrice(parseFloat(e.target.value))}
                   className="h-10 rounded-xl text-sm font-bold bg-card flex-1"
-                  placeholder="Price in LD"
+                  placeholder="Price in Credits (5-20)"
                 />
-                <span className="text-[11px] font-black text-muted-foreground shrink-0">LD</span>
+                <span className="text-[11px] font-black text-muted-foreground shrink-0">Credits</span>
               </div>
             )}
           </div>

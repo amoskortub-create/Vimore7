@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
 import { COL } from '@/lib/appwrite';
+import { CREDIT_LIMITS } from '@/lib/credit-pricing';
 import { getAuthenticatedProfile } from '@/lib/server-helpers';
 
 export async function POST(req: NextRequest) {
@@ -12,12 +13,19 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json().catch(() => ({}));
     const postId = String(body.postId || '').trim();
-    const price = Math.max(1, Math.floor(Number(body.price || body.unlockPrice || 0)));
+    const rawPrice = Number(body.price ?? body.unlockPrice ?? CREDIT_LIMITS.lockPostMin);
 
     if (!postId) {
       return NextResponse.json({ error: 'postId required' }, { status: 400 });
     }
+    if (!Number.isFinite(rawPrice) || rawPrice < CREDIT_LIMITS.lockPostMin || rawPrice > CREDIT_LIMITS.lockPostMax) {
+      return NextResponse.json(
+        { error: `Locked post price must be between ${CREDIT_LIMITS.lockPostMin} and ${CREDIT_LIMITS.lockPostMax} Credits` },
+        { status: 400 }
+      );
+    }
 
+    const price = Math.round(rawPrice);
     const db = getAdminDatabases();
     const post = await db.getDocument(DATABASE_ID, COL.POSTS, postId);
     if (post.user_id !== session.authUser.$id) {

@@ -3,6 +3,7 @@ import { ID, Query } from 'node-appwrite';
 import { COL } from '@/lib/appwrite';
 import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
 import { getAuthenticatedProfile, safeNotify } from '@/lib/server-helpers';
+import { CREDIT_LIMITS } from '@/lib/credit-pricing';
 
 export async function POST(req: NextRequest) {
   try {
@@ -51,7 +52,13 @@ export async function POST(req: NextRequest) {
     if (typeof body.image_filter === 'string' && body.image_filter) docData.image_filter = body.image_filter;
     if (typeof body.feeling === 'string' && body.feeling) docData.feeling = body.feeling;
     if (typeof body.location === 'string' && body.location) docData.location = body.location;
-    if (typeof body.unlock_price === 'number' && Number.isFinite(body.unlock_price)) {
+    if (docData.is_locked) {
+      const rawPrice = Number(body.unlock_price ?? CREDIT_LIMITS.lockPostMin);
+      const clampedPrice = Number.isFinite(rawPrice)
+        ? Math.min(CREDIT_LIMITS.lockPostMax, Math.max(CREDIT_LIMITS.lockPostMin, Math.round(rawPrice)))
+        : CREDIT_LIMITS.lockPostMin;
+      docData.unlock_price = clampedPrice;
+    } else if (typeof body.unlock_price === 'number' && Number.isFinite(body.unlock_price)) {
       docData.unlock_price = body.unlock_price;
     }
     if (typeof body.poll === 'string' && body.poll) docData.poll = body.poll;

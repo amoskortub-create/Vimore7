@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { usePosts } from "@/context/PostContext";
 import { databases, DATABASE_ID, COL, client, Query } from "@/lib/appwrite";
+import { calculatePlatformFee } from "@/lib/transaction-fee";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -49,17 +50,20 @@ async function fetchAll(collectionId: string, queries: string[] = []): Promise<a
   return results;
 }
 
+const FEE_SPLIT_TYPES = new Set(["GIFT_SENT", "POST_UNLOCK", "SUBSCRIPTION", "TRACK_PURCHASE"]);
+
 async function sumTransactionsByTypes(types: string[]): Promise<{ total: number; count: number }> {
   let total = 0;
   let count = 0;
   for (const type of types) {
     const docs = await fetchAll(COL.TRANSACTIONS, [Query.equal("type", type)]);
     for (const d of docs) {
-      total += d.amount || 0;
+      const raw = Number(d.amount || 0);
+      total += FEE_SPLIT_TYPES.has(type) ? calculatePlatformFee(raw) : raw;
       count++;
     }
   }
-  return { total, count };
+  return { total: Math.round(total * 100) / 100, count };
 }
 
 async function deleteTransactionsByTypes(types: string[]): Promise<number> {

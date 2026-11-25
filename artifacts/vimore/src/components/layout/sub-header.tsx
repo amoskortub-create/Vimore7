@@ -70,10 +70,10 @@ export function SubHeader() {
   const isAdmin = userRole === 'SUPER' || userRole === 'MODERATOR' || userRole === 'FINANCIAL';
 
   const staticAdminCount = isAdmin
-    ? ((withdrawalHistory as any[])?.filter((w) => w.status === 'pending')?.length || 0)
-      + ((paymentRequests as any[])?.filter((p) => p.status === 'pending')?.length || 0)
-      + ((tickets as any[])?.filter((tk) => tk.status === 'open')?.length || 0)
-      + ((reports as any[])?.filter((r) => r.status === 'pending' || r.status === 'open')?.length || 0)
+    ? ((withdrawalHistory as any[])?.filter((w) => String(w.status || '').toUpperCase() === 'PENDING')?.length || 0)
+      + ((paymentRequests as any[])?.filter((p) => String(p.status || '').toUpperCase() === 'PENDING')?.length || 0)
+      + ((tickets as any[])?.filter((tk) => String(tk.status || '').toLowerCase() === 'open')?.length || 0)
+      + ((reports as any[])?.filter((r) => ['pending', 'open'].includes(String(r.status || '').toLowerCase()))?.length || 0)
     : 0;
   const adminBadgeCount = staticAdminCount + (categoryPulses?.ADMIN || 0);
 

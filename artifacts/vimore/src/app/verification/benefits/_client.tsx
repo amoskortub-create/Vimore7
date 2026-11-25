@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
 import Link from "next/link";
 
 const EXAMPLE_AMOUNT = 100;
-const PLATFORM_FEE = 10;
+const PLATFORM_FEE = 20;
 const CREATOR_KEEP = 100 - PLATFORM_FEE;
 const creatorKeeps = EXAMPLE_AMOUNT * (CREATOR_KEEP / 100);
 
@@ -104,7 +104,7 @@ export default function VerifiedBenefitsPage() {
                 </div>
                 <div>
                    <p className="text-2xl font-black tabular-nums text-foreground">{creatorKeeps}</p>
-                  <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">Gold kept of {EXAMPLE_AMOUNT}</p>
+                  <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">Credits kept of {EXAMPLE_AMOUNT}</p>
                 </div>
                 <div className="space-y-1">
                   <div className="flex items-center justify-between text-[10px]">
@@ -132,7 +132,7 @@ export default function VerifiedBenefitsPage() {
                 </div>
                 <div className="relative">
                    <p className="text-2xl font-black tabular-nums text-primary">{creatorKeeps}</p>
-                  <p className="text-[9px] font-bold text-primary/60 uppercase tracking-widest">Gold kept of {EXAMPLE_AMOUNT}</p>
+                  <p className="text-[9px] font-bold text-primary/60 uppercase tracking-widest">Credits kept of {EXAMPLE_AMOUNT}</p>
                 </div>
                 <div className="space-y-1 relative">
                   <div className="flex items-center justify-between text-[10px]">
@@ -144,7 +144,7 @@ export default function VerifiedBenefitsPage() {
                   </div>
                   <div className="flex items-center justify-between text-[10px]">
                     <span className="text-muted-foreground font-bold">Platform fee</span>
-                    <span className="font-black text-green-500">10%</span>
+                    <span className="font-black text-green-500">{PLATFORM_FEE}%</span>
                   </div>
                 </div>
               </div>
@@ -157,7 +157,7 @@ export default function VerifiedBenefitsPage() {
               </div>
               <div>
                  <p className="text-xs font-black text-foreground">The same fair rate applies to every creator</p>
-                 <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Gifts, post unlocks, and subscriptions use a 10% platform fee for both verified and unverified creators. Transactions under 10 Credits have a 1-Credit minimum fee.</p>
+                 <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Gifts (2–50 Credits), post unlocks (5–20 Credits), and subscriptions (20 Credits/month) add 80% to your Credit balance and keep 20% as platform fees.</p>
               </div>
             </div>
           </div>
@@ -265,8 +265,8 @@ export default function VerifiedBenefitsPage() {
             </p>
             <div className="space-y-3">
               {[
-                { icon: Heart, label: "Collect Gifts", desc: "Fans send you Gold or Credits through your posts and reels. The more you post, the more you earn.", color: "text-rose-500", bg: "bg-rose-500/10" },
-                { icon: Gift, label: "Premium Posts", desc: "Lock your best content and earn Gold when followers unlock it. Subscribers pay Credits.", color: "text-cyan-500", bg: "bg-cyan-500/10" },
+                { icon: Heart, label: "Collect Gifts", desc: "Fans send you Credits through your posts and reels. You keep 80% of every gift.", color: "text-rose-500", bg: "bg-rose-500/10" },
+                { icon: Gift, label: "Premium Posts", desc: "Lock your best content (5–20 Credits) and earn 80% when followers unlock it. Subscribers pay 20 Credits/month.", color: "text-cyan-500", bg: "bg-cyan-500/10" },
                 { icon: Star, label: "Star Reactions", desc: "Fans can send Stars directly via your posts. Collect 25,000 to pay with Stars instead.", color: "text-amber-500", bg: "bg-amber-500/10" },
                 { icon: MessageCircle, label: "Boost Engagement", desc: "More comments, shares and views increase your profile ranking and drive more gifting from fans.", color: "text-violet-500", bg: "bg-violet-500/10" },
               ].map((item) => (
@@ -290,7 +290,7 @@ export default function VerifiedBenefitsPage() {
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-white/60 dark:bg-white/5 rounded-2xl p-3.5 text-center space-y-1 border border-cyan-500/15">
               <Gem className="h-5 w-5 text-cyan-500 mx-auto" />
-              <p className="text-xl font-black text-foreground">8</p>
+              <p className="text-xl font-black text-foreground">20</p>
               <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Credits / mo</p>
             </div>
             <div className="bg-white/60 dark:bg-white/5 rounded-2xl p-3.5 text-center space-y-1 border border-amber-500/15">

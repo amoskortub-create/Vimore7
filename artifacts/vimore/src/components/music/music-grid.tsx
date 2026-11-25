@@ -406,10 +406,10 @@ export function MusicGrid({ type, items = [], title }: MusicGridProps) {
             <div className="bg-cyan-500/5 border border-cyan-500/20 rounded-2xl p-5 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">Unlock Price</span>
-                <span className="text-2xl font-black text-cyan-400">{unlockTarget.unlockPrice?.toFixed(0)} LD</span>
+                <span className="text-2xl font-black text-cyan-400">{unlockTarget.unlockPrice?.toFixed(0)} Credits</span>
               </div>
               <p className="text-[11px] text-muted-foreground leading-relaxed">
-                One-time Orange Money payment to unlock this {unlockTarget.songs ? 'album' : 'track'} forever.
+                One-time Credit unlock (80% goes to the creator, 20% platform fee) to access this {unlockTarget.songs ? 'album' : 'track'} forever.
               </p>
             </div>
 
@@ -420,7 +420,7 @@ export function MusicGrid({ type, items = [], title }: MusicGridProps) {
                 disabled={isUnlocking}
               >
                 {isUnlocking ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : <Lock className="h-4 w-4 mr-2" />}
-                {isUnlocking ? "Processing..." : `Unlock for ${unlockTarget.unlockPrice?.toFixed(0)} LD`}
+                {isUnlocking ? "Processing..." : `Unlock for ${unlockTarget.unlockPrice?.toFixed(0)} Credits`}
               </Button>
               <Button
                 variant="ghost"

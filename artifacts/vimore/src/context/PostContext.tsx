@@ -354,7 +354,7 @@ interface PostContextType {
   recordWithdrawal: (node: any) => Promise<void>;
   processWithdrawal: (id: string, status: 'APPROVED' | 'REJECTED', adminMessage?: string, proofImageUrl?: string) => Promise<void>;
   verifyUser: (cost: number, currency: 'DIAMOND' | 'STAR') => Promise<void>;
-  processGiftTransaction: (cost: number, currency: 'GOLD' | 'DIAMOND') => Promise<void>;
+  processGiftTransaction: (cost: number, itemMeta?: 'GOLD' | 'DIAMOND' | { itemId?: string; itemName?: string }) => Promise<void>;
   unlockPost: (postId: string, cost: number) => Promise<void>;
   subscribeToCreator: (username: string, cost: number) => Promise<void>;
   cancelSubscription: (username: string) => Promise<void>;
@@ -435,7 +435,7 @@ const INITIAL_SETTINGS: AppSettings = {
   isHardwareEnrolled: false, biometricProtectedAreas: ['messages', 'earnings', 'currency'],
   taggingPrivacy: 'everyone', discoveryVisibility: 'everyone',
   showReadReceipts: true, legacyContact: null, isSilenceActive: false, silenceStart: "22:00",
-  silenceEnd: "07:00", defaultStream: 'foryou', goldRate: 0.01, diamondRate: 0.25,
+  silenceEnd: "07:00", defaultStream: 'foryou', goldRate: 0.01, diamondRate: 0.01,
   ldMultiplier: 190, isMusicEnabled: true, isGiftingEnabled: true,
   isAiVerificationActive: true, isSensitivityFilterActive: false,
 };
@@ -3638,7 +3638,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
   const unlockPost = useCallback(async (postId: string, _ignoredCost: number) => {
     if (!currentUser) return;
-    const res = await authFetch('/api/monetization/unlock-post', {
+    const res = await authFetch('/api/transaction/unlock-post', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ postId }),
@@ -3647,8 +3647,19 @@ export function PostProvider({ children }: { children: ReactNode }) {
     if (!res.ok) {
       throw new Error(data?.error || 'Unlock failed');
     }
-    window.location.href = data.dialerUri;
-    toast({ title: "Orange Money payment started", description: `Pay ${data.amountLD} LD to unlock this post.` });
+    setUnlockedPostIdsState(prev => new Set(prev).add(postId));
+    if (typeof data.newBalance === 'number') {
+      setCurrentUserState(prev =>
+        prev ? { ...prev, diamondBalance: data.newBalance, creditBalance: data.newBalance } : null
+      );
+    }
+    toast({
+      title: "Post Unlocked!",
+      description:
+        typeof data.creatorShare === 'number'
+          ? `${data.creatorShare} Credits sent to creator · ${data.platformFee ?? 0} Credits platform fee`
+          : "Content is now unlocked.",
+    });
   }, [currentUser, toast]);
 
   const subscribeToCreator = useCallback(async (username: string, _ignoredCost: number) => {
@@ -3670,9 +3681,23 @@ export function PostProvider({ children }: { children: ReactNode }) {
       throw new Error(data?.error || 'Subscription failed');
     }
     if (typeof data.subscriberNewBalance === 'number') {
-      setCurrentUserState(prev => prev ? { ...prev, diamondBalance: data.subscriberNewBalance } : null);
+      setCurrentUserState(prev =>
+        prev
+          ? {
+              ...prev,
+              diamondBalance: data.subscriberNewBalance,
+              creditBalance: data.subscriberNewBalance,
+            }
+          : null
+      );
     }
-    toast({ title: "Subscribed!", description: `${data.creatorShare ?? ''} Credits sent to @${username} · ${data.platformFee ?? ''} Credits platform fee` });
+    toast({
+      title: "Subscribed!",
+      description:
+        typeof data.creatorShare === 'number'
+          ? `${data.creatorShare} Credits sent to @${username} · ${data.platformFee ?? 0} Credits platform fee`
+          : `Active monthly subscription to @${username}`,
+    });
   }, [currentUser, allUsers, toast]);
 
   const cancelSubscription = useCallback(async (username: string) => {
@@ -3688,34 +3713,64 @@ export function PostProvider({ children }: { children: ReactNode }) {
         Query.equal('status', 'ACTIVE'),
       ]);
       for (const doc of existing.documents) {
-        await databases.updateDocument(DATABASE_ID, COL.SUBSCRIPTIONS, doc.$id, { status: 'CANCELLED' });
+        await databases.updateDocument(DATABASE_ID, COL.SUBSCRIPTIONS, doc.$id, { status: 'CANCELLED', isActive: false });
       }
     } catch { /* ignore */ }
     toast({ title: "Subscription cancelled" });
   }, [currentUser, allUsers, toast]);
 
-  const processGiftTransaction = useCallback(async (cost: number, _currency: 'GOLD' | 'DIAMOND' = 'DIAMOND') => {
+  const processGiftTransaction = useCallback(async (
+    cost: number,
+    itemMeta?: 'GOLD' | 'DIAMOND' | { itemId?: string; itemName?: string }
+  ) => {
     if (!currentUser) throw new Error("Not logged in");
     if (!targetUserForGift) throw new Error("No recipient selected");
 
+    const currentBal = currentUser.creditBalance ?? currentUser.diamondBalance ?? 0;
+    const optimisticBal = Math.round((currentBal - cost) * 100) / 100;
+
     // Optimistic balance deduction for snappy UI
-    setCurrentUserState(prev => prev ? { ...prev, diamondBalance: (prev.diamondBalance || 0) - cost } : null);
+    setCurrentUserState(prev =>
+      prev ? { ...prev, diamondBalance: optimisticBal, creditBalance: optimisticBal } : null
+    );
+
+    const payload: Record<string, any> = {
+      recipientId: targetUserForGift.$id,
+      amount: cost,
+    };
+    if (itemMeta && typeof itemMeta === 'object') {
+      if (itemMeta.itemId) payload.itemId = itemMeta.itemId;
+      if (itemMeta.itemName) payload.itemName = itemMeta.itemName;
+    }
 
     const res = await authFetch('/api/transaction/gift', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipientId: targetUserForGift.$id, amount: cost }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       // Rollback optimistic deduction
-      setCurrentUserState(prev => prev ? { ...prev, diamondBalance: (prev.diamondBalance || 0) + cost } : null);
+      setCurrentUserState(prev =>
+        prev ? { ...prev, diamondBalance: currentBal, creditBalance: currentBal } : null
+      );
       throw new Error(data?.error || 'Gift failed');
     }
     if (typeof data.senderNewBalance === 'number') {
-      setCurrentUserState(prev => prev ? { ...prev, diamondBalance: data.senderNewBalance } : null);
+      setCurrentUserState(prev =>
+        prev
+          ? {
+              ...prev,
+              diamondBalance: data.senderNewBalance,
+              creditBalance: data.senderNewBalance,
+            }
+          : null
+      );
     }
-    toast({ title: "Gift sent!", description: `${data.creatorShare ?? ''} Credits sent to creator · ${data.platformFee ?? ''} Credits platform fee` });
+    toast({
+      title: "Gift sent!",
+      description: `${data.creatorShare ?? ''} Credits sent to creator · ${data.platformFee ?? ''} Credits platform fee`,
+    });
   }, [currentUser, targetUserForGift, toast]);
 
   const verifyUser = useCallback(async (cost: number, currency: 'DIAMOND' | 'STAR') => {
@@ -4107,67 +4162,53 @@ export function PostProvider({ children }: { children: ReactNode }) {
     if (!res.ok) throw new Error(data.error || 'Withdrawal failed');
 
     // Update local balance with the server-confirmed value
-    setCurrentUserState(prev =>
-      prev ? { ...prev, [balanceField]: data.newBalance } : null
-    );
+    setCurrentUserState(prev => {
+      if (!prev) return null;
+      if (balanceField === 'diamondBalance') {
+        return { ...prev, diamondBalance: data.newBalance, creditBalance: data.newBalance };
+      }
+      return { ...prev, [balanceField]: data.newBalance };
+    });
 
     const wd: Record<string, any> = {
       $id: data.withdrawalId,
       ...n,
+      payoutAmount: data.payoutAmount ?? n.payoutAmount,
+      payoutCurrency: data.payoutCurrency ?? n.payoutCurrency ?? 'USD',
+      method: data.method ?? n.method ?? '',
       status: 'PENDING',
       $createdAt: new Date().toISOString(),
       username: currentUser.username,
       accountName: n.accountName || '',
-      method: n.method || '',
+      account_name: n.accountName || '',
+      accountNumber: n.accountNumber || n.phoneNumber || '',
+      account_number: n.accountNumber || n.phoneNumber || '',
     };
     setWithdrawalHistory(prev => [wd, ...prev]);
   };
 
   const processWithdrawal = async (id: string, status: 'APPROVED' | 'REJECTED', adminMessage?: string, proofImageUrl?: string) => {
+    const prevSnapshot = withdrawalHistory.find(w => w.$id === id);
     setWithdrawalHistory(prev => prev.map(w => w.$id === id ? { ...w, status } : w));
     try {
-      await databases.updateDocument(DATABASE_ID, COL.WITHDRAWAL_REQUESTS, id, { status });
-      // Fetch the withdrawal doc to get user_id and amount for notification
-      const wdDoc = await databases.getDocument(DATABASE_ID, COL.WITHDRAWAL_REQUESTS, id);
-      const notifTitle = status === 'APPROVED' ? 'Withdrawal Approved' : 'Withdrawal Rejected';
-      const baseMsg = status === 'APPROVED'
-        ? `Your withdrawal of ${wdDoc.amount} ${wdDoc.currency} has been approved.`
-        : `Your withdrawal of ${wdDoc.amount} ${wdDoc.currency} has been rejected.`;
-      const fullMsg = adminMessage ? `${baseMsg} ${adminMessage}` : baseMsg;
-      const notifData: Record<string, any> = {
-        user_id: wdDoc.user_id,
-        type: 'SYSTEM',
-        title: notifTitle,
-        message: fullMsg,
-        content: fullMsg,
-        is_read: false,
-      };
-      if (proofImageUrl) notifData.image = proofImageUrl;
-      await databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), notifData);
-      // If REJECTED, refund the balance
-      if (status === 'REJECTED') {
-        const currency: string = wdDoc.currency || 'GOLD';
-        const dbBalanceField = currency === 'DIAMOND' ? 'diamond_balance' : currency === 'STAR' ? 'star_balance' : 'gold_balance';
-        const balanceField = currency === 'DIAMOND' ? 'diamondBalance' : currency === 'STAR' ? 'starBalance' : 'goldBalance';
-        if (wdDoc.user_id === currentUser?.$id) {
-          const currentBalance = (currentUser as any)[balanceField] || 0;
-          setCurrentUserState(prev => prev ? { ...prev, [balanceField]: currentBalance + (wdDoc.amount || 0) } : null);
-          await databases.updateDocument(DATABASE_ID, COL.USERS, wdDoc.user_id, {
-            [dbBalanceField]: currentBalance + (wdDoc.amount || 0),
-          });
-        } else {
-          // Update balance of the user whose withdrawal was rejected (admin side)
-          const userRes = await databases.listDocuments(DATABASE_ID, COL.USERS, [Query.equal('$id', wdDoc.user_id), Query.limit(1)]);
-          if (userRes.documents[0]) {
-            const userDoc = userRes.documents[0];
-            const dbBal = currency === 'DIAMOND' ? 'diamond_balance' : currency === 'STAR' ? 'star_balance' : 'gold_balance';
-            await databases.updateDocument(DATABASE_ID, COL.USERS, userDoc.$id, {
-              [dbBal]: (userDoc[dbBal] || 0) + (wdDoc.amount || 0),
-            });
-          }
+      const res = await authFetch('/api/withdraw/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, status, adminMessage, proofImageUrl }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (prevSnapshot) {
+          setWithdrawalHistory(prev => prev.map(w => w.$id === id ? prevSnapshot : w));
         }
+        throw new Error(data?.error || 'Could not process withdrawal');
       }
-    } catch { /* ignore */ }
+    } catch (err) {
+      if (prevSnapshot) {
+        setWithdrawalHistory(prev => prev.map(w => w.$id === id ? prevSnapshot : w));
+      }
+      throw err;
+    }
   };
 
   const createCluster = async (name: string, members: any[], logoFile?: File) => {
@@ -4519,7 +4560,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
     const expiryMs = Date.now() + duration * 86400000;
     const expiry = new Date(expiryMs).toISOString();
-    const balanceUpdate = { credit_balance: currentBalance - totalCost, diamond_balance: currentBalance - totalCost };
+    const balanceUpdate = { diamond_balance: currentBalance - totalCost };
 
     if (type === 'POST') {
       // Optimistic update
@@ -4808,7 +4849,6 @@ export function PostProvider({ children }: { children: ReactNode }) {
           is_verified: true,
           has_ever_been_verified: true,
           verification_expiry: newExpiry,
-          credit_balance: newBalance,
           diamond_balance: newBalance,
         });
         setCurrentUserState(prev => prev ? {
@@ -5019,7 +5059,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
         const { boostProductFeatured, BOOST_DAYS_PER_DIAMOND } = await import('@/lib/marketplace');
         const newUntil = await boostProductFeatured(productId, credits);
         const days = credits * BOOST_DAYS_PER_DIAMOND;
-        await databases.updateDocument(DATABASE_ID, COL.USERS, currentUser.$id, { credit_balance: balance - credits, diamond_balance: balance - credits });
+        await databases.updateDocument(DATABASE_ID, COL.USERS, currentUser.$id, { diamond_balance: balance - credits });
         setCurrentUserState(prev => prev ? { ...prev, creditBalance: balance - credits, diamondBalance: balance - credits } : null);
         try {
           await databases.createDocument(DATABASE_ID, COL.TRANSACTIONS, ID.unique(), {

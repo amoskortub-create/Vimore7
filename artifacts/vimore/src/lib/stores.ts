@@ -238,7 +238,6 @@ export async function boostStoreWithDiamonds(
   const nextBalance = currentBalance - cost;
   await databases.updateDocument(DATABASE_ID, COL.USERS, userId, {
     diamond_balance: nextBalance,
-    credit_balance: nextBalance,
   });
   await databases.updateDocument(DATABASE_ID, COL.STORES, storeId, {
     boost_until: newUntil,

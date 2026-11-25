@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     const db = getAdminDatabases();
     const record: any = await db.getDocument(DATABASE_ID, COL.VERIFICATION_RECORDS, recordId);
     const userId = record.user_id;
-    const cost = Number(record.cost || 0);
+    const cost = Number(record.cost ?? record.amount ?? 0);
 
     await db.updateDocument(DATABASE_ID, COL.VERIFICATION_RECORDS, recordId, {
       status: 'REJECTED',

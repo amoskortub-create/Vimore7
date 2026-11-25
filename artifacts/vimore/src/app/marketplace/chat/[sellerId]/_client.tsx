@@ -12,7 +12,7 @@ import { usePosts } from "@/context/PostContext";
 import { cn } from "@/lib/utils";
 import { BUCKET, getFileUrl, formatTimeAgo } from "@/lib/appwrite";
 import { authFetch } from "@/lib/auth-fetch";
-import { uploadViaClient } from "@/lib/upload";
+import { uploadViaClient, optimizeAndBufferImage } from "@/lib/upload";
 import {
   ArrowLeft, Send, Paperclip, Mic, StopCircle,
   ShoppingBag, Store, Loader2, X, Play, Pause, User,
@@ -244,12 +244,16 @@ export default function MarketplaceChatPage() {
     await sendMsg({ text: t, type: "text" });
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const url = URL.createObjectURL(file);
-    setMediaPreview({ file, url });
-    e.target.value = "";
+    try {
+      const prepared = file.type.startsWith("image/") ? await optimizeAndBufferImage(file) : file;
+      const url = URL.createObjectURL(prepared);
+      setMediaPreview({ file: prepared, url });
+    } finally {
+      e.target.value = "";
+    }
   };
 
   // ── Voice recording ───────────────────────────────────────────────────────

@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useMusic } from "@/context/MusicContext";
 import { CreateStoryModal } from "@/components/feed/create-story-modal";
 import { ImageRefinementPortal } from "@/components/profile/image-refinement-portal";
+import { optimizeAndBufferImage } from "@/lib/upload";
 import { useRouter } from "next/navigation";
 import { 
   ArrowLeft, 
@@ -429,7 +430,7 @@ export default function MyProfilePage() {
               <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
                 <button onClick={() => coverInputRef.current?.click()} className="bg-white/20 backdrop-blur-md p-3 rounded-full border border-white/30 text-white hover:bg-white/40 transition-all"><Camera className="h-6 w-6" /></button>
               </div>
-              <input type="file" ref={coverInputRef} className="hidden" accept="image/*" onChange={(e) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => { setRefiningImage(reader.result as string); setRefiningMode('cover'); setIsRefinementOpen(true); }; reader.readAsDataURL(file); } }} />
+              <input type="file" ref={coverInputRef} className="hidden" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (!file) return; try { const prepared = await optimizeAndBufferImage(file, { maxEdge: 1600, quality: 0.86 }); const reader = new FileReader(); reader.onloadend = () => { setRefiningImage(reader.result as string); setRefiningMode('cover'); setIsRefinementOpen(true); }; reader.readAsDataURL(prepared); } finally { e.target.value = ''; } }} />
             </div>
             
             <div className="px-4 pb-4">
@@ -442,7 +443,7 @@ export default function MyProfilePage() {
                   <div className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                     <button onClick={() => avatarInputRef.current?.click()} className="bg-white/20 backdrop-blur-md p-3 rounded-full border border-white/30 text-white hover:bg-white/40 transition-all"><Camera className="h-8 w-8" /></button>
                   </div>
-                  <input type="file" ref={avatarInputRef} className="hidden" accept="image/*" onChange={(e) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => { setRefiningImage(reader.result as string); setRefiningMode('avatar'); setIsRefinementOpen(true); }; reader.readAsDataURL(file); } }} />
+                  <input type="file" ref={avatarInputRef} className="hidden" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (!file) return; try { const prepared = await optimizeAndBufferImage(file, { maxEdge: 1200, quality: 0.86 }); const reader = new FileReader(); reader.onloadend = () => { setRefiningImage(reader.result as string); setRefiningMode('avatar'); setIsRefinementOpen(true); }; reader.readAsDataURL(prepared); } finally { e.target.value = ''; } }} />
                 </div>
               </div>
               

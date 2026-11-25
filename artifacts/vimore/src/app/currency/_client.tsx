@@ -35,6 +35,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { BiometricGate } from "@/components/layout/biometric-gate";
+import { optimizeAndBufferImage } from "@/lib/upload";
 
 const CREDIT_PACKAGES = [
   { id: "d1", d: 25, priceLD: 1200, priceUSD: 7.00, label: "Gem Spike" },
@@ -158,13 +159,23 @@ export default function CurrencyHub() {
     }
   };
 
-  const handleScreenshotUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleScreenshotUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      triggerHaptic(10);
-      const reader = new FileReader();
-      reader.onloadend = () => setUploadedScreenshot(reader.result as string);
-      reader.readAsDataURL(file);
+    if (!file) return;
+    triggerHaptic(10);
+    try {
+      const prepared = await optimizeAndBufferImage(file, { maxEdge: 1440, quality: 0.85 });
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('Could not read screenshot'));
+        reader.readAsDataURL(prepared);
+      });
+      setUploadedScreenshot(dataUrl);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Screenshot Error", description: err?.message || "Could not load the selected screenshot." });
+    } finally {
+      e.target.value = "";
     }
   };
 

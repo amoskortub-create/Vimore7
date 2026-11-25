@@ -1,10 +1,5 @@
 {
   "pages": {
-    "/api/[...path]/route": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/api/[...path]/route.js"
-    ],
     "/layout": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
@@ -21,6 +16,26 @@
       "static/chunks/main-app.js",
       "static/chunks/app/loading.js"
     ],
+    "/login/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/login/page.js"
+    ],
+    "/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/page.js"
+    ],
+    "/currency/loading": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/currency/loading.js"
+    ],
+    "/currency/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/currency/page.js"
+    ],
     "/reels/layout": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
@@ -36,20 +51,35 @@
       "static/chunks/main-app.js",
       "static/chunks/app/reels/page.js"
     ],
-    "/music/layout": [
+    "/marketplace/layout": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/music/layout.js"
+      "static/chunks/app/marketplace/layout.js"
     ],
-    "/music/loading": [
+    "/marketplace/loading": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/music/loading.js"
+      "static/chunks/app/marketplace/loading.js"
     ],
-    "/music/page": [
+    "/marketplace/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/music/page.js"
+      "static/chunks/app/marketplace/page.js"
+    ],
+    "/messages/loading": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/messages/loading.js"
+    ],
+    "/messages/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/messages/page.js"
+    ],
+    "/api/[...path]/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/[...path]/route.js"
     ]
   }
 }

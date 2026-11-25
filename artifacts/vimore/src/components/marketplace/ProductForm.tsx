@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { usePosts } from "@/context/PostContext";
 import { createProduct, normalizePhoneE164, ProductCurrency } from "@/lib/marketplace";
 import { getMyStore, StoreDoc, STORE_CATEGORIES, StoreCategory } from "@/lib/stores";
+import { optimizeAndBufferImage } from "@/lib/upload";
 import { Camera, X, Loader2, Store } from "lucide-react";
 
 const MAX_PHOTOS = 2;
@@ -44,23 +45,30 @@ export function ProductForm({ onSuccess }: { onSuccess?: () => void } = {}) {
     });
   }, [currentUser?.$id]);
 
-  const onFilesPicked = (e: ChangeEvent<HTMLInputElement>) => {
+  const onFilesPicked = async (e: ChangeEvent<HTMLInputElement>) => {
     const picked = Array.from(e.target.files || []);
     if (!picked.length) return;
-    const remaining = MAX_PHOTOS - files.length;
-    if (remaining <= 0) {
-      toast({ variant: "destructive", title: "Max 2 photos", description: "Remove a photo to add a different one." });
+    try {
+      const remaining = MAX_PHOTOS - files.length;
+      if (remaining <= 0) {
+        toast({ variant: "destructive", title: "Max 2 photos", description: "Remove a photo to add a different one." });
+        return;
+      }
+      if (picked.length > remaining) {
+        toast({ variant: "destructive", title: "Max 2 photos", description: `Only the first ${remaining} added.` });
+      }
+      const accepted = picked.slice(0, remaining);
+      const prepared = await Promise.all(
+        accepted.map(f => optimizeAndBufferImage(f, { maxEdge: 1200, quality: 0.82 }))
+      );
+      const newPreviews = prepared.map(f => URL.createObjectURL(f));
+      setFiles(prev => [...prev, ...prepared]);
+      setPreviews(prev => [...prev, ...newPreviews]);
+    } catch {
+      toast({ variant: "destructive", title: "Could not read photo", description: "Please pick the image again." });
+    } finally {
       e.target.value = "";
-      return;
     }
-    if (picked.length > remaining) {
-      toast({ variant: "destructive", title: "Max 2 photos", description: `Only the first ${remaining} added.` });
-    }
-    const accepted = picked.slice(0, remaining);
-    const newPreviews = accepted.map(f => URL.createObjectURL(f));
-    setFiles(prev => [...prev, ...accepted]);
-    setPreviews(prev => [...prev, ...newPreviews]);
-    e.target.value = "";
   };
 
   const removeFile = (idx: number) => {

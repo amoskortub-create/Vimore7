@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { databases, DATABASE_ID, COL, BUCKET, ID, getFileUrl, Query } from "@/lib/appwrite";
-import { uploadViaClient } from "@/lib/upload";
+import { uploadViaClient, optimizeAndBufferImage } from "@/lib/upload";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -100,11 +100,17 @@ export function AdminTicketTab({ currentUserId }: { currentUserId: string }) {
     setEventStats(stats);
   };
 
-  const handleFlyerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFlyerChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setFlyerFile(file);
-      setFlyerPreview(URL.createObjectURL(file));
+    if (!file) return;
+    try {
+      const prepared = await optimizeAndBufferImage(file, { maxEdge: 1600, quality: 0.85 });
+      setFlyerFile(prepared);
+      setFlyerPreview(URL.createObjectURL(prepared));
+    } catch {
+      toast({ variant: 'destructive', title: 'Could not read flyer', description: 'Please pick the image again.' });
+    } finally {
+      e.target.value = '';
     }
   };
 

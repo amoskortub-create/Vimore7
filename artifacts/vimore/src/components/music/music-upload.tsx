@@ -18,6 +18,7 @@ import { useMusic, Track, Album } from "@/context/MusicContext";
 import { usePosts } from "@/context/PostContext";
 import { BUCKET_MUSIC, BUCKET } from "@/lib/appwrite";
 import { parseFollowerCount } from "@/lib/utils";
+import { optimizeAndBufferImage } from "@/lib/upload";
 
 interface TrackSlot {
   id: number;
@@ -89,14 +90,25 @@ export function MusicUpload({ onCancel }: { onCancel: () => void }) {
     if (type === "single") setTracks(prev => prev.slice(0, 1));
   };
 
-  const handleCoverUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     triggerHaptic(10);
-    setCoverFile(file);
-    const reader = new FileReader();
-    reader.onloadend = () => setCoverArt(reader.result as string);
-    reader.readAsDataURL(file);
+    try {
+      const prepared = await optimizeAndBufferImage(file, { maxEdge: 1200, quality: 0.85 });
+      setCoverFile(prepared);
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('Could not read cover'));
+        reader.readAsDataURL(prepared);
+      });
+      setCoverArt(dataUrl);
+    } catch {
+      toast({ variant: "destructive", title: "Could not load cover", description: "Please pick the image again." });
+    } finally {
+      e.target.value = "";
+    }
   };
 
   const updateTrack = (id: number, data: Partial<TrackSlot>) =>

@@ -33,7 +33,9 @@ import * as NotificationsDelete from '@/server/api-impl/root/notifications-delet
 import * as NotificationsList from '@/server/api-impl/root/notifications-list';
 import * as NotificationsMarkRead from '@/server/api-impl/root/notifications-mark-read';
 import * as PaymentApprove from '@/server/api-impl/root/payment/approve';
+import * as PaymentCreate from '@/server/api-impl/root/payment/create';
 import * as PaymentReject from '@/server/api-impl/root/payment/reject';
+import * as PostsCreate from '@/server/api-impl/root/posts/create';
 import * as Presence from '@/server/api-impl/root/presence';
 import * as PushSend from '@/server/api-impl/root/push/send';
 import * as PushSubscribe from '@/server/api-impl/root/push/subscribe';
@@ -99,7 +101,9 @@ const ROUTES: Record<string, Handler> = {
   'notifications/list': NotificationsList,
   'notifications/mark-read': NotificationsMarkRead,
   'payment/approve': PaymentApprove,
+  'payment/create': PaymentCreate,
   'payment/reject': PaymentReject,
+  'posts/create': PostsCreate,
   'presence': Presence,
   'push/send': PushSend,
   'push/subscribe': PushSubscribe,

@@ -1,3 +1,8 @@
 {
-  "/api/[...path]/route": "app/api/[...path]/route.js"
+  "/api/[...path]/route": "app/api/[...path]/route.js",
+  "/page": "app/page.js",
+  "/currency/page": "app/currency/page.js",
+  "/messages/page": "app/messages/page.js",
+  "/reels/page": "app/reels/page.js",
+  "/marketplace/page": "app/marketplace/page.js"
 }

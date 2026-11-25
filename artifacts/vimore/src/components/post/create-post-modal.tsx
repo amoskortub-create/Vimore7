@@ -78,6 +78,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Progress } from "@/components/ui/progress";
+import { optimizeAndBufferImage } from "@/lib/upload";
 import { BUCKET_IMAGES } from "@/lib/appwrite";
 
 interface CreatePostModalProps {
@@ -346,30 +347,51 @@ export function CreatePostModal({ children, sharedPost, initialContent, onOpen }
     const fileArray = Array.from(files);
     const isVideo = fileArray[0].type.startsWith('video/');
 
-    if (isVideo) {
-      const file = fileArray[0];
-      const objUrl = URL.createObjectURL(file);
-      const tempVideo = document.createElement('video');
-      tempVideo.src = objUrl;
-      await new Promise<void>(resolve => { tempVideo.onloadedmetadata = () => resolve(); tempVideo.load(); });
-      URL.revokeObjectURL(objUrl);
-      if (tempVideo.duration > 303) {
-        triggerHaptic(25);
-        toast({ title: "Video Too Long", description: "Videos must be 5 minutes 3 seconds or shorter." });
-        e.target.value = '';
-        return;
+    try {
+      if (isVideo) {
+        const file = fileArray[0];
+        const objUrl = URL.createObjectURL(file);
+        const tempVideo = document.createElement('video');
+        tempVideo.preload = 'metadata';
+        tempVideo.src = objUrl;
+        await new Promise<void>(resolve => {
+          const done = () => {
+            tempVideo.onloadedmetadata = null;
+            tempVideo.onerror = null;
+            clearTimeout(timer);
+            resolve();
+          };
+          const timer = setTimeout(done, 3000);
+          tempVideo.onloadedmetadata = done;
+          tempVideo.onerror = done;
+          try { tempVideo.load(); } catch { done(); }
+        });
+        const dur = tempVideo.duration;
+        URL.revokeObjectURL(objUrl);
+        if (Number.isFinite(dur) && dur > 303) {
+          triggerHaptic(25);
+          toast({ title: "Video Too Long", description: "Videos must be 5 minutes 3 seconds or shorter." });
+          return;
+        }
+        setMediaType('video');
+        setStagedFiles([file]);
+        setSelectedMedia([URL.createObjectURL(file)]);
+      } else {
+        const prepared = await Promise.all(
+          fileArray.slice(0, 6).map(f => optimizeAndBufferImage(f))
+        );
+        setMediaType('image');
+        setStagedFiles(prev => [...prev, ...prepared].slice(0, 6));
+        const urls = prepared.map(file => URL.createObjectURL(file));
+        setSelectedMedia(prev => [...prev, ...urls].slice(0, 6));
       }
-      setMediaType('video');
-      setStagedFiles([file]);
-      setSelectedMedia([URL.createObjectURL(file)]);
-    } else {
-      setMediaType('image');
-      setStagedFiles(prev => [...prev, ...fileArray].slice(0, 6));
-      const urls = fileArray.map(file => URL.createObjectURL(file));
-      setSelectedMedia(prev => [...prev, ...urls].slice(0, 6));
+      setSelectedTheme(backgroundThemes[0]);
+      setShowThemeSelector(false);
+    } catch {
+      toast({ variant: 'destructive', title: 'Could not load media', description: 'Please select the file again.' });
+    } finally {
+      e.target.value = '';
     }
-    setSelectedTheme(backgroundThemes[0]);
-    setShowThemeSelector(false);
   };
 
   const handleReelVideoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -378,9 +400,21 @@ export function CreatePostModal({ children, sharedPost, initialContent, onOpen }
     triggerHaptic(10);
     const objUrl = URL.createObjectURL(file);
     const tempVideo = document.createElement('video');
+    tempVideo.preload = 'metadata';
     tempVideo.src = objUrl;
-    await new Promise<void>(resolve => { tempVideo.onloadedmetadata = () => resolve(); tempVideo.load(); });
-    if (tempVideo.duration > 1800) {
+    await new Promise<void>(resolve => {
+      const done = () => {
+        tempVideo.onloadedmetadata = null;
+        tempVideo.onerror = null;
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(done, 3000);
+      tempVideo.onloadedmetadata = done;
+      tempVideo.onerror = done;
+      try { tempVideo.load(); } catch { done(); }
+    });
+    if (Number.isFinite(tempVideo.duration) && tempVideo.duration > 1800) {
       triggerHaptic(25);
       URL.revokeObjectURL(objUrl);
       toast({ title: "Video Too Long", description: "Reel videos must be 30 minutes or shorter." });
@@ -389,7 +423,7 @@ export function CreatePostModal({ children, sharedPost, initialContent, onOpen }
     }
     setStagedReelFile(file);
     setStagedReelUrl(objUrl);
-    setStagedReelDuration(tempVideo.duration);
+    setStagedReelDuration(Number.isFinite(tempVideo.duration) ? tempVideo.duration : 0);
     e.target.value = '';
   };
 

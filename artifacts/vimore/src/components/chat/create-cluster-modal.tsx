@@ -18,6 +18,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { usePosts, Connection } from "@/context/PostContext";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { optimizeAndBufferImage } from "@/lib/upload";
 
 export function CreateClusterModal({ children }: { children: React.ReactNode }) {
   const { connections, createCluster, triggerHaptic } = usePosts();
@@ -50,13 +51,19 @@ export function CreateClusterModal({ children }: { children: React.ReactNode }) 
     });
   };
 
-  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (logoPreview) URL.revokeObjectURL(logoPreview);
-    setLogoFile(file);
-    setLogoPreview(URL.createObjectURL(file));
-    if (e.target) e.target.value = "";
+    try {
+      const prepared = await optimizeAndBufferImage(file, { maxEdge: 1024, quality: 0.85 });
+      if (logoPreview) URL.revokeObjectURL(logoPreview);
+      setLogoFile(prepared);
+      setLogoPreview(URL.createObjectURL(prepared));
+    } catch {
+      toast({ variant: "destructive", title: "Could not read logo", description: "Please pick the image again." });
+    } finally {
+      if (e.target) e.target.value = "";
+    }
   };
 
   const handleCreate = async () => {

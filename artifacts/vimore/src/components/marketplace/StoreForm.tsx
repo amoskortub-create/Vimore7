@@ -12,6 +12,7 @@ import { usePosts } from "@/context/PostContext";
 import {
   createStore, updateStore, StoreDoc, STORE_CATEGORIES, StoreCategory, getStoreLogoUrl,
 } from "@/lib/stores";
+import { optimizeAndBufferImage } from "@/lib/upload";
 import { Camera, X, Loader2, Store } from "lucide-react";
 
 interface StoreFormProps {
@@ -35,15 +36,21 @@ export function StoreForm({ existing, onSaved }: StoreFormProps) {
   );
   const [submitting, setSubmitting] = useState(false);
 
-  const onLogoPicked = (e: ChangeEvent<HTMLInputElement>) => {
+  const onLogoPicked = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (logoPreview && !existing?.logo_file_id) {
-      try { URL.revokeObjectURL(logoPreview); } catch {}
+    try {
+      const prepared = await optimizeAndBufferImage(file, { maxEdge: 1024, quality: 0.85 });
+      if (logoPreview && !existing?.logo_file_id) {
+        try { URL.revokeObjectURL(logoPreview); } catch {}
+      }
+      setLogoFile(prepared);
+      setLogoPreview(URL.createObjectURL(prepared));
+    } catch {
+      toast({ variant: "destructive", title: "Could not read logo", description: "Please pick the image again." });
+    } finally {
+      e.target.value = "";
     }
-    setLogoFile(file);
-    setLogoPreview(URL.createObjectURL(file));
-    e.target.value = "";
   };
 
   const removeLogo = () => {

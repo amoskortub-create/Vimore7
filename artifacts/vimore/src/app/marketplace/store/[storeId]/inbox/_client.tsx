@@ -12,7 +12,7 @@ import { getStore, StoreDoc } from "@/lib/stores";
 import { BUCKET, getFileUrl, formatTimeAgo } from "@/lib/appwrite";
 import { cn } from "@/lib/utils";
 import { authFetch } from "@/lib/auth-fetch";
-import { uploadViaClient } from "@/lib/upload";
+import { uploadViaClient, optimizeAndBufferImage } from "@/lib/upload";
 import {
   ArrowLeft, Store, Loader2, Inbox, Send, Mic, StopCircle,
   ShoppingBag, Paperclip, Play, Pause, X, ChevronLeft,
@@ -327,10 +327,15 @@ function ChatPanel({
 
       {/* Input */}
       <div className="border-t border-border bg-white dark:bg-card px-3 py-2.5">
-        <input ref={fileInputRef} type="file" accept="image/*,video/*" className="hidden" onChange={e => {
-          const f = e.target.files?.[0]; if (!f) return;
-          setMediaPreview({ file: f, url: URL.createObjectURL(f) });
-          e.target.value = "";
+        <input ref={fileInputRef} type="file" accept="image/*,video/*" className="hidden" onChange={async e => {
+          const f = e.target.files?.[0];
+          if (!f) return;
+          try {
+            const prepared = f.type.startsWith("image/") ? await optimizeAndBufferImage(f) : f;
+            setMediaPreview({ file: prepared, url: URL.createObjectURL(prepared) });
+          } finally {
+            e.target.value = "";
+          }
         }} />
         {recording ? (
           <div className="flex items-center gap-3 bg-destructive/10 border border-destructive/20 rounded-2xl px-3 py-2.5">

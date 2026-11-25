@@ -2775,7 +2775,38 @@ export function PostProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const doc = await databases.createDocument(DATABASE_ID, COL.POSTS, ID.unique(), docData);
+      let doc: any = null;
+      let handledByServer = false;
+
+      try {
+        const res = await authFetch('/api/posts/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...docData,
+            shared_post_id: p.sharedPost?.$id,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          if (data?.doc) {
+            doc = data.doc;
+            handledByServer = true;
+          }
+        } else if (res.status !== 404 && res.status < 500) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data?.error || `Could not publish post (HTTP ${res.status})`);
+        }
+      } catch (serverErr: any) {
+        if (serverErr?.message && !/failed to fetch|networkerror|load failed/i.test(serverErr.message)) {
+          throw serverErr;
+        }
+      }
+
+      if (!doc) {
+        doc = await databases.createDocument(DATABASE_ID, COL.POSTS, ID.unique(), docData);
+      }
+
       const newPost = mapDocToPost(doc, undefined);
       newPost.user = currentUser;
       newPost.hashtags = extractedHashtags;
@@ -2785,61 +2816,67 @@ export function PostProvider({ children }: { children: ReactNode }) {
       if (p.videoUrl) newPost.videoUrl = p.videoUrl;
       if (p.sharedPost) {
         newPost.sharedPost = p.sharedPost;
-        databases.updateDocument(DATABASE_ID, COL.POSTS, p.sharedPost.$id, {
-          shares_count: (p.sharedPost.shares || 0) + 1,
-        }).catch(() => {});
+        if (!handledByServer) {
+          databases.updateDocument(DATABASE_ID, COL.POSTS, p.sharedPost.$id, {
+            shares_count: (p.sharedPost.shares || 0) + 1,
+          }).catch(() => {});
+        }
         setPostsState(prev => prev.map(post =>
           post.$id === p.sharedPost.$id ? { ...post, shares: (post.shares || 0) + 1 } : post
         ));
       }
       setPostsState(prev => [newPost, ...prev]);
 
-      await databases.updateDocument(DATABASE_ID, COL.USERS, currentUser.$id, {
-        posts_count: (currentUser.posts as number || 0) + 1,
-      });
+      if (!handledByServer) {
+        databases.updateDocument(DATABASE_ID, COL.USERS, currentUser.$id, {
+          posts_count: (currentUser.posts as number || 0) + 1,
+        }).catch(() => {});
+      }
       setCurrentUserState(prev => prev ? { ...prev, posts: (prev.posts as number || 0) + 1 } : null);
 
-      // Notify followers about the new post (fire-and-forget, limit 50)
-      databases.listDocuments(DATABASE_ID, COL.FOLLOWS, [
-        Query.equal('following_id', currentUser.$id),
-        Query.limit(50),
-      ]).then(res => {
-        res.documents.forEach(follow => {
-          if (follow.follower_id && follow.follower_id !== currentUser.$id) {
-            databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
-              user_id: follow.follower_id,
-              from_user_id: currentUser.$id,
-              from_user_name: currentUser.name || currentUser.username,
-              from_user_avatar: currentUser.avatar || '',
-              type: 'POST',
-              title: 'New Post',
-              content: `${currentUser.name || '@' + currentUser.username} published a new post`,
-              message: `${currentUser.name || '@' + currentUser.username} published a new post`,
-              post_id: doc.$id,
-              is_read: false,
-            }).catch(() => {});
-          }
-        });
-      }).catch(() => {});
+      if (!handledByServer) {
+        // Notify followers about the new post (fire-and-forget, limit 50)
+        databases.listDocuments(DATABASE_ID, COL.FOLLOWS, [
+          Query.equal('following_id', currentUser.$id),
+          Query.limit(50),
+        ]).then(res => {
+          res.documents.forEach(follow => {
+            if (follow.follower_id && follow.follower_id !== currentUser.$id) {
+              databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
+                user_id: follow.follower_id,
+                from_user_id: currentUser.$id,
+                from_user_name: currentUser.name || currentUser.username,
+                from_user_avatar: currentUser.avatar || '',
+                type: 'POST',
+                title: 'New Post',
+                content: `${currentUser.name || '@' + currentUser.username} published a new post`,
+                message: `${currentUser.name || '@' + currentUser.username} published a new post`,
+                post_id: doc.$id,
+                is_read: false,
+              }).catch(() => {});
+            }
+          });
+        }).catch(() => {});
 
-      // Notify tagged users (fire-and-forget)
-      if (taggedUserIds.length > 0) {
-        taggedUserIds.forEach(uid => {
-          if (uid !== currentUser.$id) {
-            databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
-              user_id: uid,
-              from_user_id: currentUser.$id,
-              from_user_name: currentUser.name || currentUser.username,
-              from_user_avatar: currentUser.avatar || '',
-              type: 'TAG',
-              title: 'You were tagged',
-              content: `${currentUser.name || '@' + currentUser.username} tagged you in a post`,
-              message: `${currentUser.name || '@' + currentUser.username} tagged you in a post`,
-              post_id: doc.$id,
-              is_read: false,
-            }).catch(() => {});
-          }
-        });
+        // Notify tagged users (fire-and-forget)
+        if (taggedUserIds.length > 0) {
+          taggedUserIds.forEach(uid => {
+            if (uid !== currentUser.$id) {
+              databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
+                user_id: uid,
+                from_user_id: currentUser.$id,
+                from_user_name: currentUser.name || currentUser.username,
+                from_user_avatar: currentUser.avatar || '',
+                type: 'TAG',
+                title: 'You were tagged',
+                content: `${currentUser.name || '@' + currentUser.username} tagged you in a post`,
+                message: `${currentUser.name || '@' + currentUser.username} tagged you in a post`,
+                post_id: doc.$id,
+                is_read: false,
+              }).catch(() => {});
+            }
+          });
+        }
       }
     } catch (err: any) {
       logAppwriteError('addPost', err);
@@ -3930,58 +3967,91 @@ export function PostProvider({ children }: { children: ReactNode }) {
     if (!currentUser) return;
 
     let screenshotFileId: string;
-    try {
-      if (screenshotUrl.startsWith('data:')) {
-        const arr = screenshotUrl.split(',');
-        const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
-        const bstr = atob(arr[1]);
-        let n = bstr.length;
-        const u8arr = new Uint8Array(n);
-        while (n--) u8arr[n] = bstr.charCodeAt(n);
-        const file = new File([u8arr], 'receipt.jpg', { type: mime });
-        const { uploadViaClient } = await import('@/lib/upload');
-        screenshotFileId = await uploadViaClient(file, BUCKET.PAYMENT_SCREENSHOTS);
-      } else {
-        screenshotFileId = extractFileId(screenshotUrl) || screenshotUrl;
-      }
-    } catch {
-      screenshotFileId = 'upload_failed';
+    if (screenshotUrl.startsWith('data:')) {
+      const arr = screenshotUrl.split(',');
+      const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+      const bstr = atob(arr[1]);
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while (n--) u8arr[n] = bstr.charCodeAt(n);
+      const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
+      const file = new File([u8arr], `receipt.${ext}`, { type: mime });
+      const { uploadViaClient } = await import('@/lib/upload');
+      screenshotFileId = await uploadViaClient(file, BUCKET.PAYMENT_SCREENSHOTS);
+    } else {
+      screenshotFileId = extractFileId(screenshotUrl) || screenshotUrl;
     }
 
-    const req: Record<string, any> = {
-      $id: 'pay_' + Date.now(),
+    if (!screenshotFileId || screenshotFileId === 'upload_failed') {
+      throw new Error('Could not upload your receipt screenshot. Please try again.');
+    }
+
+    const requestPayload = {
       user_id: currentUser.$id,
+      from_user_id: currentUser.$id,
+      to_user_id: 'platform',
       username: currentUser.username,
-      package_name: pendingTransaction?.packageName || 'Package',
-      amount: pendingTransaction?.amount || '0',
+      name: currentUser.name,
       currency: pendingTransaction?.currency || 'USD',
-      code: pendingTransaction?.code || '',
+      amount: parseFloat(pendingTransaction?.amount || '0'),
+      message: pendingTransaction?.packageName || '',
+      package_name: pendingTransaction?.packageName || '',
+      coin_type: pendingTransaction?.type || 'Gold',
+      coin_amount: pendingTransaction?.coinAmount || 0,
       screenshot_id: screenshotFileId,
+      code: pendingTransaction?.code || '',
       status: 'PENDING',
     };
-    setPaymentRequests(prev => [req, ...prev]);
 
     try {
-      await databases.createDocument(DATABASE_ID, COL.PAYMENT_REQUESTS, ID.unique(), {
+      let savedDoc: any = null;
+
+      try {
+        const res = await authFetch('/api/payment/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestPayload),
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          if (data?.doc) savedDoc = data.doc;
+        } else if (res.status !== 404 && res.status < 500) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data?.error || `Could not submit receipt (HTTP ${res.status})`);
+        }
+      } catch (serverErr: any) {
+        if (serverErr?.message && !/failed to fetch|networkerror|load failed/i.test(serverErr.message)) {
+          throw serverErr;
+        }
+      }
+
+      if (!savedDoc) {
+        const { code: _code, ...clientDoc } = requestPayload;
+        savedDoc = await databases.createDocument(
+          DATABASE_ID,
+          COL.PAYMENT_REQUESTS,
+          ID.unique(),
+          _code ? { ...clientDoc, code: _code } : clientDoc
+        );
+      }
+
+      const req: Record<string, any> = {
+        $id: savedDoc.$id,
         user_id: currentUser.$id,
-        from_user_id: currentUser.$id,
-        to_user_id: 'platform',
         username: currentUser.username,
-        name: currentUser.name,
+        package_name: pendingTransaction?.packageName || 'Package',
+        amount: pendingTransaction?.amount || '0',
         currency: pendingTransaction?.currency || 'USD',
-        amount: parseFloat(pendingTransaction?.amount || '0'),
-        message: pendingTransaction?.packageName || '',
-        package_name: pendingTransaction?.packageName || '',
-        coin_type: pendingTransaction?.type || 'Gold',
-        coin_amount: pendingTransaction?.coinAmount || 0,
+        code: pendingTransaction?.code || '',
         screenshot_id: screenshotFileId,
         status: 'PENDING',
-      });
+      };
+      setPaymentRequests(prev => [req, ...prev]);
     } catch (err: any) {
       logAppwriteError('createPaymentRequest', err);
       throw err;
     }
-  }, [currentUser, pendingTransaction, toast]);
+  }, [currentUser, pendingTransaction]);
 
   const approvePaymentRequest = async (id: string) => {
     setPaymentRequests(prev => prev.map(r => r.$id === id ? { ...r, status: 'APPROVED' } : r));

@@ -3,6 +3,7 @@
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import { authFetch } from "@/lib/auth-fetch";
+import { optimizeAndBufferImage } from "@/lib/upload";
 import { 
   ShieldCheck, 
   Zap, 
@@ -534,20 +535,26 @@ export default function AdminDashboard() {
   };
 
 
-  const handleCampaignMedia = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCampaignMedia = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setCampFile(file);
+    if (!file) return;
+    try {
       if (file.type.startsWith('audio/')) {
+        setCampFile(file);
         setCampPreview(null);
         setCampForm(prev => ({ ...prev, type: 'audio' }));
       } else if (file.type.startsWith('video/')) {
+        setCampFile(file);
         setCampPreview(URL.createObjectURL(file));
         setCampForm(prev => ({ ...prev, type: 'video' }));
       } else {
-        setCampPreview(URL.createObjectURL(file));
+        const prepared = await optimizeAndBufferImage(file);
+        setCampFile(prepared);
+        setCampPreview(URL.createObjectURL(prepared));
         setCampForm(prev => ({ ...prev, type: 'photo' }));
       }
+    } finally {
+      e.target.value = '';
     }
   };
 
@@ -3887,11 +3894,15 @@ export default function AdminDashboard() {
                       type="file"
                       accept="image/*"
                       className="hidden"
-                      onChange={(e) => {
+                      onChange={async (e) => {
                         const file = e.target.files?.[0];
-                        if (file) {
-                          setWithdrawalProofFile(file);
-                          setWithdrawalProofPreview(URL.createObjectURL(file));
+                        if (!file) return;
+                        try {
+                          const prepared = await optimizeAndBufferImage(file, { maxEdge: 1440, quality: 0.85 });
+                          setWithdrawalProofFile(prepared);
+                          setWithdrawalProofPreview(URL.createObjectURL(prepared));
+                        } finally {
+                          e.target.value = '';
                         }
                       }}
                     />

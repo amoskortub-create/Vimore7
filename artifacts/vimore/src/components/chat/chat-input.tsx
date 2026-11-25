@@ -19,6 +19,7 @@ import { useMusic } from "@/context/MusicContext";
 import { usePosts } from "@/context/PostContext";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { optimizeAndBufferImage } from "@/lib/upload";
 
 interface ChatInputProps {
   onSend: (text: string, options?: { isViewOnce?: boolean; isWorkspace?: boolean; mediaUrl?: string; mediaType?: 'photo' | 'video' | 'voice'; duration?: string; file?: File }) => void;
@@ -88,38 +89,54 @@ export function ChatInput({ onSend, onTyping, onStopTyping }: ChatInputProps) {
     }, 10);
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      triggerHaptic(20);
-      const isVideo = file.type.startsWith('video');
-      const mediaUrl = URL.createObjectURL(file);
-      
+    if (!file) return;
+    triggerHaptic(20);
+    const isVideo = file.type.startsWith('video');
+
+    try {
       if (isVideo) {
+        const mediaUrl = URL.createObjectURL(file);
         const video = document.createElement('video');
         video.preload = 'metadata';
-        video.onloadedmetadata = () => {
-          if (video.duration > VIDEO_UPLOAD_LIMIT) {
-            toast({ 
-              variant: "destructive", 
-              title: "Clip Too Long", 
-              description: "High-velocity sync is capped at 5 minutes per video." 
-            });
-            URL.revokeObjectURL(mediaUrl);
-            e.target.value = "";
-            return;
-          }
-          sendMedia(mediaUrl, 'video', file.name, file);
-        };
-        video.onerror = () => {
+        video.src = mediaUrl;
+        const ok = await new Promise<boolean>(resolve => {
+          const finish = (valid: boolean) => {
+            video.onloadedmetadata = null;
+            video.onerror = null;
+            clearTimeout(timer);
+            resolve(valid);
+          };
+          const timer = setTimeout(() => finish(true), 3000);
+          video.onloadedmetadata = () => finish(true);
+          video.onerror = () => finish(false);
+          try { video.load(); } catch { finish(true); }
+        });
+
+        if (!ok) {
           toast({ variant: "destructive", title: "Format Error", description: "Could not decode video metadata." });
           URL.revokeObjectURL(mediaUrl);
-        };
-        video.src = mediaUrl;
+          return;
+        }
+        if (Number.isFinite(video.duration) && video.duration > VIDEO_UPLOAD_LIMIT) {
+          toast({ 
+            variant: "destructive", 
+            title: "Clip Too Long", 
+            description: "High-velocity sync is capped at 5 minutes per video." 
+          });
+          URL.revokeObjectURL(mediaUrl);
+          return;
+        }
+        sendMedia(mediaUrl, 'video', file.name, file);
       } else {
-        sendMedia(mediaUrl, 'photo', file.name, file);
+        const prepared = await optimizeAndBufferImage(file);
+        const mediaUrl = URL.createObjectURL(prepared);
+        sendMedia(mediaUrl, 'photo', prepared.name, prepared);
       }
-      
+    } catch {
+      toast({ variant: "destructive", title: "Media Error", description: "Could not read the selected file." });
+    } finally {
       e.target.value = "";
     }
   };

@@ -162,7 +162,12 @@ export async function authFetch(
   }
 
   const response = await fetchFresh();
-  if (response.ok && options.method && options.method.toUpperCase() !== 'GET') {
+  if (
+    response.ok &&
+    options.method &&
+    options.method.toUpperCase() !== 'GET' &&
+    requestUrl?.pathname !== '/api/upload/chunk'
+  ) {
     await clearApiResponseCache();
   }
   return response;

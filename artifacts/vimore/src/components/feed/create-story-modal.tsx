@@ -35,56 +35,118 @@ export function CreateStoryModal({ isOpen, onClose }: { isOpen: boolean; onClose
   const [isProcessing, setIsProcessing] = useState(false);
 
   const [mediaDuration, setMediaDuration] = useState<number>(5);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+
+  const prepareStoryImage = async (file: File): Promise<File> => {
+    const baseName = (file.name || 'story').replace(/\.[^.]+$/, '') || 'story';
+    if (file.type === 'image/gif') {
+      const buf = await file.arrayBuffer();
+      return new File([buf], `${baseName}.gif`, { type: 'image/gif' });
+    }
+
+    try {
+      const tempUrl = URL.createObjectURL(file);
+      try {
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const el = new Image();
+          el.onload = () => resolve(el);
+          el.onerror = reject;
+          el.src = tempUrl;
+        });
+        const maxEdge = 1600;
+        const longest = Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height);
+        // Keep small already-lightweight images intact in RAM if <= 380 KB
+        if (file.size <= 380 * 1024 && longest <= maxEdge) {
+          const buf = await file.arrayBuffer();
+          return new File([buf], file.name || `${baseName}.jpg`, { type: file.type || 'image/jpeg' });
+        }
+        const scale = longest > maxEdge ? maxEdge / longest : 1;
+        const width = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
+        const height = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('No 2d context');
+        ctx.drawImage(img, 0, 0, width, height);
+        const blob = await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.86)
+        );
+        if (!blob) throw new Error('Canvas encoding failed');
+        return new File([blob], `${baseName}.jpg`, { type: 'image/jpeg', lastModified: Date.now() });
+      } finally {
+        URL.revokeObjectURL(tempUrl);
+      }
+    } catch {
+      const buf = await file.arrayBuffer();
+      return new File([buf], file.name || `${baseName}.jpg`, { type: file.type || 'image/jpeg' });
+    }
+  };
 
   const handleMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: "image" | "video") => {
     const file = e.target.files?.[0];
     if (!file) return;
     triggerHaptic(10);
 
-    let detectedDuration = 5;
-    if (type === "video") {
-      const objUrl = URL.createObjectURL(file);
-      const tempVid = document.createElement("video");
-      tempVid.preload = "metadata";
-      tempVid.src = objUrl;
-      await new Promise<void>(resolve => {
-        const done = () => {
-          tempVid.onloadedmetadata = null;
-          tempVid.onerror = null;
-          clearTimeout(timer);
-          resolve();
-        };
-        const timer = setTimeout(done, 3000);
-        tempVid.onloadedmetadata = done;
-        tempVid.onerror = done;
-        try { tempVid.load(); } catch { done(); }
-      });
-      if (Number.isFinite(tempVid.duration) && tempVid.duration > 0) {
-        detectedDuration = Math.min(80, Math.max(1, Math.round(tempVid.duration)));
-      }
-      URL.revokeObjectURL(objUrl);
-      if (tempVid.duration > 80) {
-        toast({ title: "Video Too Long", description: "Story videos must be 1 minute 20 seconds or shorter." });
-        e.target.value = "";
-        return;
-      }
-    }
+    try {
+      let preparedFile = file;
+      let detectedDuration = 5;
 
-    setMediaDuration(detectedDuration);
-    setSelectedFile(file);
-    setPreviewUrl(URL.createObjectURL(file));
-    setMediaType(type);
-    setStep("confirm");
-    e.target.value = "";
+      if (type === "video") {
+        const objUrl = URL.createObjectURL(file);
+        const tempVid = document.createElement("video");
+        tempVid.preload = "metadata";
+        tempVid.src = objUrl;
+        await new Promise<void>(resolve => {
+          const done = () => {
+            tempVid.onloadedmetadata = null;
+            tempVid.onerror = null;
+            clearTimeout(timer);
+            resolve();
+          };
+          const timer = setTimeout(done, 3000);
+          tempVid.onloadedmetadata = done;
+          tempVid.onerror = done;
+          try { tempVid.load(); } catch { done(); }
+        });
+        if (Number.isFinite(tempVid.duration) && tempVid.duration > 0) {
+          detectedDuration = Math.min(80, Math.max(1, Math.round(tempVid.duration)));
+        }
+        URL.revokeObjectURL(objUrl);
+        if (tempVid.duration > 80) {
+          toast({ title: "Video Too Long", description: "Story videos must be 1 minute 20 seconds or shorter." });
+          e.target.value = "";
+          return;
+        }
+      } else {
+        preparedFile = await prepareStoryImage(file);
+      }
+
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setMediaDuration(detectedDuration);
+      setSelectedFile(preparedFile);
+      setPreviewUrl(URL.createObjectURL(preparedFile));
+      setMediaType(type);
+      setStep("confirm");
+    } catch {
+      toast({
+        variant: "destructive",
+        title: "Could not load media",
+        description: "Please select the photo or video again.",
+      });
+    } finally {
+      e.target.value = "";
+    }
   };
 
   const handleShare = async () => {
     if (step === "text" && !storyText.trim()) return;
     if (step === "confirm" && !selectedFile) return;
     setIsProcessing(true);
+    setUploadProgress(0);
     triggerHaptic(30);
 
     try {
@@ -94,11 +156,13 @@ export function CreateStoryModal({ isOpen, onClose }: { isOpen: boolean; onClose
       if (selectedFile) {
         const { uploadLargeViaClient } = await import('@/lib/upload');
         finalFileId = await uploadLargeViaClient(selectedFile, BUCKET_STORIES, undefined, {
-          timeoutMs: 120_000,
+          timeoutMs: 240_000,
+          onProgress: (pct) => setUploadProgress(Math.min(95, Math.round(pct * 95))),
         });
         finalImageUrl = getFileUrl(BUCKET_STORIES, finalFileId);
       }
 
+      setUploadProgress(98);
       await addStory({
         image: finalImageUrl,
         fileId: finalFileId || undefined,
@@ -117,6 +181,7 @@ export function CreateStoryModal({ isOpen, onClose }: { isOpen: boolean; onClose
       toast({ variant: "destructive", title: "Upload failed", description: e?.message || "Please try again." });
     } finally {
       setIsProcessing(false);
+      setUploadProgress(0);
     }
   };
 
@@ -129,6 +194,7 @@ export function CreateStoryModal({ isOpen, onClose }: { isOpen: boolean; onClose
     setMediaDuration(5);
     setStoryText("");
     setIsProcessing(false);
+    setUploadProgress(0);
   };
 
   if (!isOpen) return null;
@@ -153,7 +219,12 @@ export function CreateStoryModal({ isOpen, onClose }: { isOpen: boolean; onClose
               onClick={handleShare}
               disabled={isProcessing}
             >
-              {isProcessing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Post"}
+              {isProcessing ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  {uploadProgress > 0 && <span className="text-xs">{uploadProgress}%</span>}
+                </>
+              ) : "Post"}
             </Button>
           )}
         </div>

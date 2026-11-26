@@ -3131,13 +3131,13 @@ export default function AdminDashboard() {
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-black text-foreground truncate">@{rec.user?.username ?? rec.user_id}</p>
-                          {rec.user?.display_name && (
-                            <p className="text-xs text-muted-foreground font-medium truncate">{rec.user.display_name}</p>
+                          <p className="text-sm font-black text-foreground truncate">@{rec.user?.username ?? rec.username ?? rec.user_id}</p>
+                          {(rec.user?.display_name || rec.name) && (
+                            <p className="text-xs text-muted-foreground font-medium truncate">{rec.user?.display_name || rec.name}</p>
                           )}
                           <div className="flex items-center gap-2 mt-1">
                             <Badge variant="outline" className="text-[9px] font-black uppercase border-blue-500/30 text-blue-400 px-2 h-4">
-                              {rec.amount ?? '?'} {rec.currency ?? 'DIAMOND'}
+                              {rec.amount ?? rec.cost ?? '?'} {rec.currency === 'STAR' ? 'STARS' : 'CREDITS'}
                             </Badge>
                             <span className="text-[9px] text-muted-foreground/50 font-bold">{rec.$createdAt ? new Date(rec.$createdAt).toLocaleDateString() : ''}</span>
                           </div>

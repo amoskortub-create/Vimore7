@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Query } from 'node-appwrite';
 import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { COL, getAvatarUrl } from '@/lib/appwrite';
+import { BUCKET, COL, getAvatarUrl } from '@/lib/appwrite';
 import { requireAdminUser } from '@/lib/server-helpers';
 
 export async function GET(req: NextRequest) {
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
               $id: u.$id,
               username: u.username || rec.username,
               display_name: u.display_name || u.name || rec.name,
-              avatar: u.avatar_id ? getAvatarUrl(u.avatar_id) : u.avatar || null,
+              avatar: u.avatar_id ? getAvatarUrl(BUCKET.AVATARS, u.avatar_id) : u.avatar || null,
             }
           : rec.username
             ? { username: rec.username, display_name: rec.name || rec.username, avatar: null }

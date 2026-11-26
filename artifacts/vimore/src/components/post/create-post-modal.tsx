@@ -67,6 +67,7 @@ import { usePosts } from "@/context/PostContext";
 import { useFeedSignal } from "@/context/FeedSignalContext";
 import { useReelUpload } from "@/context/ReelUploadContext";
 import { useMusic } from "@/context/MusicContext";
+import { CREDIT_LIMITS } from "@/lib/credit-pricing";
 import {
   Select,
   SelectContent,
@@ -170,7 +171,7 @@ export function CreatePostModal({ children, sharedPost, initialContent, onOpen }
   const [commentsDisabled, setCommentsDisabled] = useState(false);
   
   const [isLocked, setIsLocked] = useState(false);
-  const [unlockPrice, setUnlockPrice] = useState(5);
+  const [unlockPrice, setUnlockPrice] = useState<number>(CREDIT_LIMITS.lockPostMin);
   
   const [showFeelingSelector, setShowFeelingSelector] = useState(false);
   const [showLocationSelector, setShowLocationSelector] = useState(false);
@@ -757,15 +758,15 @@ export function CreatePostModal({ children, sharedPost, initialContent, onOpen }
                 </div>
                 <Slider 
                   value={[unlockPrice]} 
-                  min={5}
-                  max={20}
+                  min={CREDIT_LIMITS.lockPostMin}
+                  max={CREDIT_LIMITS.lockPostMax}
                   step={1} 
                   onValueChange={(val) => setUnlockPrice(val[0])}
                   className="[&_[role=slider]]:bg-cyan-500"
                 />
                 <div className="flex justify-between text-[8px] font-black text-white/40 uppercase tracking-widest">
-                  <span>5 Credits</span>
-                  <span>20 Credits</span>
+                  <span>{CREDIT_LIMITS.lockPostMin} Credits</span>
+                  <span>{CREDIT_LIMITS.lockPostMax} Credits</span>
                 </div>
               </div>
             )}

@@ -16,7 +16,7 @@ interface StoreBoostDialogProps {
 }
 
 export function StoreBoostDialog({ store, onBoosted, children }: StoreBoostDialogProps) {
-  const { currentUser, setCurrentUserState } = usePosts() as any;
+  const { currentUser, checkSession } = usePosts();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [days, setDays] = useState(7);
@@ -33,9 +33,7 @@ export function StoreBoostDialog({ store, onBoosted, children }: StoreBoostDialo
     setBoosting(true);
     try {
       const newUntil = await boostStoreWithDiamonds(store.$id, currentUser.$id, days, balance);
-      if (setCurrentUserState) {
-         setCurrentUserState((prev: any) => prev ? { ...prev, creditBalance: balance - cost, diamondBalance: balance - cost } : null);
-      }
+      await checkSession().catch(() => {});
       toast({
         title: "Store Boosted!",
         description: `"${store.store_name}" will appear at the top for ${days} day${days > 1 ? 's' : ''}.`,
@@ -103,21 +101,21 @@ export function StoreBoostDialog({ store, onBoosted, children }: StoreBoostDialo
               <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Rate</span>
               <div className="flex items-center gap-1 text-sm font-black text-amber-600">
                 <Diamond className="h-3.5 w-3.5 fill-current" />
-                {STORE_BOOST_DIAMONDS_PER_DAY} / day
+                {STORE_BOOST_DIAMONDS_PER_DAY} Credits / day
               </div>
             </div>
             <div className="flex items-center justify-between border-t border-border/30 pt-2.5">
               <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Total Cost</span>
               <div className={cn("flex items-center gap-1 text-lg font-black", !canAfford ? "text-destructive" : "text-foreground")}>
                 <Diamond className="h-4 w-4 fill-current text-cyan-500" />
-                {cost}
+                {cost.toLocaleString()} Credits
               </div>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Your Balance</span>
               <div className="flex items-center gap-1 text-sm font-bold text-muted-foreground">
                 <Diamond className="h-3 w-3 fill-current text-cyan-500/60" />
-                {balance}
+                {balance.toLocaleString()} Credits
               </div>
             </div>
           </div>

@@ -25,7 +25,7 @@ if (existsSync(rootNodeModules) && hasStaleRootCache) {
   rmSync(rootNodeModules, { recursive: true, force: true });
 }
 
-execSync('npm install --include=dev --legacy-peer-deps --no-audit --no-fund', {
+execSync('npm install --include=dev --legacy-peer-deps --no-package-lock --no-audit --no-fund', {
   cwd: rootDir,
   stdio: 'inherit',
 });

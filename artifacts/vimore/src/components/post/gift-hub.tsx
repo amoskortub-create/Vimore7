@@ -160,7 +160,7 @@ export function GiftHub() {
                 <div>
                   <h2 className="text-xl font-black italic uppercase tracking-tighter text-white">Send a Gift</h2>
                   <p className="text-[10px] font-bold text-cyan-400/70 uppercase tracking-widest mt-0.5">
-                    to @{targetUserForGift?.username} · 2–50 Credits
+                    to @{targetUserForGift?.username} · {CREDIT_LIMITS.giftMin}–{CREDIT_LIMITS.giftMax} Credits
                   </p>
                 </div>
                 <div className="flex items-center gap-3">

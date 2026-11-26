@@ -19,6 +19,7 @@ import { usePosts } from "@/context/PostContext";
 import { BUCKET_MUSIC, BUCKET } from "@/lib/appwrite";
 import { parseFollowerCount } from "@/lib/utils";
 import { optimizeAndBufferImage } from "@/lib/upload";
+import { CREDIT_LIMITS } from "@/lib/credit-pricing";
 
 interface TrackSlot {
   id: number;
@@ -57,7 +58,7 @@ export function MusicUpload({ onCancel }: { onCancel: () => void }) {
   const [releaseDate, setReleaseDate] = useState("");
   const [isPublishing, setIsPublishing] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
-  const [unlockPrice, setUnlockPrice] = useState(5);
+  const [unlockPrice, setUnlockPrice] = useState<number>(CREDIT_LIMITS.lockPostMin);
 
   const [tracks, setTracks] = useState<TrackSlot[]>(
     Array.from({ length: 12 }, (_, i) => ({
@@ -149,6 +150,10 @@ export function MusicUpload({ onCancel }: { onCancel: () => void }) {
         ? await uploadMedia(coverFile, BUCKET.ALBUM_COVERS)
         : "https://picsum.photos/seed/single/600/600";
 
+      const safeUnlockPrice = isLocked && isPaywallEligible
+        ? Math.min(CREDIT_LIMITS.lockPostMax, Math.max(CREDIT_LIMITS.lockPostMin, Math.round(Number(unlockPrice) || CREDIT_LIMITS.lockPostMin)))
+        : 0;
+
       if (projectType === "single") {
         const slot = tracks[0];
         const audioUrl = slot.file ? await uploadMedia(slot.file, BUCKET_MUSIC) : "";
@@ -156,7 +161,7 @@ export function MusicUpload({ onCancel }: { onCancel: () => void }) {
           title: projectTitle, artist: currentUser.name, artistUsername: currentUser.username,
           cover: coverUrl, audioUrl, duration: slot.duration || 0,
           artistFollowers: currentUser.followers,
-          isLocked: isLocked && isPaywallEligible, unlockPrice: isLocked && isPaywallEligible ? unlockPrice : 0,
+          isLocked: isLocked && isPaywallEligible, unlockPrice: safeUnlockPrice,
         });
       } else {
         const albumSongs: Track[] = [];
@@ -173,7 +178,7 @@ export function MusicUpload({ onCancel }: { onCancel: () => void }) {
           artistUsername: currentUser.username, cover: coverUrl,
           year: new Date().getFullYear().toString(), tracks: albumSongs.length,
           totalStreams: "0", songs: albumSongs,
-          isLocked: isLocked && isPaywallEligible, unlockPrice: isLocked && isPaywallEligible ? unlockPrice : 0,
+          isLocked: isLocked && isPaywallEligible, unlockPrice: safeUnlockPrice,
         });
       }
       toast({ title: "Published!", description: `${projectTitle} is now live on ViMore.` });
@@ -499,13 +504,13 @@ export function MusicUpload({ onCancel }: { onCancel: () => void }) {
                 <Zap className="h-4 w-4 text-primary shrink-0" />
                 <Input
                   type="number"
-                  min="5"
-                  max="20"
+                  min={CREDIT_LIMITS.lockPostMin}
+                  max={CREDIT_LIMITS.lockPostMax}
                   step="1"
-                  value={unlockPrice}
+                  value={Number.isFinite(unlockPrice) ? unlockPrice : CREDIT_LIMITS.lockPostMin}
                   onChange={e => setUnlockPrice(parseFloat(e.target.value))}
                   className="h-10 rounded-xl text-sm font-bold bg-card flex-1"
-                  placeholder="Price in Credits (5-20)"
+                  placeholder={`Price in Credits (${CREDIT_LIMITS.lockPostMin}-${CREDIT_LIMITS.lockPostMax})`}
                 />
                 <span className="text-[11px] font-black text-muted-foreground shrink-0">Credits</span>
               </div>

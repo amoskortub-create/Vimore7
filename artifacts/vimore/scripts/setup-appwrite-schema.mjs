@@ -16,16 +16,16 @@ const databases = new Databases(client);
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 const gifts = [
-  ['Blush Bloom', '🌷', 50, 'Love'], ['Sweet Heart', '💗', 60, 'Love'], ['Rose Aura', '🌹', 80, 'Love'], ['Love Letter', '💌', 90, 'Love'], ['Cupid Crown', '👑', 100, 'Love'],
-  ['Hope Basket', '🧺', 120, 'Support'], ['Kindness Pack', '🤝', 140, 'Support'], ['Village Blessing', '🙏', 160, 'Support'], ['Power Boost', '⚡', 180, 'Support'], ['Helping Hand', '🫶', 200, 'Support'],
-  ['Sunrise Petal', '🌼', 50, 'Nature'], ['Forest Calm', '🌿', 70, 'Nature'], ['Leaf Blessing', '🍃', 90, 'Nature'], ['Rainforest Glow', '🌴', 110, 'Nature'], ['Golden Horizon', '🌅', 150, 'Nature'],
-  ['Market Feast', '🍲', 60, 'Food'], ['Palm Rice', '🍚', 80, 'Food'], ['Jolly Cake', '🎂', 100, 'Food'], ['Cocoa Joy', '🍫', 130, 'Food'], ['Feast Table', '🍽️', 170, 'Food'],
-  ['Party Pop', '🎉', 70, 'Celebration'], ['Confetti Burst', '🎊', 100, 'Celebration'], ['Birthday Star', '⭐', 130, 'Celebration'], ['Victory Bell', '🔔', 160, 'Celebration'], ['Grand Finale', '🏆', 200, 'Celebration'],
-  ['Street Beat', '🎵', 80, 'Music'], ['Studio Spark', '🎧', 100, 'Music'], ['Vibe Mix', '🎶', 120, 'Music'], ['Sound Wave', '🔊', 150, 'Music'], ['Live Stage', '🎤', 200, 'Music'],
-  ['Travel Bag', '🧳', 90, 'Travel'], ['Airport Pass', '🎫', 110, 'Travel'], ['Coastline Escape', '🏖️', 150, 'Travel'], ['Sky Route', '✈️', 200, 'Travel'], ['Global Glow', '🌍', 250, 'Travel'],
-  ['First Win', '🥇', 80, 'Achievement'], ['Momentum Star', '🌟', 120, 'Achievement'], ['Silver Goal', '🥈', 160, 'Achievement'], ['Champion Crown', '🏆', 220, 'Achievement'], ['Legend Medal', '🏅', 300, 'Achievement'],
-  ['Hometown Pride', '🏡', 75, 'Community'], ['Community Cheer', '👏', 110, 'Community'], ['Neighborhood Lift', '🧡', 140, 'Community'], ['Unity Circle', '🤝', 190, 'Community'], ['Together Crown', '👨‍👩‍👧‍👦', 260, 'Community'],
-  ['Peace Euphoria', '🕊️', 90, 'Wellness'], ['Calm Wave', '🌊', 120, 'Wellness'], ['Glow Ritual', '✨', 170, 'Wellness'], ['Mindful Crown', '👁️', 220, 'Wellness'], ['Luxury Calm', '💎', 500, 'Wellness'],
+  ['Blush Bloom', '🌷', 2, 'Love'], ['Sweet Heart', '💗', 5, 'Love'], ['Rose Aura', '🌹', 15, 'Love'], ['Love Letter', '💌', 25, 'Love'], ['Cupid Crown', '👑', 50, 'Love'],
+  ['Hope Basket', '🧺', 8, 'Support'], ['Kindness Pack', '🤝', 15, 'Support'], ['Village Blessing', '🙏', 35, 'Support'], ['Power Boost', '⚡', 60, 'Support'], ['Helping Hand', '🫶', 100, 'Support'],
+  ['Sunrise Petal', '🌼', 4, 'Nature'], ['Forest Calm', '🌿', 12, 'Nature'], ['Leaf Blessing', '🍃', 25, 'Nature'], ['Rainforest Glow', '🌴', 45, 'Nature'], ['Golden Horizon', '🌅', 90, 'Nature'],
+  ['Market Feast', '🍲', 10, 'Food'], ['Palm Rice', '🍚', 20, 'Food'], ['Jolly Cake', '🎂', 40, 'Food'], ['Cocoa Joy', '🍫', 75, 'Food'], ['Feast Table', '🍽️', 120, 'Food'],
+  ['Party Pop', '🎉', 12, 'Celebration'], ['Confetti Burst', '🎊', 30, 'Celebration'], ['Birthday Star', '⭐', 60, 'Celebration'], ['Victory Bell', '🔔', 120, 'Celebration'], ['Grand Finale', '🏆', 200, 'Celebration'],
+  ['Street Beat', '🎵', 15, 'Music'], ['Studio Spark', '🎧', 40, 'Music'], ['Vibe Mix', '🎶', 80, 'Music'], ['Sound Wave', '🔊', 150, 'Music'], ['Live Stage', '🎤', 250, 'Music'],
+  ['Travel Bag', '🧳', 20, 'Travel'], ['Airport Pass', '🎫', 50, 'Travel'], ['Coastline Escape', '🏖️', 100, 'Travel'], ['Sky Route', '✈️', 180, 'Travel'], ['Global Glow', '🌍', 300, 'Travel'],
+  ['First Win', '🥇', 25, 'Achievement'], ['Momentum Star', '🌟', 60, 'Achievement'], ['Silver Goal', '🥈', 120, 'Achievement'], ['Champion Crown', '🏆', 250, 'Achievement'], ['Legend Medal', '🏅', 400, 'Achievement'],
+  ['Hometown Pride', '🏡', 15, 'Community'], ['Community Cheer', '👏', 40, 'Community'], ['Neighborhood Lift', '🧡', 90, 'Community'], ['Unity Circle', '🤝', 180, 'Community'], ['Together Crown', '👨‍👩‍👧‍👦', 350, 'Community'],
+  ['Peace Euphoria', '🕊️', 30, 'Wellness'], ['Calm Wave', '🌊', 75, 'Wellness'], ['Glow Ritual', '✨', 150, 'Wellness'], ['Mindful Crown', '👁️', 300, 'Wellness'], ['Luxury Calm', '💎', 500, 'Wellness'],
 ];
 
 const schemas = [
@@ -41,8 +41,8 @@ const schemas = [
     id: 'transactions', name: 'Transactions', permissions: [],
     attrs: [
       ['transactionId', 'string', { size: 36, required: true }], ['senderUserId', 'string', { size: 36, required: true }], ['receiverUserId', 'string', { size: 36, required: true }],
-      ['transactionType', 'enum', { elements: ['gift', 'subscription', 'unlock_post', 'unlock_music', 'store_boost', 'marketplace_boost', 'verification', 'currency_purchase'], required: true }], ['amountLD', 'integer', { required: true, min: 1 }],
-      ['itemId', 'string', { size: 36 }], ['itemType', 'enum', { elements: ['post', 'music', 'gift_item'] }], ['orangeMoneyRef', 'string', { size: 128 }],
+      ['transactionType', 'enum', { elements: ['purchase', 'gift', 'unlock', 'unlock_post', 'unlock_music', 'post_unlock', 'subscribe', 'subscription', 'verify', 'verification', 'boost', 'post_boost', 'sonic_boost', 'marketplace_boost', 'store_boost', 'ad', 'ad_campaign', 'withdrawal', 'refund', 'deposit', 'currency_purchase'], required: true }], ['amountLD', 'integer', { required: true, min: 1 }],
+      ['itemId', 'string', { size: 36 }], ['itemType', 'enum', { elements: ['gift', 'gift_item', 'post', 'post_unlock', 'track', 'album', 'music', 'subscription', 'store', 'product', 'verification', 'ad', 'ad_campaign', 'credits', 'withdrawal'] }], ['orangeMoneyRef', 'string', { size: 128 }],
       ['status', 'enum', { elements: ['pending', 'completed', 'failed', 'cancelled'], required: true }], ['createdAt', 'datetime', { required: true }],
     ], indexes: [['transactionId', 'unique', ['transactionId']], ['senderUserId', 'key', ['senderUserId']], ['receiverUserId', 'key', ['receiverUserId']], ['transactionType', 'key', ['transactionType']], ['amountLD', 'key', ['amountLD']], ['status', 'key', ['status']], ['createdAt', 'key', ['createdAt']]],
   },
@@ -52,15 +52,15 @@ const schemas = [
   },
   {
     id: 'locked_content', name: 'Locked Content', permissions: [],
-    attrs: [['contentId', 'string', { size: 36, required: true }], ['creatorUserId', 'string', { size: 36, required: true }], ['contentType', 'enum', { elements: ['post', 'music'], required: true }], ['priceLD', 'integer', { required: true, min: 100, max: 500 }], ['isLocked', 'boolean', { required: true, defaultValue: true }], ['createdAt', 'datetime', { required: true }]], indexes: [['contentId', 'unique', ['contentId']], ['creatorUserId', 'key', ['creatorUserId']], ['contentType', 'key', ['contentType']], ['priceLD', 'key', ['priceLD']]],
+    attrs: [['contentId', 'string', { size: 36, required: true }], ['creatorUserId', 'string', { size: 36, required: true }], ['contentType', 'enum', { elements: ['post', 'music'], required: true }], ['priceLD', 'integer', { required: true, min: 20, max: 100 }], ['isLocked', 'boolean', { required: true, defaultValue: true }], ['createdAt', 'datetime', { required: true }]], indexes: [['contentId', 'unique', ['contentId']], ['creatorUserId', 'key', ['creatorUserId']], ['contentType', 'key', ['contentType']], ['priceLD', 'key', ['priceLD']]],
   },
   {
     id: 'subscriptions', name: 'Subscriptions', permissions: [],
-    attrs: [['subscriptionId', 'string', { size: 36, required: true }], ['subscriberUserId', 'string', { size: 36, required: true }], ['creatorUserId', 'string', { size: 36, required: true }], ['amountLD', 'integer', { required: true, min: 500, max: 500 }], ['startDate', 'datetime', { required: true }], ['endDate', 'datetime', { required: true }], ['isActive', 'boolean', { required: true, defaultValue: true }], ['autoRenew', 'boolean', { required: true, defaultValue: true }]], indexes: [['subscriptionId', 'unique', ['subscriptionId']], ['subscriberUserId', 'key', ['subscriberUserId']], ['creatorUserId', 'key', ['creatorUserId']], ['startDate', 'key', ['startDate']], ['endDate', 'key', ['endDate']], ['isActive', 'key', ['isActive']]],
+    attrs: [['subscriptionId', 'string', { size: 36, required: true }], ['subscriberUserId', 'string', { size: 36, required: true }], ['creatorUserId', 'string', { size: 36, required: true }], ['amountLD', 'integer', { required: false, min: 0, max: 1000000000, defaultValue: 500 }], ['startDate', 'datetime', { required: true }], ['endDate', 'datetime', { required: true }], ['isActive', 'boolean', { required: true, defaultValue: true }], ['autoRenew', 'boolean', { required: true, defaultValue: true }]], indexes: [['subscriptionId', 'unique', ['subscriptionId']], ['subscriberUserId', 'key', ['subscriberUserId']], ['creatorUserId', 'key', ['creatorUserId']], ['startDate', 'key', ['startDate']], ['endDate', 'key', ['endDate']], ['isActive', 'key', ['isActive']]],
   },
   {
     id: 'gift_items', name: 'Gift Items', permissions: [Permission.read(Role.users())],
-    attrs: [['giftId', 'string', { size: 36, required: true }], ['name', 'string', { size: 128, required: true }], ['priceLD', 'integer', { required: true, min: 50, max: 500 }], ['category', 'string', { size: 64, required: true }], ['iconUrl', 'string', { size: 512, required: true }], ['isActive', 'boolean', { required: true, defaultValue: true }]], indexes: [['giftId', 'unique', ['giftId']], ['priceLD', 'key', ['priceLD']], ['category', 'key', ['category']]],
+    attrs: [['giftId', 'string', { size: 36, required: true }], ['name', 'string', { size: 128, required: true }], ['priceLD', 'integer', { required: true, min: 2, max: 500 }], ['category', 'string', { size: 64, required: true }], ['iconUrl', 'string', { size: 512, required: true }], ['isActive', 'boolean', { required: true, defaultValue: true }]], indexes: [['giftId', 'unique', ['giftId']], ['priceLD', 'key', ['priceLD']], ['category', 'key', ['category']]],
   },
 ];
 

@@ -1,6 +1,6 @@
 {
-  "app/admin/_client.tsx -> @/lib/upload": {
-    "id": "app/admin/_client.tsx -> @/lib/upload",
+  "components/feed/create-story-modal.tsx -> @/lib/upload": {
+    "id": "components/feed/create-story-modal.tsx -> @/lib/upload",
     "files": []
   },
   "components/layout/deferred-global-ui.tsx -> @/components/ad/ad-portal": {
@@ -173,14 +173,10 @@
   },
   "context/PostContext.tsx -> @/lib/upload": {
     "id": "context/PostContext.tsx -> @/lib/upload",
-    "files": [
-      "static/chunks/_app-pages-browser_src_lib_upload_ts.js"
-    ]
+    "files": []
   },
   "lib/marketplace.ts -> ./upload": {
     "id": "lib/marketplace.ts -> ./upload",
-    "files": [
-      "static/chunks/_app-pages-browser_src_lib_upload_ts.js"
-    ]
+    "files": []
   }
 }

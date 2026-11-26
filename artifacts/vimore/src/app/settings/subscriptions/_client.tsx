@@ -153,7 +153,7 @@ export default function SubscriptionsVault() {
                       <span className="text-[10px] font-black text-muted-foreground uppercase tracking-tighter">@{creator.username}</span>
                     </div>
                   </div>
-                  <Badge className="bg-cyan-500/10 text-cyan-600 border-none font-black h-5 px-3 uppercase tracking-tighter">20 C / MO</Badge>
+                  <Badge className="bg-cyan-500/10 text-cyan-600 border-none font-black h-5 px-3 uppercase tracking-tighter">500 C / MO</Badge>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">

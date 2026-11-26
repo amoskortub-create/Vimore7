@@ -1,5 +1,7 @@
 import { databases, storage, account, ID, Query, COL, BUCKET, DATABASE_ID, getFilePreview, getFileUrl } from './appwrite';
 import { Permission, Role } from 'appwrite';
+import { CREDIT_PRICES } from './credit-pricing';
+import { authFetch } from './auth-fetch';
 
 export type ProductCurrency = 'LRD' | 'USD';
 export type ProductStatus = 'active' | 'sold' | 'paused';
@@ -25,9 +27,9 @@ export interface ProductDoc {
   category?: string | null;
 }
 
-export const BOOST_DAYS_PER_DIAMOND = 5;
-export const BOOST_MIN_DIAMONDS = 2;
-export const BOOST_MAX_DIAMONDS = 10;
+export const MARKETPLACE_BOOST_CREDITS_PER_DAY = CREDIT_PRICES.marketplaceBoostPerDay;
+export const MARKETPLACE_BOOST_MIN_DAYS = 1;
+export const MARKETPLACE_BOOST_MAX_DAYS = 30;
 
 export interface CreateProductInput {
   sellerId: string;
@@ -117,7 +119,7 @@ function mapProduct(doc: any): ProductDoc {
     phoneNumber: doc.phoneNumber || '',
     imageFileIds: Array.isArray(doc.imageFileIds) ? doc.imageFileIds : [],
     status: (doc.status || 'active') as ProductStatus,
-    featuredUntil: doc.featuredUntil || null,
+    featuredUntil: doc.featuredUntil || doc.boost_until || null,
     store_id: doc.store_id || null,
     category: doc.category || null,
   };
@@ -128,17 +130,24 @@ export function isFeatured(p: ProductDoc): boolean {
   return new Date(p.featuredUntil).getTime() > Date.now();
 }
 
-export async function boostProductFeatured(productId: string, diamonds: number): Promise<string> {
-  if (diamonds < BOOST_MIN_DIAMONDS || diamonds > BOOST_MAX_DIAMONDS) {
-    throw new Error(`Boost must be between ${BOOST_MIN_DIAMONDS} and ${BOOST_MAX_DIAMONDS} Credits.`);
+export async function boostProductFeatured(productId: string, days: number): Promise<{ boostExpiry: string; newBalance?: number }> {
+  const safeDays = Math.floor(days);
+  if (safeDays < MARKETPLACE_BOOST_MIN_DAYS || safeDays > MARKETPLACE_BOOST_MAX_DAYS) {
+    throw new Error(`Boost duration must be between ${MARKETPLACE_BOOST_MIN_DAYS} and ${MARKETPLACE_BOOST_MAX_DAYS} days.`);
   }
-  const days = diamonds * BOOST_DAYS_PER_DIAMOND;
-  const existing = await getProduct(productId);
-  const now = Date.now();
-  const startMs = existing?.featuredUntil ? Math.max(now, new Date(existing.featuredUntil).getTime()) : now;
-  const newUntil = new Date(startMs + days * 24 * 60 * 60 * 1000).toISOString();
-  await databases.updateDocument(DATABASE_ID, COL.PRODUCTS, productId, { featuredUntil: newUntil });
-  return newUntil;
+  const res = await authFetch('/api/transaction/boost', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type: 'MARKETPLACE', targetId: productId, days: safeDays }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.error || 'Marketplace boost failed');
+  }
+  return {
+    boostExpiry: data.boostExpiry,
+    newBalance: typeof data.newBalance === 'number' ? data.newBalance : undefined,
+  };
 }
 
 export async function listProducts(opts: { limit?: number; cursorAfter?: string } = {}): Promise<ProductDoc[]> {

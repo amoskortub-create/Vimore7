@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, ReactNode, useEffect, useCa
 import { usePosts } from './PostContext';
 import { databases, ID, Query, Permission, Role, BUCKET, DATABASE_ID, COL, getFileUrl, extractFileId } from '@/lib/appwrite';
 import { saveCache, loadCache, pinMediaInSW, OFFLINE_KEYS } from '@/lib/offline-cache';
+import { authFetch } from '@/lib/auth-fetch';
 
 
 export interface Track {
@@ -194,7 +195,7 @@ function mapDocToPlaylist(doc: any, songs: Track[]): Playlist {
 }
 
 export function MusicProvider({ children }: { children: ReactNode }) {
-  const { currentUser, campaigns } = usePosts();
+  const { currentUser, campaigns, checkSession } = usePosts();
 
   const [currentTrack, setCurrentTrackState] = useState<Track | null>(null);
   const [globalSongs, setGlobalSongsState] = useState<Track[]>([]);
@@ -452,29 +453,28 @@ export function MusicProvider({ children }: { children: ReactNode }) {
 
   const unlockMusic = useCallback(async (
     id: string | number,
-    price: number,
-    artistId: string,
-    isVerified: boolean,
+    _price: number,
+    _artistId: string,
+    _isVerified: boolean,
   ) => {
     if (!currentUser) throw new Error('Not logged in');
-    const artistShare = 0.8;
-    const artistAmount = Math.round(price * artistShare * 100) / 100;
     try {
-      await databases.createDocument(DATABASE_ID, COL.MUSIC_UNLOCKS, ID.unique(), {
-        user_id: currentUser.$id,
-        track_id: String(id),
-        price_paid: price,
-        artist_id: artistId,
-        artist_amount: artistAmount,
-      }, [
-        Permission.read(Role.user(currentUser.$id)),
-      ]);
+      const res = await authFetch('/api/transaction/unlock-music', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trackId: String(id) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || 'Could not unlock music');
+      }
       setUnlockedMusicIdsState(prev => new Set(prev).add(id));
+      void checkSession().catch(() => {});
     } catch (err: any) {
       console.error('unlockMusic error:', err);
       throw err;
     }
-  }, [currentUser]);
+  }, [currentUser, checkSession]);
 
   const recordSongStream = useCallback(async (songId: string | number) => {
     setGlobalSongsState(prev => prev.map(s => {

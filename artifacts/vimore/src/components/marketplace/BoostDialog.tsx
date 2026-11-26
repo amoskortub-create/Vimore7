@@ -9,7 +9,13 @@ import {
 } from "@/components/ui/dialog";
 import { usePosts } from "@/context/PostContext";
 import { useToast } from "@/hooks/use-toast";
-import { BOOST_DAYS_PER_DIAMOND, BOOST_MIN_DIAMONDS, BOOST_MAX_DIAMONDS, isFeatured, ProductDoc } from "@/lib/marketplace";
+import {
+  MARKETPLACE_BOOST_CREDITS_PER_DAY,
+  MARKETPLACE_BOOST_MIN_DAYS,
+  MARKETPLACE_BOOST_MAX_DAYS,
+  isFeatured,
+  ProductDoc,
+} from "@/lib/marketplace";
 
 interface Props {
   product: ProductDoc;
@@ -21,26 +27,26 @@ export function BoostDialog({ product, children, onBoosted }: Props) {
   const { currentUser, boostMarketplaceListing } = usePosts();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
-  const [diamonds, setDiamonds] = useState<number>(BOOST_MIN_DIAMONDS);
+  const [days, setDays] = useState<number>(MARKETPLACE_BOOST_MIN_DAYS);
   const [submitting, setSubmitting] = useState(false);
 
-  const days = diamonds * BOOST_DAYS_PER_DIAMOND;
-  const balance = currentUser?.diamondBalance || 0;
-  const insufficient = balance < diamonds;
+  const totalCost = days * MARKETPLACE_BOOST_CREDITS_PER_DAY;
+  const balance = currentUser?.creditBalance ?? currentUser?.diamondBalance ?? 0;
+  const insufficient = balance < totalCost;
   const alreadyFeatured = isFeatured(product);
 
   const adjust = (delta: number) => {
-    setDiamonds(d => Math.min(BOOST_MAX_DIAMONDS, Math.max(BOOST_MIN_DIAMONDS, d + delta)));
+    setDays(d => Math.min(MARKETPLACE_BOOST_MAX_DAYS, Math.max(MARKETPLACE_BOOST_MIN_DAYS, d + delta)));
   };
 
   const handleConfirm = async () => {
     if (insufficient) {
-      toast({ variant: "destructive", title: "Not enough Credits", description: `You need ${diamonds} but have ${balance}.` });
+      toast({ variant: "destructive", title: "Not enough Credits", description: `You need ${totalCost.toLocaleString()} Credits but have ${balance.toLocaleString()}.` });
       return;
     }
     setSubmitting(true);
     try {
-      const newUntil = await boostMarketplaceListing(product.$id, diamonds);
+      const newUntil = await boostMarketplaceListing(product.$id, days);
       onBoosted?.(newUntil);
       setOpen(false);
     } catch { /* toast already shown */ }
@@ -57,7 +63,7 @@ export function BoostDialog({ product, children, onBoosted }: Props) {
           </div>
           <DialogTitle className="font-black italic uppercase tracking-tighter text-center text-xl">Feature this listing</DialogTitle>
           <DialogDescription className="text-center text-xs">
-            Push your product to the top of the marketplace. <span className="font-bold text-foreground">{BOOST_MIN_DIAMONDS} Credits = {BOOST_MIN_DIAMONDS * BOOST_DAYS_PER_DIAMOND} days</span>.
+            Push your product to the top of the marketplace. <span className="font-bold text-foreground">{MARKETPLACE_BOOST_CREDITS_PER_DAY} Credits / day</span>.
           </DialogDescription>
         </DialogHeader>
 
@@ -71,24 +77,27 @@ export function BoostDialog({ product, children, onBoosted }: Props) {
 
         <div className="bg-secondary/30 rounded-2xl p-4 space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Credits</p>
-            <p className="text-[10px] text-muted-foreground">Balance: <span className="font-bold text-cyan-500">{balance}</span></p>
+            <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Boost Days</p>
+            <p className="text-[10px] text-muted-foreground">Balance: <span className="font-bold text-cyan-500">{balance.toLocaleString()} Credits</span></p>
           </div>
           <div className="flex items-center justify-center gap-3">
-            <Button type="button" variant="ghost" size="icon" onClick={() => adjust(-1)} disabled={diamonds <= BOOST_MIN_DIAMONDS} className="h-12 w-12 rounded-full bg-background">
+            <Button type="button" variant="ghost" size="icon" onClick={() => adjust(-1)} disabled={days <= MARKETPLACE_BOOST_MIN_DAYS} className="h-12 w-12 rounded-full bg-background">
               <Minus className="h-4 w-4" />
             </Button>
-            <div className="flex items-center gap-2 bg-cyan-500/10 px-6 py-3 rounded-2xl min-w-[120px] justify-center">
-              <Gem className="h-6 w-6 text-cyan-500" />
-              <span className="text-3xl font-black tabular-nums">{diamonds}</span>
+            <div className="flex items-center gap-2 bg-cyan-500/10 px-6 py-3 rounded-2xl min-w-[140px] justify-center">
+              <span className="text-3xl font-black tabular-nums">{days}</span>
+              <span className="text-xs font-black uppercase text-cyan-600 dark:text-cyan-400">{days === 1 ? 'day' : 'days'}</span>
             </div>
-            <Button type="button" variant="ghost" size="icon" onClick={() => adjust(1)} disabled={diamonds >= BOOST_MAX_DIAMONDS} className="h-12 w-12 rounded-full bg-background">
+            <Button type="button" variant="ghost" size="icon" onClick={() => adjust(1)} disabled={days >= MARKETPLACE_BOOST_MAX_DAYS} className="h-12 w-12 rounded-full bg-background">
               <Plus className="h-4 w-4" />
             </Button>
           </div>
           <div className="text-center pt-1">
-            <p className="text-2xl font-black italic uppercase tracking-tighter text-primary">{days} days</p>
-            <p className="text-[10px] text-muted-foreground">Featured at the top of the marketplace</p>
+            <p className="text-2xl font-black italic uppercase tracking-tighter text-primary flex items-center justify-center gap-1.5">
+              <Gem className="h-5 w-5 text-cyan-500" />
+              {totalCost.toLocaleString()} Credits
+            </p>
+            <p className="text-[10px] text-muted-foreground">{MARKETPLACE_BOOST_CREDITS_PER_DAY} Credits/day · Featured at the top of the marketplace</p>
           </div>
         </div>
 
@@ -100,7 +109,7 @@ export function BoostDialog({ product, children, onBoosted }: Props) {
             className="rounded-xl bg-cyan-500 hover:bg-cyan-600 text-white gap-2 font-black uppercase tracking-widest text-[10px]"
           >
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
-            {insufficient ? "Not enough Credits" : `Boost · ${diamonds} Credits`}
+            {insufficient ? "Not enough Credits" : `Boost · ${totalCost.toLocaleString()} Credits`}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -32,8 +32,6 @@ interface BoostPortalProps {
   type: 'POST' | 'SONIC';
 }
 
-const CREDIT_RATE = CREDIT_PRICES.postBoostPerDay;
-
 const DAY_TIERS = [
   { days: 1, label: '1 Day', sublabel: 'Pulse' },
   { days: 3, label: '3 Days', sublabel: 'Surge' },
@@ -51,7 +49,7 @@ export function BoostPortal({ children, nodeId, type }: BoostPortalProps) {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
 
-  const rate = CREDIT_RATE;
+  const rate = type === 'SONIC' ? CREDIT_PRICES.musicBoostPerDay : CREDIT_PRICES.postBoostPerDay;
   const totalCost = days * rate;
   const currentBalance = currentUser?.creditBalance ?? currentUser?.diamondBalance ?? 0;
   const hasBalance = currentBalance >= totalCost;
@@ -179,7 +177,7 @@ export function BoostPortal({ children, nodeId, type }: BoostPortalProps) {
                 </div>
                 <div className="rounded-2xl p-4 border-2 border-cyan-500/40 bg-cyan-500/10">
                   <div className="flex items-center gap-2"><Gem className="h-5 w-5 text-cyan-500" /><span className="text-[10px] font-black uppercase tracking-widest">Credits</span></div>
-                  <span className="text-[10px] font-bold text-muted-foreground">{CREDIT_RATE} per day</span>
+                  <span className="text-[10px] font-bold text-muted-foreground">{rate} per day</span>
                   <span className={cn("block text-[9px] font-black uppercase", hasBalance ? "text-green-500" : "text-red-400")}>Balance: {currentBalance.toLocaleString()}</span>
                 </div>
               </div>

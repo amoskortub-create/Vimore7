@@ -400,7 +400,7 @@ interface PostContextType {
   blockedUsernames: string[];
   submitReport: (data: { reportedUsername: string; reason: string; details: string }) => Promise<void>;
   adminDeleteProduct: (productId: string) => Promise<void>;
-  boostMarketplaceListing: (productId: string, diamonds: number) => Promise<string>;
+  boostMarketplaceListing: (productId: string, days: number) => Promise<string>;
   fetchAllUsersForDiscovery: () => Promise<User[]>;
   allUsers: User[];
   refreshAllUsers: () => Promise<void>;
@@ -4547,11 +4547,10 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const boostNode = async (nodeId: string, duration: number, _currency: 'CREDIT', type: 'POST' | 'SONIC') => {
     if (!currentUser) return;
 
-    const ratePerDay = CREDIT_PRICES.postBoostPerDay;
+    const ratePerDay = type === 'SONIC' ? CREDIT_PRICES.musicBoostPerDay : CREDIT_PRICES.postBoostPerDay;
     const totalCost = duration * ratePerDay;
     const currentBalance = currentUser.creditBalance ?? currentUser.diamondBalance ?? 0;
 
-    // Balance check FIRST — before any state or DB changes
     if (currentBalance < totalCost) {
       throw new Error(
         `Insufficient Credits. You need ${totalCost} but only have ${currentBalance}.`
@@ -4559,39 +4558,35 @@ export function PostProvider({ children }: { children: ReactNode }) {
     }
 
     const expiryMs = Date.now() + duration * 86400000;
-    const expiry = new Date(expiryMs).toISOString();
-    const balanceUpdate = { diamond_balance: currentBalance - totalCost };
-
     if (type === 'POST') {
-      // Optimistic update
-       setPostsState(prev => prev.map(p => p.$id === nodeId ? { ...p, isBoosted: true, boostExpiry: expiryMs } : p));
-      try {
-        await Promise.all([
-           databases.updateDocument(DATABASE_ID, COL.POSTS, nodeId, { is_boosted: true, boost_expiry: expiry }),
-          databases.updateDocument(DATABASE_ID, COL.USERS, currentUser.$id, balanceUpdate),
-        ]);
-        setCurrentUserState(prev => {
-          if (!prev) return null;
-          return { ...prev, creditBalance: currentBalance - totalCost, diamondBalance: currentBalance - totalCost };
-        });
-      } catch (err: any) {
-        // Roll back optimistic update on failure
+      setPostsState(prev => prev.map(p => p.$id === nodeId ? { ...p, isBoosted: true, boostExpiry: expiryMs } : p));
+    }
+
+    try {
+      const res = await authFetch('/api/transaction/boost', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, targetId: nodeId, days: duration }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || 'Boost failed');
+      }
+
+      const confirmedExpiryMs = data.boostExpiry ? new Date(data.boostExpiry).getTime() : expiryMs;
+      if (type === 'POST') {
+        setPostsState(prev => prev.map(p => p.$id === nodeId ? { ...p, isBoosted: true, boostExpiry: confirmedExpiryMs } : p));
+      }
+      const nextBalance = typeof data.newBalance === 'number' ? data.newBalance : Math.max(0, currentBalance - totalCost);
+      setCurrentUserState(prev => {
+        if (!prev) return null;
+        return { ...prev, creditBalance: nextBalance, diamondBalance: nextBalance };
+      });
+    } catch (err: any) {
+      if (type === 'POST') {
         setPostsState(prev => prev.map(p => p.$id === nodeId ? { ...p, isBoosted: false, boostExpiry: undefined } : p));
-        throw err;
       }
-    } else if (type === 'SONIC') {
-      try {
-        await Promise.all([
-           databases.updateDocument(DATABASE_ID, COL.TRACKS, nodeId, { is_boosted: true, boost_expiry: expiry }),
-          databases.updateDocument(DATABASE_ID, COL.USERS, currentUser.$id, balanceUpdate),
-        ]);
-        setCurrentUserState(prev => {
-          if (!prev) return null;
-          return { ...prev, creditBalance: currentBalance - totalCost, diamondBalance: currentBalance - totalCost };
-        });
-      } catch (err: any) {
-        throw err;
-      }
+      throw err;
     }
   };
 
@@ -4831,37 +4826,40 @@ export function PostProvider({ children }: { children: ReactNode }) {
     },
     buyVerificationBadge: async () => {
       if (!currentUser) return { status: 'insufficient_balance' as const, balance: 0 };
-      try {
-        const userDoc = await databases.getDocument(DATABASE_ID, COL.USERS, currentUser.$id);
-        const balance = userDoc.credit_balance ?? userDoc.diamond_balance ?? 0;
-        const expiry = userDoc.verification_expiry ? new Date(userDoc.verification_expiry).getTime() : undefined;
-        const COST = CREDIT_PRICES.verification;
-        if (userDoc.is_verified && expiry && expiry > Date.now()) {
-          return { status: 'already_verified' as const, expiry };
-        }
-        if (balance < COST) {
+      const balance = currentUser.creditBalance ?? currentUser.diamondBalance ?? 0;
+      const COST = CREDIT_PRICES.verification;
+      if (currentUser.isVerified && currentUser.verificationExpiry && currentUser.verificationExpiry > Date.now()) {
+        return { status: 'already_verified' as const, expiry: currentUser.verificationExpiry };
+      }
+      if (balance < COST) {
+        return { status: 'insufficient_balance' as const, balance };
+      }
+      const res = await authFetch('/api/transaction/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currency: 'DIAMOND', cost: COST }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (String(data?.error || '').toLowerCase().includes('insufficient')) {
           return { status: 'insufficient_balance' as const, balance };
         }
-        const newExpiryMs = Date.now() + 30 * 24 * 60 * 60 * 1000;
-        const newExpiry = new Date(newExpiryMs).toISOString();
-        const newBalance = balance - COST;
-        await databases.updateDocument(DATABASE_ID, COL.USERS, currentUser.$id, {
-          is_verified: true,
-          has_ever_been_verified: true,
-          verification_expiry: newExpiry,
-          diamond_balance: newBalance,
-        });
-        setCurrentUserState(prev => prev ? {
-          ...prev,
-          isVerified: true,
-          diamondBalance: newBalance,
-          creditBalance: newBalance,
-          verificationExpiry: newExpiryMs,
-        } : null);
-        return { status: 'success' as const, expiry: newExpiryMs };
-      } catch (e: any) {
-        throw e;
+        throw new Error(data?.error || 'Verification failed');
       }
+      if (data.alreadyVerified) {
+        return { status: 'already_verified' as const, expiry: data.verificationExpiry };
+      }
+      const newBalance = typeof data.newBalance === 'number' ? data.newBalance : Math.max(0, balance - COST);
+      const newExpiryMs = data.verificationExpiry || Date.now() + 30 * 24 * 60 * 60 * 1000;
+      setCurrentUserState(prev => prev ? {
+        ...prev,
+        isVerified: true,
+        hasEverBeenVerified: true,
+        diamondBalance: newBalance,
+        creditBalance: newBalance,
+        verificationExpiry: newExpiryMs,
+      } : null);
+      return { status: 'success' as const, expiry: newExpiryMs, balance: newBalance };
     },
     refreshAdminData,
     fetchProfileByUsername, fetchProfilePosts, fetchReels, searchAllUsers, fetchComments,
@@ -5051,36 +5049,18 @@ export function PostProvider({ children }: { children: ReactNode }) {
         }
       } catch { /* keep optimistic */ }
     },
-    boostMarketplaceListing: async (productId: string, credits: number) => {
+    boostMarketplaceListing: async (productId: string, days: number) => {
       if (!currentUser) throw new Error('Not signed in');
+      const { boostProductFeatured, MARKETPLACE_BOOST_CREDITS_PER_DAY } = await import('@/lib/marketplace');
+      const cost = days * MARKETPLACE_BOOST_CREDITS_PER_DAY;
       const balance = currentUser.creditBalance ?? currentUser.diamondBalance ?? 0;
-      if (balance < credits) throw new Error(`You need ${credits} Credits but only have ${balance}.`);
+      if (balance < cost) throw new Error(`You need ${cost} Credits but only have ${balance}.`);
       try {
-        const { boostProductFeatured, BOOST_DAYS_PER_DIAMOND } = await import('@/lib/marketplace');
-        const newUntil = await boostProductFeatured(productId, credits);
-        const days = credits * BOOST_DAYS_PER_DIAMOND;
-        await databases.updateDocument(DATABASE_ID, COL.USERS, currentUser.$id, { diamond_balance: balance - credits });
-        setCurrentUserState(prev => prev ? { ...prev, creditBalance: balance - credits, diamondBalance: balance - credits } : null);
-        try {
-          await databases.createDocument(DATABASE_ID, COL.TRANSACTIONS, ID.unique(), {
-            user_id: currentUser.$id,
-            transactionId: ID.unique(),
-            senderUserId: currentUser.$id,
-            receiverUserId: currentUser.$id,
-            transactionType: 'marketplace_boost',
-            amountLD: credits,
-            itemId: productId,
-            createdAt: new Date().toISOString(),
-            type: 'MARKETPLACE_BOOST',
-            currency: 'CREDIT',
-            amount: -credits,
-            description: `Featured listing boost — ${days} days`,
-            reference_id: productId,
-            status: 'COMPLETED',
-          });
-        } catch { /* non-fatal */ }
-        toast({ title: 'Listing Featured!', description: `Promoted for ${days} days.` });
-        return newUntil;
+        const { boostExpiry, newBalance } = await boostProductFeatured(productId, days);
+        const nextBalance = typeof newBalance === 'number' ? newBalance : Math.max(0, balance - cost);
+        setCurrentUserState(prev => prev ? { ...prev, creditBalance: nextBalance, diamondBalance: nextBalance } : null);
+        toast({ title: 'Listing Featured!', description: `Promoted for ${days} day${days > 1 ? 's' : ''}.` });
+        return boostExpiry;
       } catch (err: any) {
         logAppwriteError('boostMarketplaceListing', err);
         toast({ variant: 'destructive', title: 'Boost failed', description: err?.message || 'Try again.' });

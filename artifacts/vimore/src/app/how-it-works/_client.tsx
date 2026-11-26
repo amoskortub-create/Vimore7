@@ -51,7 +51,7 @@ const FEATURES = [
     points: [
       { icon: Rocket, text: "Your feed is personalised by AI — it shows the content most relevant to you." },
       { icon: Zap, text: "Reels — short videos in full-screen, designed for creators to go viral." },
-      { icon: Gem, text: "Lock posts behind a Credit paywall (5–20 C) to monetise your best content." },
+      { icon: Gem, text: "Lock posts behind a Credit paywall (20–100 C) to monetise your best content." },
     ],
   },
   {
@@ -219,7 +219,7 @@ export default function HowItWorks() {
               </div>
             </div>
              <p className="text-white/75 text-sm font-medium leading-relaxed">
-               Every Credit you earn from your content — gifts (2–50 C), unlocks (5–20 C), and subscriptions (20 C/month) — gives 80% directly to your Credit balance while keeping 20% as platform fees.
+               Every Credit you earn from your content — gifts (2–500 C), unlocks (20–100 C), and subscriptions (500 C/month) — gives 80% directly to your Credit balance while keeping 20% as platform fees.
             </p>
             <div className="flex gap-3">
               <div className="flex-1 bg-white/10 rounded-xl p-3 text-center">

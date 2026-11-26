@@ -157,7 +157,7 @@ export default function VerifiedBenefitsPage() {
               </div>
               <div>
                  <p className="text-xs font-black text-foreground">The same fair rate applies to every creator</p>
-                 <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Gifts (2–50 Credits), post unlocks (5–20 Credits), and subscriptions (20 Credits/month) add 80% to your Credit balance and keep 20% as platform fees.</p>
+                 <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Gifts (2–500 Credits), post unlocks (20–100 Credits), and subscriptions (500 Credits/month) add 80% to your Credit balance and keep 20% as platform fees.</p>
               </div>
             </div>
           </div>
@@ -197,7 +197,7 @@ export default function VerifiedBenefitsPage() {
                 color: "text-green-500",
                 bg: "bg-green-500/10",
                 title: "Loyalty Renewal Discount",
-                desc: "Verified creators renew for 20 Credits or 20,000 Stars and keep their creator status active.",
+                desc: "Verified creators renew for 500 Credits or 20,000 Stars and keep their creator status active.",
               },
               {
                 icon: TrendingUp,
@@ -261,12 +261,12 @@ export default function VerifiedBenefitsPage() {
           <p className="text-[11px] font-black uppercase tracking-widest text-muted-foreground px-1">How to Earn Your Badge</p>
           <div className="bg-white dark:bg-white/4 border border-black/5 dark:border-white/8 rounded-3xl p-5 shadow-sm space-y-4">
             <p className="text-xs text-muted-foreground font-medium leading-relaxed">
-              You need either <strong className="text-foreground">20 Credits</strong> or <strong className="text-foreground">25,000 Stars</strong> to activate your badge for 30 days. Here are the fastest ways to earn them:
+              You need either <strong className="text-foreground">500 Credits</strong> or <strong className="text-foreground">25,000 Stars</strong> to activate your badge for 30 days. Here are the fastest ways to earn them:
             </p>
             <div className="space-y-3">
               {[
                 { icon: Heart, label: "Collect Gifts", desc: "Fans send you Credits through your posts and reels. You keep 80% of every gift.", color: "text-rose-500", bg: "bg-rose-500/10" },
-                { icon: Gift, label: "Premium Posts", desc: "Lock your best content (5–20 Credits) and earn 80% when followers unlock it. Subscribers pay 20 Credits/month.", color: "text-cyan-500", bg: "bg-cyan-500/10" },
+                { icon: Gift, label: "Premium Posts", desc: "Lock your best content (20–100 Credits) and earn 80% when followers unlock it. Subscribers pay 500 Credits/month.", color: "text-cyan-500", bg: "bg-cyan-500/10" },
                 { icon: Star, label: "Star Reactions", desc: "Fans can send Stars directly via your posts. Collect 25,000 to pay with Stars instead.", color: "text-amber-500", bg: "bg-amber-500/10" },
                 { icon: MessageCircle, label: "Boost Engagement", desc: "More comments, shares and views increase your profile ranking and drive more gifting from fans.", color: "text-violet-500", bg: "bg-violet-500/10" },
               ].map((item) => (
@@ -290,7 +290,7 @@ export default function VerifiedBenefitsPage() {
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-white/60 dark:bg-white/5 rounded-2xl p-3.5 text-center space-y-1 border border-cyan-500/15">
               <Gem className="h-5 w-5 text-cyan-500 mx-auto" />
-              <p className="text-xl font-black text-foreground">20</p>
+              <p className="text-xl font-black text-foreground">500</p>
               <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Credits / mo</p>
             </div>
             <div className="bg-white/60 dark:bg-white/5 rounded-2xl p-3.5 text-center space-y-1 border border-amber-500/15">
@@ -302,7 +302,7 @@ export default function VerifiedBenefitsPage() {
           <div className="flex items-start gap-2.5 bg-green-500/8 border border-green-500/15 rounded-2xl p-3">
             <RefreshCw className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
             <p className="text-[10px] text-green-700 dark:text-green-400 font-medium leading-relaxed">
-              Verification renewals cost <strong>20 Credits</strong> or <strong>20,000 Stars</strong>.
+              Verification renewals cost <strong>500 Credits</strong> or <strong>20,000 Stars</strong>.
             </p>
           </div>
         </section>

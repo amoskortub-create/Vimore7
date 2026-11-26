@@ -11,6 +11,8 @@ import {
   getFilePreview,
 } from './appwrite';
 import { uploadViaClient } from './upload';
+import { CREDIT_PRICES } from './credit-pricing';
+import { authFetch } from './auth-fetch';
 
 export const STORE_CATEGORIES = [
   'Fashion & Clothing',
@@ -28,7 +30,7 @@ export const STORE_CATEGORIES = [
 
 export type StoreCategory = (typeof STORE_CATEGORIES)[number];
 
-export const STORE_BOOST_DIAMONDS_PER_DAY = 3;
+export const STORE_BOOST_DIAMONDS_PER_DAY = CREDIT_PRICES.storeBoostPerDay;
 export const STORE_BOOST_MAX_DAYS = 30;
 
 export interface StoreDoc {
@@ -217,7 +219,7 @@ export async function updateStore(
 
 export async function boostStoreWithDiamonds(
   storeId: string,
-  userId: string,
+  _userId: string,
   days: number,
   currentBalance: number
 ): Promise<string> {
@@ -227,21 +229,14 @@ export async function boostStoreWithDiamonds(
     throw new Error(`Insufficient credits: need ${cost} Credits.`);
   }
 
-  const existing = await getStore(storeId);
-  const now = Date.now();
-  const baseMs =
-    existing?.boost_until && new Date(existing.boost_until).getTime() > now
-      ? new Date(existing.boost_until).getTime()
-      : now;
-  const newUntil = new Date(baseMs + safeDays * 24 * 60 * 60 * 1000).toISOString();
-
-  const nextBalance = currentBalance - cost;
-  await databases.updateDocument(DATABASE_ID, COL.USERS, userId, {
-    diamond_balance: nextBalance,
+  const res = await authFetch('/api/transaction/boost', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type: 'STORE', targetId: storeId, days: safeDays }),
   });
-  await databases.updateDocument(DATABASE_ID, COL.STORES, storeId, {
-    boost_until: newUntil,
-  });
-
-  return newUntil;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.error || 'Store boost failed');
+  }
+  return data.boostExpiry;
 }

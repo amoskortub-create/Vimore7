@@ -151,9 +151,7 @@
   },
   "context/MusicContext.tsx -> @/lib/upload": {
     "id": "context/MusicContext.tsx -> @/lib/upload",
-    "files": [
-      "static/chunks/_app-pages-browser_src_lib_upload_ts.js"
-    ]
+    "files": []
   },
   "context/PostContext.tsx -> @/lib/appwrite": {
     "id": "context/PostContext.tsx -> @/lib/appwrite",

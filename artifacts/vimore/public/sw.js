@@ -234,6 +234,10 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const { request } = event;
   if (request.method !== 'GET') return;
+  try {
+    const pathname = new URL(request.url).pathname.toLowerCase();
+    if (pathname.endsWith('.apk') || pathname.startsWith('/downloads/')) return;
+  } catch {}
   if (isPrivateFileUrl(request.url)) return;
 
   // ── 1. Static assets: network-first, cache fallback ──────────────────────

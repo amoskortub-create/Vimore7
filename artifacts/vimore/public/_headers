@@ -9,3 +9,8 @@
 
 /icons/*
   Cache-Control: public, max-age=604800, immutable
+
+/downloads/*.apk
+  Content-Type: application/vnd.android.package-archive
+  Content-Disposition: attachment; filename="vimore.apk"
+  Cache-Control: public, max-age=3600

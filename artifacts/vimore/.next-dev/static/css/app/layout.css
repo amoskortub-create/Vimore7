@@ -844,6 +844,9 @@ video {
 .bottom-\[76px\] {
   bottom: 76px;
 }
+.bottom-\[max\(1rem\2c env\(safe-area-inset-bottom\)\)\] {
+  bottom: max(1rem, env(safe-area-inset-bottom));
+}
 .left-0 {
   left: 0px;
 }
@@ -6108,6 +6111,10 @@ video {
 }
 .text-primary\/80 {
   color: hsl(var(--primary) / 0.8);
+}
+.text-purple-300 {
+  --tw-text-opacity: 1;
+  color: rgb(216 180 254 / var(--tw-text-opacity, 1));
 }
 .text-purple-500 {
   --tw-text-opacity: 1;

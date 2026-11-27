@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowUpRight, Check, Download, ShieldCheck, Smartphone } from "lucide-react";
+import { getApkDownloadUrl } from "@/lib/apk";
 
 export const metadata: Metadata = {
   title: "Downloads | ViMore",
@@ -15,7 +16,7 @@ const apps = [
     platform: "Android",
     size: "14 MB",
     description: "Social, music, marketplace, reels, and messaging in one data-light community app.",
-    href: "/downloads/vimore.apk",
+    href: getApkDownloadUrl(),
     available: true,
   },
   {

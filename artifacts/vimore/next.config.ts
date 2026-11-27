@@ -96,6 +96,14 @@ const nextConfig: NextConfig = {
           { key: 'Access-Control-Allow-Origin', value: '*' },
         ],
       },
+      {
+        source: '/downloads/:file*.apk',
+        headers: [
+          { key: 'Content-Type', value: 'application/vnd.android.package-archive' },
+          { key: 'Content-Disposition', value: 'attachment; filename="vimore.apk"' },
+          { key: 'Cache-Control', value: 'public, max-age=3600' },
+        ],
+      },
     ];
   },
   allowedDevOrigins: ['127.0.0.1', 'localhost', '*.replit.dev', '*.replit.app', '*.spock.replit.dev', '*.worf.replit.dev', '*.janeway.replit.dev'],

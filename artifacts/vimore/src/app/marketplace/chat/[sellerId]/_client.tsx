@@ -142,7 +142,7 @@ export default function MarketplaceChatPage() {
     try {
       const res = await fetch(`/api/marketplace/messages/list?clusterId=${encodeURIComponent(clusterId)}`);
       if (!res.ok) return;
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       setMessages(data.messages || []);
     } catch {}
   }, [clusterId]);

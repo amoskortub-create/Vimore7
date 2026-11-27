@@ -20,10 +20,16 @@ async function getCacheTimestamp(
   cache: Cache,
   cacheKey: string
 ): Promise<number | null> {
-  const metaResponse = await cache.match(`${cacheKey}/__meta__`);
-  if (!metaResponse) return null;
-  const meta = await metaResponse.json();
-  return meta.cachedAt ?? null;
+  try {
+    const metaResponse = await cache.match(`${cacheKey}/__meta__`);
+    if (!metaResponse) return null;
+    const text = await metaResponse.text();
+    if (!text) return null;
+    const meta = JSON.parse(text);
+    return meta?.cachedAt ?? null;
+  } catch {
+    return null;
+  }
 }
 
 async function setCacheTimestamp(cache: Cache, cacheKey: string): Promise<void> {

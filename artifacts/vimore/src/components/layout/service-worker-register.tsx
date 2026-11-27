@@ -11,13 +11,16 @@ const PRECACHE_ROUTES = [
   "/notifications",
   "/menu",
   "/settings",
-  "/search",
+  "/friends",
 ];
 
 export function ServiceWorkerRegister() {
   useEffect(() => {
     if (typeof window === "undefined" || !("serviceWorker" in navigator))
       return;
+
+    let idleTimer: number | undefined;
+    let idleCallbackId: number | undefined;
 
     const onMessage = (event: MessageEvent) => {
       if (event.data?.type === "SW_UPDATED") {
@@ -29,6 +32,31 @@ export function ServiceWorkerRegister() {
       }
     };
     navigator.serviceWorker.addEventListener("message", onMessage);
+
+    const schedulePrecache = () => {
+      const run = () => {
+        navigator.serviceWorker.ready
+          .then((activeReg) => {
+            activeReg.active?.postMessage({
+              type: "PRECACHE_ROUTES",
+              routes: PRECACHE_ROUTES,
+            });
+          })
+          .catch(() => {});
+      };
+
+      const w = window as unknown as {
+        requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+        cancelIdleCallback?: (id: number) => void;
+      };
+      idleTimer = window.setTimeout(() => {
+        if (typeof w.requestIdleCallback === "function") {
+          idleCallbackId = w.requestIdleCallback(run, { timeout: 3000 });
+        } else {
+          run();
+        }
+      }, 3500);
+    };
 
     navigator.serviceWorker
       // The Capacitor app loads the same HTTPS origin as the website. Keep
@@ -54,21 +82,17 @@ export function ServiceWorkerRegister() {
           });
         });
 
-        // After the SW is active, ask it to pre-cache all main routes
-        // so the user can navigate offline even on their first visit.
-        navigator.serviceWorker.ready
-          .then((activeReg) => {
-            activeReg.active?.postMessage({
-              type: "PRECACHE_ROUTES",
-              routes: PRECACHE_ROUTES,
-            });
-          })
-          .catch(() => {});
+        schedulePrecache();
       })
       .catch(() => {});
 
     return () => {
       navigator.serviceWorker.removeEventListener("message", onMessage);
+      if (idleTimer !== undefined) window.clearTimeout(idleTimer);
+      const w = window as unknown as { cancelIdleCallback?: (id: number) => void };
+      if (idleCallbackId !== undefined && typeof w.cancelIdleCallback === "function") {
+        w.cancelIdleCallback(idleCallbackId);
+      }
     };
   }, []);
 

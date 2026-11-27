@@ -382,7 +382,10 @@ export function PostCard(props: PostCardProps) {
 
   useEffect(() => { if (typeof window !== 'undefined') setViewerLanguage(window.navigator.language.split('-')[0]); }, []);
 
-  const showTranslateButton = !isShared && !!content && !!viewerLanguage && isTextForeignToUser(content, viewerLanguage);
+  const showTranslateButton = useMemo(
+    () => !isShared && !!content && !!viewerLanguage && isTextForeignToUser(content, viewerLanguage),
+    [isShared, content, viewerLanguage]
+  );
 
   const handleTranslate = async () => {
     if (translatedText) { setTranslatedText(null); return; }
@@ -490,9 +493,12 @@ export function PostCard(props: PostCardProps) {
 
   return (
     <>
-      <Card ref={cardRef} className={cn(
-        "border-none shadow-sm overflow-hidden mb-4 transition-colors relative ring-1 ring-black/5 dark:ring-white/5",
-        isShared ? "bg-secondary/20 shadow-none ring-0 border border-primary/10 rounded-2xl" : "bg-white dark:bg-card",
+      <Card
+        ref={cardRef}
+        style={!isShared ? { contentVisibility: 'auto', containIntrinsicSize: '520px' } : undefined}
+        className={cn(
+          "border-none shadow-sm overflow-hidden mb-4 transition-colors relative ring-1 ring-black/5 dark:ring-white/5",
+          isShared ? "bg-secondary/20 shadow-none ring-0 border border-primary/10 rounded-2xl" : "bg-white dark:bg-card",
         isCampaign && "border-2 border-primary/20 shadow-xl shadow-primary/5",
         isBoosted && !isShared && "ring-2 ring-primary/20 shadow-lg shadow-primary/5"
       )}>
@@ -760,70 +766,76 @@ export function PostCard(props: PostCardProps) {
           </CardFooter>
         )}
       </Card>
-      <ShareHub isOpen={isShareHubOpen} onClose={() => setIsShareHubOpen(false)} post={props} />
+      {isShareHubOpen && (
+        <ShareHub isOpen={isShareHubOpen} onClose={() => setIsShareHubOpen(false)} post={props} />
+      )}
 
-      <Dialog open={isReportDialogOpen} onOpenChange={(open) => { setIsReportDialogOpen(open); if (!open) { setReportReason(''); setReportDetails(''); } }}>
-        <DialogContent className="rounded-[2rem] sm:max-w-[420px]">
-          <DialogHeader>
-            <div className="mx-auto h-16 w-16 bg-destructive/10 rounded-2xl flex items-center justify-center text-destructive mb-4">
-              <Flag className="h-8 w-8" />
+      {isReportDialogOpen && (
+        <Dialog open={isReportDialogOpen} onOpenChange={(open) => { setIsReportDialogOpen(open); if (!open) { setReportReason(''); setReportDetails(''); } }}>
+          <DialogContent className="rounded-[2rem] sm:max-w-[420px]">
+            <DialogHeader>
+              <div className="mx-auto h-16 w-16 bg-destructive/10 rounded-2xl flex items-center justify-center text-destructive mb-4">
+                <Flag className="h-8 w-8" />
+              </div>
+              <DialogTitle className="font-black italic uppercase tracking-tighter text-2xl text-center">{t('post_report')}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-widest text-muted-foreground">{t('post_report_reason')} *</label>
+                <select
+                  className="w-full h-10 rounded-xl border border-input bg-background px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={reportReason}
+                  onChange={e => setReportReason(e.target.value)}
+                >
+                  <option value="">{t('post_report_placeholder')}</option>
+                  <option value="spam">Spam or misleading</option>
+                  <option value="harassment">Harassment or bullying</option>
+                  <option value="hate_speech">Hate speech</option>
+                  <option value="violence">Violence or dangerous content</option>
+                  <option value="misinformation">Misinformation</option>
+                  <option value="nudity">Nudity or sexual content</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-widest text-muted-foreground">{t('post_report_details')}</label>
+                <Textarea
+                  placeholder={t('post_report_placeholder')}
+                  className="rounded-xl resize-none min-h-[90px] text-sm"
+                  value={reportDetails}
+                  onChange={e => setReportDetails(e.target.value)}
+                />
+              </div>
             </div>
-            <DialogTitle className="font-black italic uppercase tracking-tighter text-2xl text-center">{t('post_report')}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <label className="text-xs font-black uppercase tracking-widest text-muted-foreground">{t('post_report_reason')} *</label>
-              <select
-                className="w-full h-10 rounded-xl border border-input bg-background px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary"
-                value={reportReason}
-                onChange={e => setReportReason(e.target.value)}
+            <DialogFooter className="flex-col sm:flex-row gap-3 pt-2">
+              <Button variant="secondary" className="rounded-xl h-12 font-bold" onClick={() => { setIsReportDialogOpen(false); setReportReason(''); setReportDetails(''); }}>{t('post_cancel')}</Button>
+              <Button
+                className="rounded-xl h-12 font-black italic uppercase bg-destructive hover:bg-destructive/90 text-white"
+                disabled={!reportReason || isReportSubmitting}
+                onClick={async () => {
+                  if (!reportReason) return;
+                  setIsReportSubmitting(true);
+                  try {
+                    await submitReport({ reportedUsername: user.username, reason: reportReason, details: reportDetails });
+                    setIsReportDialogOpen(false);
+                    setReportReason('');
+                    setReportDetails('');
+                  } finally {
+                    setIsReportSubmitting(false);
+                  }
+                }}
               >
-                <option value="">{t('post_report_placeholder')}</option>
-                <option value="spam">Spam or misleading</option>
-                <option value="harassment">Harassment or bullying</option>
-                <option value="hate_speech">Hate speech</option>
-                <option value="violence">Violence or dangerous content</option>
-                <option value="misinformation">Misinformation</option>
-                <option value="nudity">Nudity or sexual content</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs font-black uppercase tracking-widest text-muted-foreground">{t('post_report_details')}</label>
-              <Textarea
-                placeholder={t('post_report_placeholder')}
-                className="rounded-xl resize-none min-h-[90px] text-sm"
-                value={reportDetails}
-                onChange={e => setReportDetails(e.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter className="flex-col sm:flex-row gap-3 pt-2">
-            <Button variant="secondary" className="rounded-xl h-12 font-bold" onClick={() => { setIsReportDialogOpen(false); setReportReason(''); setReportDetails(''); }}>{t('post_cancel')}</Button>
-            <Button
-              className="rounded-xl h-12 font-black italic uppercase bg-destructive hover:bg-destructive/90 text-white"
-              disabled={!reportReason || isReportSubmitting}
-              onClick={async () => {
-                if (!reportReason) return;
-                setIsReportSubmitting(true);
-                try {
-                  await submitReport({ reportedUsername: user.username, reason: reportReason, details: reportDetails });
-                  setIsReportDialogOpen(false);
-                  setReportReason('');
-                  setReportDetails('');
-                } finally {
-                  setIsReportSubmitting(false);
-                }
-              }}
-            >
-              {isReportSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              {t('post_report_submit')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+                {isReportSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                {t('post_report_submit')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
-      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}><AlertDialogContent className="rounded-[2rem] sm:max-w-[420px]"><AlertDialogHeader><div className="mx-auto h-16 w-16 bg-destructive/10 rounded-2xl flex items-center justify-center text-destructive mb-4"><Trash2 className="h-8 w-8" /></div><AlertDialogTitle className="font-black italic uppercase tracking-tighter text-3xl text-center">{t('post_purge')}?</AlertDialogTitle></AlertDialogHeader><AlertDialogFooter className="flex-col sm:flex-row gap-3 pt-6"><AlertDialogCancel className="rounded-xl h-12 font-bold bg-secondary/50">Cancel</AlertDialogCancel><AlertDialogAction onClick={handleDelete} className="rounded-xl h-12 font-black italic uppercase bg-destructive text-white">Confirm Purge</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+      {isDeleteDialogOpen && (
+        <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}><AlertDialogContent className="rounded-[2rem] sm:max-w-[420px]"><AlertDialogHeader><div className="mx-auto h-16 w-16 bg-destructive/10 rounded-2xl flex items-center justify-center text-destructive mb-4"><Trash2 className="h-8 w-8" /></div><AlertDialogTitle className="font-black italic uppercase tracking-tighter text-3xl text-center">{t('post_purge')}?</AlertDialogTitle></AlertDialogHeader><AlertDialogFooter className="flex-col sm:flex-row gap-3 pt-6"><AlertDialogCancel className="rounded-xl h-12 font-bold bg-secondary/50">Cancel</AlertDialogCancel><AlertDialogAction onClick={handleDelete} className="rounded-xl h-12 font-black italic uppercase bg-destructive text-white">Confirm Purge</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+      )}
 
     </>
   );

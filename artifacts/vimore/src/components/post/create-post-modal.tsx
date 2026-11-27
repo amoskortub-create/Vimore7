@@ -285,7 +285,7 @@ export function CreatePostModal({ children, sharedPost, initialContent, onOpen }
           try {
             const res = await fetch(`/api/link-preview?url=${encodeURIComponent(foundUrl)}`);
             if (res.ok) {
-              const data = await res.json();
+              const data = await res.json().catch(() => ({}));
               if (data.url) setLinkPreview(data);
             }
           } catch {}

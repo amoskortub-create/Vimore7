@@ -122,7 +122,7 @@ function ChatPanel({
     try {
       const res = await fetch(`/api/marketplace/messages/list?clusterId=${encodeURIComponent(conv.clusterId)}`);
       if (!res.ok) return;
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       setMessages(data.messages || []);
       // Mark as read
       fetch(`/api/marketplace/messages/list?clusterId=${encodeURIComponent(conv.clusterId)}`, { method: "PATCH" }).catch(() => {});
@@ -397,7 +397,7 @@ export default function StoreInboxPage() {
     try {
       const res = await fetch(`/api/marketplace/messages/conversations?sellerId=${encodeURIComponent(ownerId)}`);
       if (!res.ok) return;
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       setConversations(data.conversations || []);
     } catch {}
   }, []);

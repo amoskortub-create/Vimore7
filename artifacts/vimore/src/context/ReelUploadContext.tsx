@@ -4,6 +4,7 @@ import { BUCKET, ID } from '@/lib/appwrite';
 import { uploadLargeViaClient, uploadViaClient } from '@/lib/upload';
 import { authFetch } from '@/lib/auth-fetch';
 import { validateAndCompressVideo } from '@/lib/video-compress';
+import { safeJson } from '@/lib/utils';
 
 export type UploadStatus = 'compressing' | 'uploading' | 'done' | 'error';
 
@@ -153,7 +154,7 @@ export function ReelUploadProvider({ children }: { children: React.ReactNode }) 
         signal,
       });
 
-      const data = await res.json();
+      const data = await safeJson<any>(res, {});
       if (!res.ok || !data.ok) throw new Error(data.error || `Server error ${res.status}`);
 
       setJob(j => j ? { ...j, progress: 95, label: 'Publishing…' } : j);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { Users, UserPlus, ChevronRight, Sparkles, Check, UserRoundX, UserRoundPlus } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,8 @@ export function SuggestedFollows() {
   const { tier } = useNetwork();
 
   const [fallbackUsers, setFallbackUsers] = useState<any[]>([]);
+  const [isNearViewport, setIsNearViewport] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const suggestions = useMemo(() => {
     if (!currentUser) return [];
@@ -81,12 +83,28 @@ export function SuggestedFollows() {
     return all.slice(0, 10);
   }, [connections, posts, isFriend, isRequestSent, isRequestReceived, currentUser, fallbackUsers]);
 
-  // Fetch fallback users from DB when we don't have enough connection-based suggestions
   useEffect(() => {
-    if (!currentUser) return;
+    const el = containerRef.current;
+    if (!el || isNearViewport) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setIsNearViewport(true);
+          obs.disconnect();
+        }
+      },
+      { rootMargin: '400px' }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [isNearViewport]);
+
+  // Fetch fallback users from DB when near viewport and we don't have enough connection-based suggestions
+  useEffect(() => {
+    if (!currentUser || !isNearViewport || fallbackUsers.length > 0) return;
     databases.listDocuments(DATABASE_ID, COL.USERS, [
       Query.orderDesc('followers_count'),
-      Query.limit(20),
+      Query.limit(12),
     ]).then(res => {
       setFallbackUsers(res.documents.map((u: any) => ({
         $id: u.$id,
@@ -99,12 +117,12 @@ export function SuggestedFollows() {
         lastSeenAt: u.last_seen_at || null,
       })));
     }).catch(() => {});
-  }, [currentUser]);
+  }, [currentUser, isNearViewport, fallbackUsers.length]);
 
-  if (suggestions.length === 0) return null;
+  if (suggestions.length === 0) return <div ref={containerRef} />;
 
   return (
-    <div className="w-full bg-white dark:bg-card rounded-[2rem] border border-primary/5 py-6 space-y-4 shadow-sm mb-4">
+    <div ref={containerRef} className="w-full bg-white dark:bg-card rounded-[2rem] border border-primary/5 py-6 space-y-4 shadow-sm mb-4">
       <div className="flex items-center justify-between px-6">
         <div className="flex items-center gap-2">
           <div className="h-8 w-8 rounded-xl bg-primary/10 flex items-center justify-center text-primary">

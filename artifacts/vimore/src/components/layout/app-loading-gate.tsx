@@ -39,7 +39,7 @@ export function AppLoadingGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const current = getActivePath(pathname) || mountedPath.current;
-    if (isPublicActivePath(current)) {
+    if (isPublicActivePath(current) || currentUser) {
       setIsVisible(false);
       setShouldRenderSplash(false);
       return;
@@ -48,19 +48,19 @@ export function AppLoadingGate({ children }: { children: React.ReactNode }) {
       setIsVisible(false);
       setShouldRenderSplash(false);
     }
-  }, [isLoading, initError, pathname]);
+  }, [isLoading, initError, pathname, currentUser]);
 
   useEffect(() => {
     const current = getActivePath(pathname) || mountedPath.current;
-    if (isPublicActivePath(current)) return;
+    if (isPublicActivePath(current) || currentUser || !shouldRenderSplash) return;
 
     const fallbackTimer = setTimeout(() => {
       setIsVisible(false);
       setShouldRenderSplash(false);
-    }, 4000);
+    }, 3500);
 
     return () => clearTimeout(fallbackTimer);
-  }, [pathname, isLoading, initError]);
+  }, [pathname, currentUser, shouldRenderSplash]);
 
   useEffect(() => {
     if (!isLoading && !currentUser) {

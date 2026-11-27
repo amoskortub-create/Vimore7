@@ -28,6 +28,7 @@ import { Label } from "@/components/ui/label";
 import { usePosts } from "@/context/PostContext";
 import { useNotifications } from "@/context/NotificationContext";
 import { useTranslation } from "@/context/LanguageContext";
+import { safeJson } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useToast } from "@/hooks/use-toast";
@@ -68,7 +69,7 @@ export default function EarningsPage() {
   useEffect(() => {
     if (!currentUser) return;
     authFetch("/api/monetization/earnings-summary")
-      .then((response) => response.json())
+      .then((response) => safeJson<any>(response, {}))
       .then((summary) => {
         if (summary?.earnings) setEarnings(summary.earnings);
       })

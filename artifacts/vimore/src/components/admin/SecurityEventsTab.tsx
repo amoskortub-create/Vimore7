@@ -113,7 +113,7 @@ export function SecurityEventsTab() {
       const query = params.size ? `?${params.toString()}` : '';
       const response = await authFetch(`/api/admin/security-events${query}`);
       if (!response.ok) throw new Error('Unable to load security events.');
-      const page = await response.json();
+      const page = await response.json().catch(() => ({ documents: [], hasMore: false }));
       const docs = page.documents as SecurityEvent[];
 
       if (reset) {
@@ -147,7 +147,7 @@ export function SecurityEventsTab() {
       try {
         const response = await authFetch('/api/admin/security-events');
         if (!response.ok) return;
-        const page = await response.json();
+        const page = await response.json().catch(() => ({ documents: [] }));
         const knownIds = new Set(eventsRef.current.map(event => event.$id));
         const incoming = (page.documents as SecurityEvent[]).filter(event => !knownIds.has(event.$id));
         if (incoming.length > 0) {

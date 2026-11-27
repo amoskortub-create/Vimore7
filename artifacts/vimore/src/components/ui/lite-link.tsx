@@ -16,14 +16,13 @@ type LiteLinkProps = LinkProps &
  * networks. Saves a bunch of background route bundles for users on tight data caps.
  */
 export const LiteLink = forwardRef<HTMLAnchorElement, LiteLinkProps>(function LiteLink(
-  { prefetch, onPointerEnter, onTouchStart, ...props },
+  { prefetch, onPointerEnter, onPointerDown, onTouchStart, ...props },
   ref
 ) {
   const { tier } = useNetwork();
   const router = useRouter();
-  const effectivePrefetch = tier === "lite" ? false : prefetch;
+  const effectivePrefetch = tier === "lite" ? false : (prefetch ?? true);
   const prefetchOnIntent = () => {
-    if (tier !== "lite") return;
     const href = props.href;
     const path = typeof href === "string" ? href : href.pathname;
     if (path?.startsWith("/")) router.prefetch(path);
@@ -36,6 +35,10 @@ export const LiteLink = forwardRef<HTMLAnchorElement, LiteLinkProps>(function Li
       {...props}
       onPointerEnter={(event) => {
         onPointerEnter?.(event);
+        if (tier === "lite") prefetchOnIntent();
+      }}
+      onPointerDown={(event) => {
+        onPointerDown?.(event);
         prefetchOnIntent();
       }}
       onTouchStart={(event) => {

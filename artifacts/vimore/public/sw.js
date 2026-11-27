@@ -8,7 +8,7 @@
  * - Push notifications and badge control unchanged
  */
 
-const SW_VERSION = 'v1795690634984';
+const SW_VERSION = 'v1795694466194';
 const APP_SHELL_CACHE = `vimore-shell-${SW_VERSION}`;
 const PAGE_CACHE      = `vimore-pages-${SW_VERSION}`;
 const MEDIA_CACHE     = `vimore-media-${SW_VERSION}`;
@@ -45,26 +45,17 @@ const MAX_PAGE_AGE_MS   = 5  * 60 * 60 * 1000;  // 5 h
 const MAX_MEDIA_AGE_MS  = 5  * 60 * 60 * 1000;  // 5 h
 const MAX_PINNED_AGE_MS = 24 * 60 * 60 * 1000;  // 24 h
 
-// Pages/routes to pre-cache on install for guaranteed offline access
+// Core pages to pre-cache on install without causing network contention or 404s
 const PRECACHE_ROUTES = [
   '/',
+  '/friends',
   '/reels',
   '/marketplace',
   '/messages',
   '/music',
   '/notifications',
   '/menu',
-  '/settings',
-  '/search',
   '/profile',
-  '/currency',
-  '/earnings',
-  '/store',
-  '/friends',
-  '/tickets',
-  '/mtl',
-  '/how-it-works',
-  '/explore',
 ];
 
 const MEDIA_EXTENSIONS = [

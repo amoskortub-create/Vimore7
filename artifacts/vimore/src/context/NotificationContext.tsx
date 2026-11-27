@@ -7,6 +7,7 @@ import { databases, DATABASE_ID, COL, ID, Query } from '@/lib/appwrite';
 import { firePush } from '@/lib/push-fire';
 import { authFetch } from '@/lib/auth-fetch';
 import { subscribeToPush } from '@/lib/push-notifications';
+import { safeJson } from '@/lib/utils';
 
 export type SignalType = 'SOCIAL' | 'SONIC' | 'POST' | 'SYSTEM';
 export type PulseCategory = 'HOME' | 'FRIENDS' | 'MUSIC' | 'MESSAGES' | 'ADMIN';
@@ -97,7 +98,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         cache: 'no-store',
       });
       if (!response.ok) throw new Error(`Notification load failed (${response.status})`);
-      const data = await response.json();
+      const data = await safeJson<any>(response, {});
       const mapped: NotificationNode[] = (Array.isArray(data?.documents) ? data.documents : [])
         .filter((doc: any) => !pendingDeletions.current.has(doc.$id))
         .map((doc: any) => ({

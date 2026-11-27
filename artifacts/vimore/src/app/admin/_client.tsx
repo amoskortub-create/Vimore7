@@ -730,7 +730,7 @@ export default function AdminDashboard() {
     try {
       const res = await authFetch(`/api/knowledge-admin?limit=50&offset=${page * 50}`);
       if (!res.ok) return;
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       setKnowledgeEntries(data.documents || []);
       setKnowledgeTotal(data.total || 0);
       setKnowledgePage(page);
@@ -780,8 +780,8 @@ export default function AdminDashboard() {
       try {
         const res = await authFetch(`/api/admin/active-users?ts=${Date.now()}`, { cache: 'no-store' });
         if (res.ok) {
-          const data = await res.json();
-          setActiveUsersData(data);
+          const data = await res.json().catch(() => null);
+          if (data) setActiveUsersData(data);
         }
       } catch { /* ignore */ } finally {
         setActiveUsersLoading(false);
@@ -812,7 +812,7 @@ export default function AdminDashboard() {
       try {
         const res = await authFetch('/api/admin/verifications');
         if (res.ok) {
-          const data = await res.json();
+          const data = await res.json().catch(() => ({}));
           setPendingVerifications(data.records ?? []);
         }
       } catch { /* ignore */ } finally {
@@ -999,7 +999,7 @@ export default function AdminDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identifier: ccIdentifier.trim(), password: ccPassword }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setCcError(data.error || 'Authentication failed.');
         return;
@@ -3325,7 +3325,10 @@ export default function AdminDashboard() {
                     setActiveUsersLoading(true);
                     try {
                        const res = await authFetch(`/api/admin/active-users?ts=${Date.now()}`, { cache: 'no-store' });
-                      if (res.ok) setActiveUsersData(await res.json());
+                      if (res.ok) {
+                        const data = await res.json().catch(() => null);
+                        if (data) setActiveUsersData(data);
+                      }
                     } catch { /* ignore */ } finally { setActiveUsersLoading(false); }
                   }}
                   disabled={activeUsersLoading}
@@ -3547,7 +3550,7 @@ export default function AdminDashboard() {
                         try {
                           const res = await authFetch('/api/cron/cleanup');
                           if (res.ok) {
-                            const data = await res.json();
+                            const data = await res.json().catch(() => ({}));
                             setCleanupResult(data.reset);
                             setCleanupLastRun(new Date());
                           }
@@ -3596,7 +3599,7 @@ export default function AdminDashboard() {
                         try {
                           const res = await authFetch('/api/cron/expiry-alerts');
                           if (res.ok) {
-                            const data = await res.json();
+                            const data = await res.json().catch(() => ({}));
                             setAlertResult(data.sent);
                           }
                         } catch { /* ignore */ } finally { setIsRunningAlerts(false); }

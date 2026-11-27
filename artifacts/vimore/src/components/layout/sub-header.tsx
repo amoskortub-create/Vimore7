@@ -1,6 +1,7 @@
 
 "use client";
 
+import { useEffect } from "react";
 import { LiteLink as Link } from "@/components/ui/lite-link";
 import { 
   Home, 
@@ -58,6 +59,17 @@ export function SubHeader() {
   const pendingRequests = receivedRequestUsernames?.size || 0;
   const { t } = useTranslation();
   const { tier, setForcedTier } = useNetwork();
+
+  useEffect(() => {
+    if (tier === 'lite' || typeof window === 'undefined') return;
+    const routes = ['/friends', '/reels', '/music', '/messages', '/notifications', '/marketplace', '/profile'];
+    const timer = window.setTimeout(() => {
+      routes.forEach((r) => {
+        if (r !== pathname) router.prefetch(r);
+      });
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [tier, pathname, router]);
 
   const cycleTier = () => {
     triggerHaptic(10);

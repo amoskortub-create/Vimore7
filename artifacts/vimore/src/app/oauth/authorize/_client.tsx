@@ -50,8 +50,8 @@ export default function OAuthAuthorizePage() {
         const res = await fetch(`/api/oauth/clients?owner_id=_lookup_&client_id=${client_id}`);
         const clientRes = await fetch(`/api/oauth/clients/info?client_id=${client_id}`);
         if (clientRes.ok) {
-          const data = await clientRes.json();
-          setClientInfo(data);
+          const data = await clientRes.json().catch(() => null);
+          if (data) setClientInfo(data);
         } else {
           const db = databases;
           const result = await db.listDocuments(DATABASE_ID, "oauth_clients", [
@@ -92,7 +92,7 @@ export default function OAuthAuthorizePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ client_id, redirect_uri, scope, state, user_id: currentUser.$id }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (data.redirect) {
         window.location.href = data.redirect;
       } else {

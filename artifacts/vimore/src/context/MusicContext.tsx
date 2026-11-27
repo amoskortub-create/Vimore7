@@ -5,6 +5,7 @@ import { usePosts } from './PostContext';
 import { databases, ID, Query, Permission, Role, BUCKET, DATABASE_ID, COL, getFileUrl, extractFileId } from '@/lib/appwrite';
 import { saveCache, loadCache, pinMediaInSW, OFFLINE_KEYS } from '@/lib/offline-cache';
 import { authFetch } from '@/lib/auth-fetch';
+import { safeJson } from '@/lib/utils';
 
 
 export interface Track {
@@ -239,7 +240,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
       // client-side Appwrite collection permissions.
       const res = await fetch('/api/music/catalog');
       if (!res.ok) throw new Error(`catalog ${res.status}`);
-      const data = await res.json();
+      const data = await safeJson<any>(res, {});
 
       if (data.errors) {
         console.warn('[MusicContext] catalog errors:', data.errors);
@@ -362,7 +363,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
 
     const timer = window.setTimeout(() => {
       void loadMusicData();
-    }, 600);
+    }, 1500);
     return () => window.clearTimeout(timer);
   }, [loadMusicData]);
 

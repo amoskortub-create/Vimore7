@@ -246,7 +246,7 @@ function EmailVerificationGate({ email }: { email?: string }) {
 }
 
 const FEED_CACHE_KEY = 'vimore_feed_cache_v1';
-const MAX_CACHED_POSTS = 30;
+const MAX_CACHED_POSTS = 15;
 
 export default function Home() {
   const router = useRouter();
@@ -309,27 +309,30 @@ export default function Home() {
 
   useEffect(() => {
     if (posts.length === 0 || isOffline) return;
-    try {
-      const toCache = posts.slice(0, MAX_CACHED_POSTS).map((p: any) => ({
-        $id: p.$id,
-        user: p.user,
-        content: p.content,
-        image: p.image,
-        videoUrl: p.videoUrl,
-        likes: p.likes,
-        unlikes: p.unlikes,
-        comments: p.comments,
-        views: p.views,
-        time: p.time,
-        type: p.type,
-        isBoosted: p.isBoosted,
-        isLocked: p.isLocked,
-        unlockPrice: p.unlockPrice,
-        linkPreview: p.linkPreview,
-      }));
-      localStorage.setItem(FEED_CACHE_KEY, JSON.stringify(toCache));
-      setCachedPosts(toCache);
-    } catch {}
+    const timer = window.setTimeout(() => {
+      try {
+        const toCache = posts.slice(0, MAX_CACHED_POSTS).map((p: any) => ({
+          $id: p.$id,
+          user: p.user,
+          content: p.content,
+          image: p.image,
+          videoUrl: p.videoUrl,
+          likes: p.likes,
+          unlikes: p.unlikes,
+          comments: p.comments,
+          views: p.views,
+          time: p.time,
+          type: p.type,
+          isBoosted: p.isBoosted,
+          isLocked: p.isLocked,
+          unlockPrice: p.unlockPrice,
+          linkPreview: p.linkPreview,
+        }));
+        localStorage.setItem(FEED_CACHE_KEY, JSON.stringify(toCache));
+        setCachedPosts(toCache);
+      } catch {}
+    }, 350);
+    return () => window.clearTimeout(timer);
   }, [posts, isOffline]);
 
   const shuffledBoostedRegular = useMemo(() => {
@@ -511,7 +514,7 @@ export default function Home() {
         triggerHaptic(5);
         loadMoreFeed().finally(() => { isLoadingMoreRef.current = false; });
       }
-    }, { threshold: 0.1, rootMargin: '200px' });
+    }, { threshold: 0.01, rootMargin: '600px' });
     observer.observe(el);
     return () => observer.disconnect();
   }, [feedItems, hasMoreFeed, isFeedLoading, loadMoreFeed, triggerHaptic]);

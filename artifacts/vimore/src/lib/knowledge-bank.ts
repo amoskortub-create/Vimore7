@@ -118,7 +118,8 @@ export async function searchKnowledgeBank(question: string): Promise<{ answer: s
     );
     if (!res.ok) return null;
 
-    const data = await res.json();
+    const raw = await res.text();
+    const data = raw ? JSON.parse(raw) : {};
     const docs: any[] = data.documents || [];
     if (!docs.length) return null;
 

@@ -1,4 +1,22 @@
 {
+  "app/admin/_client.tsx -> @/lib/upload": {
+    "id": "app/admin/_client.tsx -> @/lib/upload",
+    "files": []
+  },
+  "app/advertise/_client.tsx -> @/lib/upload": {
+    "id": "app/advertise/_client.tsx -> @/lib/upload",
+    "files": [
+      "static/chunks/_app-pages-browser_src_lib_upload_ts.js"
+    ]
+  },
+  "components/chat/chat-window.tsx -> @/lib/appwrite": {
+    "id": "components/chat/chat-window.tsx -> @/lib/appwrite",
+    "files": []
+  },
+  "components/chat/chat-window.tsx -> @/lib/upload": {
+    "id": "components/chat/chat-window.tsx -> @/lib/upload",
+    "files": []
+  },
   "components/feed/create-story-modal.tsx -> @/lib/upload": {
     "id": "components/feed/create-story-modal.tsx -> @/lib/upload",
     "files": []
@@ -155,7 +173,9 @@
   },
   "context/MusicContext.tsx -> @/lib/upload": {
     "id": "context/MusicContext.tsx -> @/lib/upload",
-    "files": []
+    "files": [
+      "static/chunks/_app-pages-browser_src_lib_upload_ts.js"
+    ]
   },
   "context/PostContext.tsx -> @/lib/appwrite": {
     "id": "context/PostContext.tsx -> @/lib/appwrite",
@@ -173,10 +193,14 @@
   },
   "context/PostContext.tsx -> @/lib/upload": {
     "id": "context/PostContext.tsx -> @/lib/upload",
-    "files": []
+    "files": [
+      "static/chunks/_app-pages-browser_src_lib_upload_ts.js"
+    ]
   },
   "lib/marketplace.ts -> ./upload": {
     "id": "lib/marketplace.ts -> ./upload",
-    "files": []
+    "files": [
+      "static/chunks/_app-pages-browser_src_lib_upload_ts.js"
+    ]
   }
 }

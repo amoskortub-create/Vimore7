@@ -63,7 +63,7 @@ export default function ConnectedAppsPage() {
     setLoading(true);
     try {
       const res = await fetch(`/api/oauth/connected?user_id=${currentUser!.$id}`);
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       setApps(data.connected || []);
     } catch {
       toast({ title: "Failed to load connected apps", variant: "destructive" });

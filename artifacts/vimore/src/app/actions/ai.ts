@@ -1,5 +1,7 @@
 'use server';
 
+import { safeJson } from '@/lib/utils';
+
 const MYMEMORY_ENDPOINT = 'https://api.mymemory.translated.net/get';
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
@@ -48,7 +50,7 @@ export async function aiTranslatePostAction({
     const url = `${MYMEMORY_ENDPOINT}?q=${encodeURIComponent(postContent.slice(0, 500))}&langpair=auto|${targetLang}`;
     const res = await fetch(url, { next: { revalidate: 3600 } });
     if (res.ok) {
-      const data = await res.json();
+      const data = await safeJson<any>(res, {});
       if (data.responseStatus === 200 && data.responseData?.translatedText) {
         const translated: string = data.responseData.translatedText;
         if (!translated.toUpperCase().startsWith('MYMEMORY WARNING') && translated !== postContent) {

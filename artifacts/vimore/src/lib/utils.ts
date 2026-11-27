@@ -88,3 +88,25 @@ export function dataURLtoFile(dataUrl: string, filename: string): File {
   }
   return new File([bytes], filename, { type: mime });
 }
+
+export function safeJsonParse<T = any>(raw: string | null | undefined, fallback: T): T {
+  if (!raw || typeof raw !== "string") return fallback;
+  const trimmed = raw.trim();
+  if (!trimmed) return fallback;
+  try {
+    return JSON.parse(trimmed) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+export async function safeJson<T = any>(res: Response, fallback: T = {} as T): Promise<T> {
+  try {
+    const text = await res.text();
+    if (!text || !text.trim()) return fallback;
+    return JSON.parse(text) as T;
+  } catch {
+    return fallback;
+  }
+}
+

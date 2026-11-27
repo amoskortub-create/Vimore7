@@ -59,7 +59,7 @@ export default function DeveloperPage() {
     setLoading(true);
     try {
       const res = await fetch(`/api/oauth/clients?owner_id=${currentUser!.$id}`);
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       setApps(data.clients || []);
     } catch {
       toast({ title: "Failed to load apps", variant: "destructive" });
@@ -88,7 +88,7 @@ export default function DeveloperPage() {
           owner_id: currentUser!.$id,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error);
       setNewCreds({ client_id: data.client_id, client_secret: data.client_secret });
       setShowCreate(false);

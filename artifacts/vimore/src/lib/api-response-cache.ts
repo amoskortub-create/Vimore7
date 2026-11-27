@@ -16,22 +16,42 @@ interface CachedResponse {
   cachedAt: number;
 }
 
+const memoryCache = new Map<string, CachedResponse>();
+const sessionScopeCache = new Map<string, string>();
+let dbPromise: Promise<IDBDatabase> | null = null;
+
 function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
-      request.result.createObjectStore(STORE_NAME, { keyPath: 'key' });
+      if (!request.result.objectStoreNames.contains(STORE_NAME)) {
+        request.result.createObjectStore(STORE_NAME, { keyPath: 'key' });
+      }
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onclose = () => { dbPromise = null; };
+      db.onversionchange = () => { db.close(); dbPromise = null; };
+      resolve(db);
+    };
+    request.onerror = () => {
+      dbPromise = null;
+      reject(request.error);
+    };
   });
+  return dbPromise;
 }
 
 async function sessionScope(session: string): Promise<string | null> {
+  const existing = sessionScopeCache.get(session);
+  if (existing) return existing;
   try {
     const bytes = new TextEncoder().encode(session);
     const digest = await crypto.subtle.digest('SHA-256', bytes);
-    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    const scope = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    sessionScopeCache.set(session, scope);
+    return scope;
   } catch {
     return null;
   }
@@ -62,14 +82,20 @@ async function writeEntry(db: IDBDatabase, entry: CachedResponse): Promise<void>
     transaction.onabort = () => reject(transaction.error);
   });
 
+  if (memoryCache.size > MAX_ENTRIES) {
+    memoryCache.clear();
+  }
+
   const entries = await new Promise<CachedResponse[]>((resolve, reject) => {
     const request = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).getAll();
     request.onsuccess = () => resolve(request.result as CachedResponse[]);
     request.onerror = () => reject(request.error);
   });
+  if (entries.length <= MAX_ENTRIES) return;
+
   entries.sort((left, right) => left.cachedAt - right.cachedAt);
   let totalBytes = entries.reduce(
-    (total, item) => total + new TextEncoder().encode(item.body).byteLength,
+    (total, item) => total + item.body.length * 2,
     0,
   );
   const expiredKeys: string[] = [];
@@ -77,7 +103,7 @@ async function writeEntry(db: IDBDatabase, entry: CachedResponse): Promise<void>
     const oldest = entries[expiredKeys.length];
     if (!oldest) break;
     expiredKeys.push(oldest.key);
-    totalBytes -= new TextEncoder().encode(oldest.body).byteLength;
+    totalBytes -= oldest.body.length * 2;
   }
   if (expiredKeys.length === 0) return;
 
@@ -97,26 +123,29 @@ export async function fetchCachedApiResponse(
   fetchFresh: () => Promise<Response>,
 ): Promise<Response> {
   const scope = await sessionScope(session);
-  if (!scope || typeof indexedDB === 'undefined') return fetchFresh();
-
-  let db: IDBDatabase;
-  try {
-    db = await openDb();
-  } catch {
-    return fetchFresh();
-  }
+  if (!scope) return fetchFresh();
 
   const key = `${scope}:${url}`;
-  let cached: CachedResponse | undefined;
-  try {
-    cached = await readEntry(db, key);
-  } catch {
-    db.close();
-    return fetchFresh();
+  const memHit = memoryCache.get(key);
+  if (memHit && Date.now() - memHit.cachedAt < FRESH_TTL_MS) {
+    return responseFromEntry(memHit);
+  }
+
+  let db: IDBDatabase | null = null;
+  let cached: CachedResponse | undefined = memHit;
+  if (typeof indexedDB !== 'undefined') {
+    try {
+      db = await openDb();
+      if (!cached) {
+        cached = await readEntry(db, key);
+        if (cached) memoryCache.set(key, cached);
+      }
+    } catch {
+      db = null;
+    }
   }
 
   if (cached && Date.now() - cached.cachedAt < FRESH_TTL_MS) {
-    db.close();
     return responseFromEntry(cached);
   }
 
@@ -131,23 +160,23 @@ export async function fetchCachedApiResponse(
       !/\bno-store\b/i.test(cacheControl)
     ) {
       const body = await response.clone().text();
-      if (new TextEncoder().encode(body).byteLength <= MAX_RESPONSE_SIZE) {
-        try {
-          await writeEntry(db, {
-            key,
-            body,
-            status: response.status,
-            statusText: response.statusText,
-            headers: Array.from(response.headers.entries()),
-            cachedAt: Date.now(),
-          });
-        } catch {}
+      if (body.length * 2 <= MAX_RESPONSE_SIZE) {
+        const entry: CachedResponse = {
+          key,
+          body,
+          status: response.status,
+          statusText: response.statusText,
+          headers: Array.from(response.headers.entries()),
+          cachedAt: Date.now(),
+        };
+        memoryCache.set(key, entry);
+        if (db) {
+          writeEntry(db, entry).catch(() => {});
+        }
       }
     }
-    db.close();
     return response;
   } catch (error) {
-    db.close();
     if (cached && Date.now() - cached.cachedAt < OFFLINE_TTL_MS) {
       return responseFromEntry(cached);
     }
@@ -156,6 +185,7 @@ export async function fetchCachedApiResponse(
 }
 
 export async function clearApiResponseCache(): Promise<void> {
+  memoryCache.clear();
   if (typeof indexedDB === 'undefined') return;
   try {
     const db = await openDb();
@@ -166,6 +196,5 @@ export async function clearApiResponseCache(): Promise<void> {
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
     });
-    db.close();
   } catch {}
 }

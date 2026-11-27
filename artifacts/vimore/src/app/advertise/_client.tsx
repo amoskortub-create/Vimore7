@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
+import { cn, safeJson } from "@/lib/utils";
 import { usePosts } from "@/context/PostContext";
 import { useMusic } from "@/context/MusicContext";
 import { useToast } from "@/hooks/use-toast";
@@ -199,7 +199,7 @@ export default function AdvertisePage() {
       setUploadProgress(92);
       setUploadStep("creating");
 
-      const data = await res.json();
+      const data = await safeJson<any>(res, {});
 
       if (!res.ok) {
         if (data.error === "INSUFFICIENT_BALANCE") {

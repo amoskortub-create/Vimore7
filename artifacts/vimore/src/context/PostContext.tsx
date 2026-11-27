@@ -16,6 +16,7 @@ import { clearApiResponseCache } from '@/lib/api-response-cache';
 import { offlineCache } from '@/lib/offline-cache';
 import { firePush } from '@/lib/push-fire';
 import { CREDIT_PRICES } from '@/lib/credit-pricing';
+import { safeJson, safeJsonParse } from '@/lib/utils';
 
 const PRESENCE_TTL_MS = 90_000;
 const SESSION_REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -617,7 +618,8 @@ function getChatMessagePreview(message: Partial<ChatMessage> & { type?: string }
   return '';
 }
 
-const FEED_PAGE_SIZE = 30;
+const INITIAL_FEED_SIZE = 12;
+const FEED_PAGE_SIZE = 20;
 const FOLLOWING_IDS_CACHE_PREFIX = 'vimore_following_ids_';
 
 function shuffleDocuments<T>(items: T[]): T[] {
@@ -645,40 +647,51 @@ async function fetchRandomPostDocs(
 ): Promise<{ docs: any[]; total: number }> {
   if (desiredCount <= 0) return { docs: [], total: knownTotal ?? 0 };
   try {
-    let total = knownTotal;
-    if (typeof total !== 'number' || total <= 0) {
-      const head = await databases.listDocuments(DATABASE_ID, COL.POSTS, [
-        ...baseQueries,
-        Query.limit(1),
-      ]);
-      total = head.total;
-    }
-    if (!total || total <= 0) return { docs: [], total: 0 };
-
-    const fetchSize = Math.min(Math.max(desiredCount * 2, desiredCount), 50, total);
-    const maxOffset = Math.max(0, total - fetchSize);
+    const fetchSize = Math.min(Math.max(desiredCount + 4, desiredCount), 30);
     const collected: any[] = [];
     const localSeen = new Set<string>(excludeIds);
+    let total = knownTotal ?? 0;
 
-    for (let attempt = 0; attempt < 2 && collected.length < desiredCount; attempt++) {
-      const offset = maxOffset > 0
-        ? (attempt === 0 ? Math.floor(Math.random() * (maxOffset + 1)) : 0)
-        : 0;
-      const r = await databases.listDocuments(DATABASE_ID, COL.POSTS, [
-        ...baseQueries,
-        pickRandomOrderQuery(),
-        Query.limit(fetchSize),
-        ...(offset > 0 ? [Query.offset(offset)] : []),
-      ]);
-      total = r.total || total;
-      for (const doc of shuffleDocuments(r.documents)) {
-        if (!localSeen.has(doc.$id)) {
-          localSeen.add(doc.$id);
-          collected.push(doc);
-          if (collected.length >= desiredCount) break;
+    // Single primary query — jumps straight to a random offset when total is known,
+    // or fetches with a random sort direction when total is not yet known (avoiding a separate count query).
+    const initialMaxOffset = total > fetchSize ? Math.max(0, total - fetchSize) : 0;
+    const firstOffset = initialMaxOffset > 0 ? Math.floor(Math.random() * (initialMaxOffset + 1)) : 0;
+    const firstRes = await databases.listDocuments(DATABASE_ID, COL.POSTS, [
+      ...baseQueries,
+      pickRandomOrderQuery(),
+      Query.limit(fetchSize),
+      ...(firstOffset > 0 ? [Query.offset(firstOffset)] : []),
+    ]);
+    total = firstRes.total || total;
+
+    for (const doc of shuffleDocuments(firstRes.documents)) {
+      if (!localSeen.has(doc.$id)) {
+        localSeen.add(doc.$id);
+        collected.push(doc);
+        if (collected.length >= desiredCount) break;
+      }
+    }
+
+    // Only issue a second query if exclusions filtered out too many items and more docs exist
+    if (collected.length < Math.min(desiredCount, 4) && total > fetchSize) {
+      const maxOffset = Math.max(0, total - fetchSize);
+      const offset = maxOffset > 0 && firstOffset === 0 ? Math.floor(Math.random() * (maxOffset + 1)) : 0;
+      if (offset !== firstOffset) {
+        const secondRes = await databases.listDocuments(DATABASE_ID, COL.POSTS, [
+          ...baseQueries,
+          pickRandomOrderQuery(),
+          Query.limit(fetchSize),
+          ...(offset > 0 ? [Query.offset(offset)] : []),
+        ]);
+        total = secondRes.total || total;
+        for (const doc of shuffleDocuments(secondRes.documents)) {
+          if (!localSeen.has(doc.$id)) {
+            localSeen.add(doc.$id);
+            collected.push(doc);
+            if (collected.length >= desiredCount) break;
+          }
         }
       }
-      if (total <= fetchSize) break;
     }
 
     return { docs: collected.slice(0, desiredCount), total };
@@ -687,7 +700,7 @@ async function fetchRandomPostDocs(
       const fallback = await databases.listDocuments(DATABASE_ID, COL.POSTS, [
         ...baseQueries,
         Query.orderDesc('$createdAt'),
-        Query.limit(Math.min(desiredCount * 2, 50)),
+        Query.limit(Math.min(desiredCount + 4, 30)),
       ]);
       const filtered = shuffleDocuments(fallback.documents).filter((d: any) => !excludeIds.has(d.$id));
       return { docs: filtered.slice(0, desiredCount), total: fallback.total };
@@ -799,17 +812,24 @@ export function PostProvider({ children }: { children: ReactNode }) {
     }
   }, [settings.hapticIntensity]);
 
-  // Resolve author profiles for a list of raw post documents
+  const authorsCacheRef = useRef<Map<string, any>>(new Map());
+
+  // Resolve author profiles for a list of raw post documents (caching seen authors in memory)
   const withAuthors = useCallback(async (docs: any[]): Promise<Post[]> => {
-    const authorIds = [...new Set(docs.map((p: any) => p.user_id).filter(Boolean))];
-    let authorsMap: Record<string, any> = {};
-    if (authorIds.length > 0) {
+    const cache = authorsCacheRef.current;
+    const missingIds = [...new Set(docs.map((p: any) => p.user_id).filter((id: any) => Boolean(id) && !cache.has(id)))];
+    if (missingIds.length > 0) {
       try {
-        const r = await databases.listDocuments(DATABASE_ID, COL.USERS, [Query.equal('$id', authorIds)]);
-        authorsMap = Object.fromEntries(r.documents.map((u: any) => [u.$id, u]));
+        const r = await databases.listDocuments(DATABASE_ID, COL.USERS, [
+          Query.equal('$id', missingIds.slice(0, 100)),
+          Query.limit(100),
+        ]);
+        for (const u of r.documents) {
+          cache.set(u.$id, u);
+        }
       } catch { /* ignore */ }
     }
-    return docs.map((doc: any) => mapDocToPost(doc, authorsMap[doc.user_id]));
+    return docs.map((doc: any) => mapDocToPost(doc, cache.get(doc.user_id)));
   }, []);
 
   const resolveFollowingIds = useCallback(async (explicitUserId?: string): Promise<string[]> => {
@@ -848,7 +868,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadFeed = useCallback(async (explicitUserId?: string) => {
-    const PAGE = FEED_PAGE_SIZE;
+    const PAGE = INITIAL_FEED_SIZE;
     feedHasLoadedRef.current = false;
     fetchedFeedIdsRef.current = new Set();
     totalConnPostsRef.current = undefined;
@@ -868,7 +888,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
         fetchRandomPostDocs([], PAGE, excludeIds),
         databases.listDocuments(DATABASE_ID, COL.POSTS, [
           Query.equal('is_boosted', true),
-          Query.limit(20),
+          Query.limit(12),
         ]).catch(() => ({ documents: [] as any[] })),
       ]);
 
@@ -1179,27 +1199,30 @@ export function PostProvider({ children }: { children: ReactNode }) {
       }
 
       // Open inbox: also include anyone who has ever exchanged DMs with this user,
-      // so non-friends still show up in the conversation list.
+      // and build lastMsgMap from those exact user messages (avoiding a 500-doc global messages scan).
+      const userMessageDocs: any[] = [];
       try {
         const [sentMsgs, recvMsgs] = await Promise.allSettled([
           databases.listDocuments(DATABASE_ID, COL.MESSAGES, [
             Query.equal('sender_id', userId),
             Query.orderDesc('$createdAt'),
-            Query.limit(500),
+            Query.limit(120),
           ]),
           databases.listDocuments(DATABASE_ID, COL.MESSAGES, [
             Query.equal('receiver_id', userId),
             Query.orderDesc('$createdAt'),
-            Query.limit(500),
+            Query.limit(120),
           ]),
         ]);
         if (sentMsgs.status === 'fulfilled') {
           sentMsgs.value.documents.forEach((m: any) => {
+            userMessageDocs.push(m);
             if (m.receiver_id && m.receiver_id !== userId) allUserIds.add(m.receiver_id);
           });
         }
         if (recvMsgs.status === 'fulfilled') {
           recvMsgs.value.documents.forEach((m: any) => {
+            userMessageDocs.push(m);
             if (m.sender_id && m.sender_id !== userId) allUserIds.add(m.sender_id);
           });
         }
@@ -1210,46 +1233,41 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
       const usersResult = await databases.listDocuments(DATABASE_ID, COL.USERS, [Query.equal('$id', userIdsArr), Query.limit(200)]);
 
-      const conns: Connection[] = usersResult.documents.map((u: any) => ({
-        $id: u.$id,
-        name: u.name || '',
-        username: u.username || '',
-        email: u.email || '',
-        avatar: u.avatar_id ? getFileUrl(BUCKET.AVATARS, u.avatar_id) : avatarFallback(u.name || 'U'),
-        cover: u.cover_id ? getFileUrl(BUCKET.COVERS, u.cover_id) : undefined,
-        isVerified: u.is_verified || false,
-        isGroup: false as const,
-        isOnline: hasFreshPresence(u.is_online, u.last_seen_at),
-        lastSeenAt: u.last_seen_at || null,
-        followsYou: false,
-      }));
+      const conns: Connection[] = usersResult.documents.map((u: any) => {
+        authorsCacheRef.current.set(u.$id, u);
+        return {
+          $id: u.$id,
+          name: u.name || '',
+          username: u.username || '',
+          email: u.email || '',
+          avatar: u.avatar_id ? getFileUrl(BUCKET.AVATARS, u.avatar_id) : avatarFallback(u.name || 'U'),
+          cover: u.cover_id ? getFileUrl(BUCKET.COVERS, u.cover_id) : undefined,
+          isVerified: u.is_verified || false,
+          isGroup: false as const,
+          isOnline: hasFreshPresence(u.is_online, u.last_seen_at),
+          lastSeenAt: u.last_seen_at || null,
+          followsYou: false,
+        };
+      });
 
-      if (currentUsername && conns.length > 0) {
-        try {
-          const recentMsgs = await databases.listDocuments(DATABASE_ID, COL.MESSAGES, [
-            Query.orderDesc('$createdAt'),
-            Query.limit(500),
-          ]);
-          const lastMsgMap: Record<string, { text?: string; type?: ChatMessage['type']; time?: string }> = {};
-          recentMsgs.documents.forEach((doc: any) => {
-            const cid = doc.cluster_id;
-            if (cid && !lastMsgMap[cid]) {
-              lastMsgMap[cid] = { text: doc.text, type: doc.type as ChatMessage['type'], time: formatTimeAgo(doc.$createdAt) };
-            }
-          });
-          const enriched = conns.map(c => {
-            const clusterId = [currentUsername, c.username].sort().join('_');
-            const lastMsg = lastMsgMap[clusterId];
-            if (!lastMsg) return c;
-            const preview = getChatMessagePreview(lastMsg);
-            return { ...c, lastMessage: preview, lastTime: lastMsg.time };
-          });
-          setConnectionsState(enriched);
-          offlineCache.saveConnections(enriched);
-        } catch {
-          setConnectionsState(conns);
-          offlineCache.saveConnections(conns);
+      if (currentUsername && conns.length > 0 && userMessageDocs.length > 0) {
+        userMessageDocs.sort((a, b) => Date.parse(b.$createdAt || '') - Date.parse(a.$createdAt || ''));
+        const lastMsgMap: Record<string, { text?: string; type?: ChatMessage['type']; time?: string }> = {};
+        for (const doc of userMessageDocs) {
+          const cid = doc.cluster_id;
+          if (cid && !lastMsgMap[cid]) {
+            lastMsgMap[cid] = { text: doc.text, type: doc.type as ChatMessage['type'], time: formatTimeAgo(doc.$createdAt) };
+          }
         }
+        const enriched = conns.map(c => {
+          const clusterId = [currentUsername, c.username].sort().join('_');
+          const lastMsg = lastMsgMap[clusterId];
+          if (!lastMsg) return c;
+          const preview = getChatMessagePreview(lastMsg);
+          return { ...c, lastMessage: preview, lastTime: lastMsg.time };
+        });
+        setConnectionsState(enriched);
+        offlineCache.saveConnections(enriched);
       } else {
         setConnectionsState(conns);
         offlineCache.saveConnections(conns);
@@ -1315,12 +1333,11 @@ export function PostProvider({ children }: { children: ReactNode }) {
         Query.limit(30),
       ]);
 
-      const authorIds = [...new Set(storiesResult.documents.map((s: any) => s.user_id).filter(Boolean))];
-      let authorsMap: Record<string, any> = {};
+      const authorIds = [...new Set(storiesResult.documents.map((s: any) => s.user_id).filter((id: any) => Boolean(id) && !authorsCacheRef.current.has(id)))];
       if (authorIds.length > 0) {
         try {
           const ar = await databases.listDocuments(DATABASE_ID, COL.USERS, [Query.equal('$id', authorIds)]);
-          authorsMap = Object.fromEntries(ar.documents.map((u: any) => [u.$id, u]));
+          ar.documents.forEach((u: any) => authorsCacheRef.current.set(u.$id, u));
         } catch { /* ignore */ }
       }
 
@@ -1341,7 +1358,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       }
 
       const mapped = storiesResult.documents.map((doc: any) => {
-        const authorDoc = authorsMap[doc.user_id];
+        const authorDoc = authorsCacheRef.current.get(doc.user_id);
         const segments = (segmentsMap[doc.$id] || []).map(seg => ({
           $id: seg.$id,
           type: seg.type || 'image',
@@ -1350,7 +1367,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
           duration: seg.duration || 5,
           filter: seg.filter,
           background: seg.background,
-          textOverlays: seg.text_overlays ? JSON.parse(seg.text_overlays) : undefined,
+          textOverlays: seg.text_overlays ? safeJsonParse(seg.text_overlays, undefined) : undefined,
           postId: seg.post_id || undefined,
         }));
         return {
@@ -1875,17 +1892,23 @@ export function PostProvider({ children }: { children: ReactNode }) {
     }, 15000);
 
     try {
-      const feedPromise = hasWarmSnapshot ? loadFeed() : null;
+      const feedPromise = (hasWarmSnapshot || Boolean(storedSession)) ? loadFeed(cachedUser?.$id) : null;
+      const storiesPromise = Boolean(storedSession) ? loadStories() : null;
+      const campaignsPromise = Boolean(storedSession) ? loadCampaigns() : null;
       const meRes = await withStartupTimeout(authFetch('/api/auth/me'), 12000);
       if (!meRes) throw new Error('Session check timed out');
       if (!meRes.ok) {
         if (meRes.status === 401) throw new Error('Unauthorized');
         throw new Error(`Session check unavailable (${meRes.status})`);
       }
-      const meData = await meRes.json();
+      const meData = await safeJson<any>(meRes, null);
+      if (!meData?.authUser) {
+        throw new Error('Session check unavailable (empty response)');
+      }
       clearTimeout(timeoutId);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { authUser, profileDoc } = meData as any;
+      if (profileDoc?.$id) authorsCacheRef.current.set(profileDoc.$id, profileDoc);
       const user = mapDocToUser(authUser, profileDoc);
       setCurrentUserState(user);
       offlineCache.saveUser(user);
@@ -1894,24 +1917,35 @@ export function PostProvider({ children }: { children: ReactNode }) {
       if (typeof window !== 'undefined') {
         try {
           const cached = localStorage.getItem(`vimore_unread_signals_${authUser.$id}`);
-          if (cached) setChatLastIncomingAt(JSON.parse(cached));
+          if (cached) setChatLastIncomingAt(safeJsonParse(cached, {}));
         } catch { /* ignore */ }
       }
 
       setIsLoadingState(false);
+      // Tier 1: Critical for initial Home Feed render
       void Promise.allSettled([
         feedPromise ?? loadFeed(authUser.$id),
-        loadSocialGraph(authUser.$id),
-        loadConnections(authUser.$id, profileDoc?.username || ''),
-        loadStories(),
-        loadClusters(authUser.$id),
-        loadUserWithdrawals(authUser.$id),
-        loadCampaigns(),
-        loadChatReadReceipts(authUser.$id),
-      ]).then(() => {
-        loadUnreadSignals(authUser.$id, profileDoc?.username || '').catch(() => {});
-        loadConversationMetadata(authUser.$id, profileDoc?.username || '').catch(() => {});
-      });
+        storiesPromise ?? loadStories(),
+        campaignsPromise ?? loadCampaigns(),
+      ]);
+      // Tier 2: Social graph & connections shortly after feed begins rendering
+      setTimeout(() => {
+        void Promise.allSettled([
+          loadSocialGraph(authUser.$id),
+          loadConnections(authUser.$id, profileDoc?.username || ''),
+        ]);
+      }, 60);
+      // Tier 3: Background messaging/clusters/withdrawals staggered to keep main thread snappy
+      setTimeout(() => {
+        void Promise.allSettled([
+          loadClusters(authUser.$id),
+          loadUserWithdrawals(authUser.$id),
+          loadChatReadReceipts(authUser.$id),
+        ]).then(() => {
+          loadUnreadSignals(authUser.$id, profileDoc?.username || '').catch(() => {});
+          loadConversationMetadata(authUser.$id, profileDoc?.username || '').catch(() => {});
+        });
+      }, 280);
     } catch (err: any) {
       const browserOffline = typeof navigator !== 'undefined' && !navigator.onLine;
       const msg = String(err?.message || '');

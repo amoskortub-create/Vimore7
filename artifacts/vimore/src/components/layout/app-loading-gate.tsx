@@ -6,7 +6,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
-const PUBLIC_PATHS = ["/login", "/signup", "/auth/", "/terms", "/privacy", "/child-safety", "/marketplace", "/join/", "/admin", "/downloads"];
+const PUBLIC_PATHS = ["/login", "/signup", "/auth/", "/oauth/", "/terms", "/privacy", "/child-safety", "/marketplace", "/join/", "/admin", "/downloads"];
 
 function getActivePath(hookPath: string | null): string {
   if (typeof window !== 'undefined' && window.location.pathname) {

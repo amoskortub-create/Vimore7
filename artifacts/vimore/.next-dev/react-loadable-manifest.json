@@ -1,26 +1,4 @@
 {
-  "app/admin/_client.tsx -> @/lib/upload": {
-    "id": "app/admin/_client.tsx -> @/lib/upload",
-    "files": []
-  },
-  "app/advertise/_client.tsx -> @/lib/upload": {
-    "id": "app/advertise/_client.tsx -> @/lib/upload",
-    "files": [
-      "static/chunks/_app-pages-browser_src_lib_upload_ts.js"
-    ]
-  },
-  "components/chat/chat-window.tsx -> @/lib/appwrite": {
-    "id": "components/chat/chat-window.tsx -> @/lib/appwrite",
-    "files": []
-  },
-  "components/chat/chat-window.tsx -> @/lib/upload": {
-    "id": "components/chat/chat-window.tsx -> @/lib/upload",
-    "files": []
-  },
-  "components/feed/create-story-modal.tsx -> @/lib/upload": {
-    "id": "components/feed/create-story-modal.tsx -> @/lib/upload",
-    "files": []
-  },
   "components/layout/deferred-global-ui.tsx -> @/components/ad/ad-portal": {
     "id": "components/layout/deferred-global-ui.tsx -> @/components/ad/ad-portal",
     "files": [

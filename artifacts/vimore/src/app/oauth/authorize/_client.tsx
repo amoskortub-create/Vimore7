@@ -2,11 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { account, databases, DATABASE_ID, COL } from "@/lib/appwrite";
-import { Query } from "appwrite";
+import { account } from "@/lib/appwrite";
+import { authFetch } from "@/lib/auth-fetch";
 import { Button } from "@/components/ui/button";
 import { Loader2, ShieldCheck, X, Check, AlertTriangle } from "lucide-react";
-import Image from "next/image";
 
 const SCOPE_LABELS: Record<string, string> = {
   profile: "Access your name, username, and profile picture",
@@ -23,16 +22,35 @@ export default function OAuthAuthorizePage() {
   const scope = searchParams?.get("scope") || "profile";
   const state = searchParams?.get("state") || "";
   const response_type = searchParams?.get("response_type") || "";
+  const isPopupMode = searchParams?.get("popup") === "1";
 
   const [status, setStatus] = useState<"loading" | "ready" | "error" | "submitting">("loading");
   const [errorMsg, setErrorMsg] = useState("");
-  const [clientInfo, setClientInfo] = useState<{ name: string; logo_url: string; website_url: string } | null>(null);
+  const [clientInfo, setClientInfo] = useState<{
+    name: string;
+    logo_url: string;
+    website_url: string;
+    redirect_uris?: string[];
+  } | null>(null);
   const [currentUser, setCurrentUser] = useState<{ $id: string; name: string } | null>(null);
 
   useEffect(() => {
     async function init() {
       if (!client_id || !redirect_uri || response_type !== "code") {
-        setErrorMsg("Invalid OAuth request. Missing required parameters.");
+        setErrorMsg("Invalid OAuth request. Missing required parameters (client_id, redirect_uri, response_type=code).");
+        setStatus("error");
+        return;
+      }
+
+      try {
+        const parsed = new URL(redirect_uri);
+        if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+          setErrorMsg("Invalid redirect URI protocol.");
+          setStatus("error");
+          return;
+        }
+      } catch {
+        setErrorMsg("Malformed redirect_uri parameter.");
         setStatus("error");
         return;
       }
@@ -41,39 +59,38 @@ export default function OAuthAuthorizePage() {
         const user = await account.get();
         setCurrentUser({ $id: user.$id, name: user.name });
       } catch {
-        const params = new URLSearchParams(window.location.search);
-        router.replace(`/login?next=/oauth/authorize%3F${params.toString()}`);
+        const rawQuery = typeof window !== "undefined" ? window.location.search.replace(/^\?/, "") : "";
+        const nextTarget = `/oauth/authorize${rawQuery ? `?${rawQuery}` : ""}`;
+        router.replace(`/login?next=${encodeURIComponent(nextTarget)}`);
         return;
       }
 
       try {
-        const res = await fetch(`/api/oauth/clients?owner_id=_lookup_&client_id=${client_id}`);
-        const clientRes = await fetch(`/api/oauth/clients/info?client_id=${client_id}`);
-        if (clientRes.ok) {
-          const data = await clientRes.json().catch(() => null);
-          if (data) setClientInfo(data);
-        } else {
-          const db = databases;
-          const result = await db.listDocuments(DATABASE_ID, "oauth_clients", [
-            Query.equal("client_id", client_id),
-            Query.limit(1),
-          ]);
-          if (!result.documents.length) {
-            setErrorMsg("Unknown application. The client_id is not registered.");
-            setStatus("error");
-            return;
-          }
-          const doc = result.documents[0];
-          const uris: string[] = Array.isArray(doc.redirect_uris) ? doc.redirect_uris : [];
-          if (!uris.includes(redirect_uri)) {
-            setErrorMsg("Redirect URI does not match any registered URI for this app.");
-            setStatus("error");
-            return;
-          }
-          setClientInfo({ name: doc.name, logo_url: doc.logo_url || "", website_url: doc.website_url || "" });
+        const infoUrl = `/api/oauth/clients/info?client_id=${encodeURIComponent(client_id)}&redirect_uri=${encodeURIComponent(redirect_uri)}`;
+        const clientRes = await fetch(infoUrl, { cache: "no-store" });
+        const data = await clientRes.json().catch(() => null);
+
+        if (!clientRes.ok || !data) {
+          setErrorMsg(data?.error || "Unknown application or unregistered redirect URI.");
+          setStatus("error");
+          return;
         }
+
+        const allowedUris: string[] = Array.isArray(data.redirect_uris) ? data.redirect_uris : [];
+        if (!allowedUris.includes(redirect_uri)) {
+          setErrorMsg("Redirect URI does not match any registered URI for this app.");
+          setStatus("error");
+          return;
+        }
+
+        setClientInfo({
+          name: data.name || client_id,
+          logo_url: data.logo_url || "",
+          website_url: data.website_url || "",
+          redirect_uris: allowedUris,
+        });
         setStatus("ready");
-      } catch (err: any) {
+      } catch {
         setErrorMsg("Could not verify the application. Please try again.");
         setStatus("error");
       }
@@ -81,19 +98,30 @@ export default function OAuthAuthorizePage() {
     init();
   }, [client_id, redirect_uri, response_type, router]);
 
-  const scopes = scope.split(" ").filter((s) => SCOPE_LABELS[s]);
+  const scopes = scope.split(/\s+/).filter((s) => SCOPE_LABELS[s]);
 
   async function handleApprove() {
-    if (!currentUser) return;
+    if (!currentUser || status !== "ready") return;
     setStatus("submitting");
     try {
-      const res = await fetch("/api/oauth/grant", {
+      const res = await authFetch("/api/oauth/grant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ client_id, redirect_uri, scope, state, user_id: currentUser.$id }),
+        body: JSON.stringify({ client_id, redirect_uri, scope, state }),
       });
       const data = await res.json().catch(() => ({}));
-      if (data.redirect) {
+      if (res.ok && data.redirect) {
+        if (isPopupMode && typeof window !== "undefined" && window.opener) {
+          try {
+            const targetOrigin = new URL(redirect_uri).origin;
+            window.opener.postMessage(
+              { type: "vimore_oauth_callback", code: data.code, state: data.state || state },
+              targetOrigin
+            );
+            window.close();
+            return;
+          } catch {}
+        }
         window.location.href = data.redirect;
       } else {
         setErrorMsg(data.error || "Authorization failed.");
@@ -106,6 +134,21 @@ export default function OAuthAuthorizePage() {
   }
 
   function handleDeny() {
+    if (!clientInfo?.redirect_uris?.includes(redirect_uri)) {
+      router.push("/");
+      return;
+    }
+    if (isPopupMode && typeof window !== "undefined" && window.opener) {
+      try {
+        const targetOrigin = new URL(redirect_uri).origin;
+        window.opener.postMessage(
+          { type: "vimore_oauth_callback", error: "access_denied", state },
+          targetOrigin
+        );
+        window.close();
+        return;
+      } catch {}
+    }
     const url = new URL(redirect_uri);
     url.searchParams.set("error", "access_denied");
     if (state) url.searchParams.set("state", state);

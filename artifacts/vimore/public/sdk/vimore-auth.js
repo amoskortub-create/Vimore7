@@ -1,7 +1,14 @@
 (function (global) {
   'use strict';
 
-  var BASE_URL = 'https://vimore.cfd';
+  var BASE_URL = (function () {
+    try {
+      if (typeof document !== 'undefined' && document.currentScript && document.currentScript.src) {
+        return new URL(document.currentScript.src).origin;
+      }
+    } catch (_) {}
+    return 'https://vimore.cfd';
+  })();
 
   var STYLES = [
     '.vimore-btn{display:inline-flex;align-items:center;gap:10px;padding:0 20px;height:48px;background:#7C3AED;color:#fff;border:none;border-radius:14px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;font-weight:800;letter-spacing:.02em;cursor:pointer;text-decoration:none;transition:background .15s,transform .1s,box-shadow .15s;box-shadow:0 4px 14px rgba(124,58,237,.35);white-space:nowrap;user-select:none}',
@@ -26,6 +33,7 @@
   }
 
   function buildAuthUrl(opts) {
+    var origin = (opts && opts.baseUrl) ? opts.baseUrl.replace(/\/$/, '') : BASE_URL;
     var params = new URLSearchParams({
       client_id: opts.clientId,
       redirect_uri: opts.redirectUri,
@@ -33,7 +41,8 @@
       scope: opts.scope || 'profile',
     });
     if (opts.state) params.set('state', opts.state);
-    return BASE_URL + '/oauth/authorize?' + params.toString();
+    if (opts.popup && opts.onSuccess) params.set('popup', '1');
+    return origin + '/oauth/authorize?' + params.toString();
   }
 
   function createButton(opts) {
@@ -44,6 +53,7 @@
       return null;
     }
 
+    var origin = opts.baseUrl ? opts.baseUrl.replace(/\/$/, '') : BASE_URL;
     var label = opts.label || 'Sign in with ViMore';
     var variant = opts.variant || 'purple'; // 'purple' | 'white'
     var size = opts.size || 'md'; // 'sm' | 'md' | 'lg'
@@ -72,19 +82,25 @@
         var timer = setInterval(function () {
           if (!popup || popup.closed) {
             clearInterval(timer);
+            window.removeEventListener('message', handler);
             if (opts.onClose) opts.onClose();
           }
         }, 500);
 
-        window.addEventListener('message', function handler(event) {
-          if (event.origin !== BASE_URL) return;
+        function handler(event) {
+          if (event.origin !== origin) return;
           if (event.data && event.data.type === 'vimore_oauth_callback') {
             clearInterval(timer);
             window.removeEventListener('message', handler);
             if (popup) popup.close();
-            if (opts.onSuccess) opts.onSuccess(event.data);
+            if (event.data.error) {
+              if (opts.onError) opts.onError(event.data);
+            } else if (opts.onSuccess) {
+              opts.onSuccess(event.data);
+            }
           }
-        });
+        }
+        window.addEventListener('message', handler);
       });
     }
 

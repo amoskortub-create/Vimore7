@@ -1,11 +1,4 @@
 {
-  "/page": "app/page.js",
-  "/friends/page": "app/friends/page.js",
-  "/messages/page": "app/messages/page.js",
-  "/notifications/page": "app/notifications/page.js",
-  "/profile/page": "app/profile/page.js",
-  "/menu/page": "app/menu/page.js",
-  "/reels/page": "app/reels/page.js",
-  "/music/page": "app/music/page.js",
-  "/marketplace/page": "app/marketplace/page.js"
+  "/api/[...path]/route": "app/api/[...path]/route.js",
+  "/api/oauth/[...path]/route": "app/api/oauth/[...path]/route.js"
 }

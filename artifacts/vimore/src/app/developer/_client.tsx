@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePosts } from "@/context/PostContext";
+import { authFetch } from "@/lib/auth-fetch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,11 +10,16 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  Code2, Copy, Check, Plus, Trash2, ExternalLink, Globe, ChevronRight,
-  Loader2, ShieldCheck, AlertTriangle, X, Zap,
+  AlertDialog, AlertDialogAction, AlertDialogCancel,
+  AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Code2, Copy, Check, Plus, Trash2, Globe, ChevronRight,
+  Loader2, ShieldCheck, AlertTriangle, Zap, ArrowLeft,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import Link from "next/link";
+import { LiteLink as Link } from "@/components/ui/lite-link";
 
 interface OAuthApp {
   $id: string;
@@ -42,6 +48,8 @@ export default function DeveloperPage() {
   const [newCreds, setNewCreds] = useState<NewCredentials | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<OAuthApp | null>(null);
+  const [origin, setOrigin] = useState("https://vimore.cfd");
 
   const [form, setForm] = useState({
     name: "",
@@ -52,14 +60,21 @@ export default function DeveloperPage() {
   });
 
   useEffect(() => {
+    if (typeof window !== "undefined" && window.location.origin) {
+      setOrigin(window.location.origin);
+    }
+  }, []);
+
+  useEffect(() => {
     if (currentUser?.$id) fetchApps();
   }, [currentUser?.$id]);
 
   async function fetchApps() {
     setLoading(true);
     try {
-      const res = await fetch(`/api/oauth/clients?owner_id=${currentUser!.$id}`);
+      const res = await authFetch("/api/oauth/clients", { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to load apps");
       setApps(data.clients || []);
     } catch {
       toast({ title: "Failed to load apps", variant: "destructive" });
@@ -76,7 +91,7 @@ export default function DeveloperPage() {
     }
     setCreating(true);
     try {
-      const res = await fetch("/api/oauth/clients", {
+      const res = await authFetch("/api/oauth/clients", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -85,11 +100,10 @@ export default function DeveloperPage() {
           logo_url: form.logo_url,
           website_url: form.website_url,
           redirect_uris: uris,
-          owner_id: currentUser!.$id,
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.error || "Failed to create app");
       setNewCreds({ client_id: data.client_id, client_secret: data.client_secret });
       setShowCreate(false);
       setForm({ name: "", description: "", logo_url: "", website_url: "", redirect_uris: "" });
@@ -101,14 +115,15 @@ export default function DeveloperPage() {
     }
   }
 
-  async function handleDelete(app: OAuthApp) {
-    if (!confirm(`Delete "${app.name}"? This cannot be undone.`)) return;
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    const app = deleteTarget;
     setDeletingId(app.$id);
     try {
-      const res = await fetch("/api/oauth/clients", {
+      const res = await authFetch("/api/oauth/clients", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ doc_id: app.$id, owner_id: currentUser!.$id }),
+        body: JSON.stringify({ doc_id: app.$id }),
       });
       if (!res.ok) throw new Error("Delete failed");
       setApps((prev) => prev.filter((a) => a.$id !== app.$id));
@@ -117,6 +132,7 @@ export default function DeveloperPage() {
       toast({ title: "Failed to delete app", variant: "destructive" });
     } finally {
       setDeletingId(null);
+      setDeleteTarget(null);
     }
   }
 
@@ -136,18 +152,36 @@ export default function DeveloperPage() {
 
   return (
     <div className="min-h-screen bg-background pb-24">
-      <div className="max-w-2xl mx-auto px-4 py-8 space-y-8">
+      <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-md border-b border-border h-14 px-4 flex items-center justify-between lg:hidden">
+        <div className="flex items-center gap-3">
+          <Link href="/menu">
+            <Button variant="ghost" size="icon" className="rounded-full">
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+          </Link>
+          <span className="font-black uppercase tracking-tight text-sm">ViMore OAuth</span>
+        </div>
+        <Link href="/settings/connected-apps" className="text-xs font-bold text-primary">
+          Connected Apps
+        </Link>
+      </header>
 
-        <div className="space-y-1">
+      <div className="max-w-2xl mx-auto px-4 py-8 space-y-8">
+        <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-primary/10 flex items-center justify-center">
               <Code2 className="h-5 w-5 text-primary" />
             </div>
             <div>
               <h1 className="text-2xl font-black uppercase tracking-tight">Developer Portal</h1>
-              <p className="text-xs text-muted-foreground">Build apps that use Sign in with ViMore</p>
+              <p className="text-xs text-muted-foreground">Build apps that use Sign in with ViMore OAuth</p>
             </div>
           </div>
+          <Link href="/settings/connected-apps" className="hidden lg:inline-flex">
+            <Button variant="outline" size="sm" className="rounded-2xl text-xs font-bold gap-1.5">
+              <ShieldCheck className="h-3.5 w-3.5 text-primary" /> Connected Apps
+            </Button>
+          </Link>
         </div>
 
         <div className="bg-primary/5 border border-primary/20 rounded-2xl p-4 space-y-2">
@@ -157,10 +191,10 @@ export default function DeveloperPage() {
           </div>
           <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
             <li>Register your app below to get a <strong>client_id</strong> and <strong>client_secret</strong></li>
-            <li>Send users to: <code className="bg-muted px-1 rounded text-[10px]">vimore.cfd/oauth/authorize?client_id=...&redirect_uri=...&scope=profile&response_type=code</code></li>
+            <li>Send users to: <code className="bg-muted px-1 rounded text-[10px]">{origin}/oauth/authorize?client_id=...&redirect_uri=...&scope=profile&response_type=code</code></li>
             <li>User approves → you receive a <strong>code</strong> at your redirect URI</li>
             <li>Exchange the code for an <strong>access_token</strong> via <code className="bg-muted px-1 rounded text-[10px]">POST /api/oauth/token</code></li>
-            <li>Fetch the user profile via <code className="bg-muted px-1 rounded text-[10px]">GET /api/oauth/userinfo</code></li>
+            <li>Fetch profile via <code className="bg-muted px-1 rounded text-[10px]">GET /api/oauth/userinfo</code> (or posts with <code className="bg-muted px-1 rounded text-[10px]">GET /api/oauth/posts</code>)</li>
           </ol>
         </div>
 
@@ -229,7 +263,7 @@ export default function DeveloperPage() {
                     variant="ghost"
                     className="h-8 w-8 text-destructive hover:bg-destructive/10 rounded-xl"
                     disabled={deletingId === app.$id}
-                    onClick={() => handleDelete(app)}
+                    onClick={() => setDeleteTarget(app)}
                   >
                     {deletingId === app.$id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                   </Button>
@@ -318,7 +352,7 @@ export default function DeveloperPage() {
               <Check className="h-5 w-5 text-green-500" /> App Created!
             </DialogTitle>
             <DialogDescription>
-              Save your client secret now — it won't be shown again.
+              Save your client secret now — it won&apos;t be shown again.
             </DialogDescription>
           </DialogHeader>
           {newCreds && (
@@ -326,7 +360,7 @@ export default function DeveloperPage() {
               <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-3 flex gap-2">
                 <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-amber-700 dark:text-amber-400">
-                  Copy your <strong>Client Secret</strong> now. For security, we don't store it and can't show it again.
+                  Copy your <strong>Client Secret</strong> now. For security, we don&apos;t store it in plain text and can&apos;t show it again.
                 </p>
               </div>
 
@@ -348,10 +382,10 @@ export default function DeveloperPage() {
               <div className="bg-muted/40 rounded-xl p-3 space-y-1.5">
                 <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Authorization URL</p>
                 <code className="text-[10px] font-mono break-all text-muted-foreground block">
-                  {`https://vimore.cfd/oauth/authorize?client_id=${newCreds.client_id}&redirect_uri=YOUR_REDIRECT_URI&scope=profile+email&response_type=code`}
+                  {`${origin}/oauth/authorize?client_id=${newCreds.client_id}&redirect_uri=YOUR_REDIRECT_URI&scope=profile+email&response_type=code`}
                 </code>
                 <button onClick={() => copyText(
-                  `https://vimore.cfd/oauth/authorize?client_id=${newCreds.client_id}&redirect_uri=YOUR_REDIRECT_URI&scope=profile+email&response_type=code`,
+                  `${origin}/oauth/authorize?client_id=${newCreds.client_id}&redirect_uri=YOUR_REDIRECT_URI&scope=profile+email&response_type=code`,
                   "authurl"
                 )} className="text-[10px] text-primary flex items-center gap-1">
                   {copiedKey === "authurl" ? <><Check className="h-3 w-3" /> Copied</> : <><Copy className="h-3 w-3" /> Copy URL</>}
@@ -363,6 +397,27 @@ export default function DeveloperPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent className="rounded-3xl max-w-sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-black uppercase tracking-tight">Delete OAuth App?</AlertDialogTitle>
+            <AlertDialogDescription>
+              &ldquo;{deleteTarget?.name}&rdquo; and its client credentials will be permanently deleted. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-2xl">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={!!deletingId}
+              className="rounded-2xl bg-destructive text-white hover:bg-destructive/90"
+            >
+              {deletingId ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete App"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

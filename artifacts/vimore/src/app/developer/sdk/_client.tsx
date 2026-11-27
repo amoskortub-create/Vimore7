@@ -338,7 +338,7 @@ export default function SdkPage() {
             {[
               { scope: "profile", fields: "name, username, picture, verified", desc: "Basic identity — always include this." },
               { scope: "email", fields: "email", desc: "The user's email address." },
-              { scope: "read:posts", fields: "posts, activity", desc: "Read the user's public posts." },
+              { scope: "read:posts", fields: "GET /api/oauth/posts", desc: "Read the user's public posts and activity." },
             ].map((row, i, arr) => (
               <div key={row.scope} className={cn("flex items-start gap-4 p-5", i < arr.length - 1 && "border-b border-border")}>
                 <code className="text-[11px] font-mono bg-primary/10 text-primary px-2 py-0.5 rounded-lg flex-shrink-0 mt-0.5">{row.scope}</code>

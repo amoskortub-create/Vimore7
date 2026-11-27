@@ -1,22 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDatabases, DATABASE_ID } from '@/lib/appwrite-server';
-import { OAUTH_COL, getOAuthClient, revokeAccessToken } from '@/lib/oauth-server';
+import {
+  getOAuthClient,
+  listUserAccessTokens,
+  revokeUserClientTokens,
+} from '@/lib/oauth-server';
+import { getAuthenticatedProfile } from '@/lib/server-helpers';
 
 export async function GET(req: NextRequest) {
   try {
-    const userId = req.nextUrl.searchParams.get('user_id') || '';
-    if (!userId) {
-      return NextResponse.json({ error: 'user_id is required' }, { status: 400 });
+    const session = await getAuthenticatedProfile(req);
+    if (!session) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
+    const userId = session.profileDoc?.$id || session.authUser.$id;
 
-    const db = getAdminDatabases();
-    const res = await db.listDocuments(DATABASE_ID, OAUTH_COL.ACCESS_TOKENS, []);
-    const activeTokens = res.documents.filter(
-      (d: any) =>
-        d.user_id === userId &&
-        !d.revoked &&
-        (!d.expires_at || new Date(d.expires_at) > new Date())
-    );
+    const activeTokens = await listUserAccessTokens(userId);
 
     const grouped = new Map<string, { scopes: Set<string>; granted_at: string; token_ids: string[] }>();
     for (const tok of activeTokens as any[]) {
@@ -30,7 +28,7 @@ export async function GET(req: NextRequest) {
         });
       }
       const entry = grouped.get(cid)!;
-      String(tok.scopes || '')
+      String(tok.scopes || tok.scope || '')
         .split(' ')
         .filter(Boolean)
         .forEach((s) => entry.scopes.add(s));
@@ -60,25 +58,21 @@ export async function GET(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    const session = await getAuthenticatedProfile(req);
+    if (!session) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+    const userId = session.profileDoc?.$id || session.authUser.$id;
+
     const body = await req.json().catch(() => ({}));
     const clientId = String(body.client_id || '').trim();
-    const userId = String(body.user_id || '').trim();
 
-    if (!clientId || !userId) {
-      return NextResponse.json({ error: 'client_id and user_id are required' }, { status: 400 });
+    if (!clientId) {
+      return NextResponse.json({ error: 'client_id is required' }, { status: 400 });
     }
 
-    const db = getAdminDatabases();
-    const res = await db.listDocuments(DATABASE_ID, OAUTH_COL.ACCESS_TOKENS, []);
-    const matches = res.documents.filter(
-      (d: any) => d.client_id === clientId && d.user_id === userId && !d.revoked
-    );
-
-    for (const doc of matches) {
-      await revokeAccessToken(doc.$id);
-    }
-
-    return NextResponse.json({ ok: true, revoked: matches.length });
+    const revoked = await revokeUserClientTokens(userId, clientId);
+    return NextResponse.json({ ok: true, revoked });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || 'Failed to revoke access' }, { status: 500 });
   }

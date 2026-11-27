@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { usePosts } from "@/context/PostContext";
 import { useMusic } from "@/context/MusicContext";
+import { authFetch } from "@/lib/auth-fetch";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useToast } from "@/hooks/use-toast";
@@ -62,7 +63,7 @@ export default function ConnectedAppsPage() {
   async function fetchConnected() {
     setLoading(true);
     try {
-      const res = await fetch(`/api/oauth/connected?user_id=${currentUser!.$id}`);
+      const res = await authFetch("/api/oauth/connected", { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       setApps(data.connected || []);
     } catch {
@@ -77,10 +78,10 @@ export default function ConnectedAppsPage() {
     setRevoking(true);
     triggerHaptic(30);
     try {
-      const res = await fetch("/api/oauth/connected", {
+      const res = await authFetch("/api/oauth/connected", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ client_id: revokeTarget.client_id, user_id: currentUser.$id }),
+        body: JSON.stringify({ client_id: revokeTarget.client_id }),
       });
       if (!res.ok) throw new Error("Failed");
       setApps((prev) => prev.filter((a) => a.client_id !== revokeTarget.client_id));

@@ -4,6 +4,7 @@ import * as ClientsInfo from '@/server/api-impl/oauth/clients/info';
 import * as Clients from '@/server/api-impl/oauth/clients';
 import * as Connected from '@/server/api-impl/oauth/connected';
 import * as Grant from '@/server/api-impl/oauth/grant';
+import * as Posts from '@/server/api-impl/oauth/posts';
 import * as Revoke from '@/server/api-impl/oauth/revoke';
 import * as Token from '@/server/api-impl/oauth/token';
 import * as UserInfo from '@/server/api-impl/oauth/userinfo';
@@ -18,6 +19,7 @@ const ROUTES: Record<string, Handler> = {
   'clients': Clients,
   'connected': Connected,
   'grant': Grant,
+  'posts': Posts,
   'revoke': Revoke,
   'token': Token,
   'userinfo': UserInfo,
@@ -48,4 +50,7 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ path: st
 }
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   return dispatch(req, 'PATCH', ctx);
+}
+export async function OPTIONS(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
+  return dispatch(req, 'OPTIONS', ctx);
 }

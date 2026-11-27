@@ -137,9 +137,20 @@ export default function SignupPage() {
   const [showCountryDialog, setShowCountryDialog] = useState(false);
   const [countrySearch, setCountrySearch] = useState("");
 
+  const getSafeNext = () => {
+    if (typeof window === 'undefined') return '/';
+    try {
+      const nextParam = new URLSearchParams(window.location.search).get('next') || '';
+      if (nextParam.startsWith('/') && !nextParam.startsWith('//') && !nextParam.startsWith('/\\')) {
+        return nextParam;
+      }
+    } catch {}
+    return '/';
+  };
+
   useEffect(() => {
     if (!contextLoading && currentUser) {
-      router.replace("/");
+      router.replace(getSafeNext());
     }
   }, [currentUser, contextLoading, router]);
 
@@ -194,7 +205,7 @@ export default function SignupPage() {
     try {
       const result = await signup({ name, vimoreId, password, dob, nationality, gender, phone: phone.trim() || undefined });
       if (result.success) {
-        router.replace("/");
+        router.replace(getSafeNext());
       } else if (!result.success && result.message) {
         toast({ variant: "destructive", title: "Signup failed", description: result.message });
       }

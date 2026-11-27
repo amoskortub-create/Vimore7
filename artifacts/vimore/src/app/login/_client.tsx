@@ -59,9 +59,20 @@ export default function LoginPage() {
 
   const quickPassRef = useRef<HTMLInputElement>(null);
 
+  const getSafeNext = () => {
+    if (typeof window === 'undefined') return '/';
+    try {
+      const nextParam = new URLSearchParams(window.location.search).get('next') || '';
+      if (nextParam.startsWith('/') && !nextParam.startsWith('//') && !nextParam.startsWith('/\\')) {
+        return nextParam;
+      }
+    } catch {}
+    return '/';
+  };
+
   useEffect(() => {
     if (!contextLoading && currentUser) {
-      router.replace("/");
+      router.replace(getSafeNext());
     }
   }, [currentUser, contextLoading, router]);
 
@@ -103,7 +114,7 @@ export default function LoginPage() {
     try {
       const result = await login(quickAccount.vimoreId, quickPassword);
       if (result.success) {
-        router.push("/");
+        router.push(getSafeNext());
       } else {
         toast({ variant: "destructive", title: "Sign in failed", description: result.message || "Wrong password. Try again." });
       }
@@ -121,7 +132,7 @@ export default function LoginPage() {
     try {
       const result = await login(identifier, password);
       if (result.success) {
-        router.push("/");
+        router.push(getSafeNext());
       } else {
         toast({ variant: "destructive", title: "Sign in failed", description: result.message || "Please check your credentials." });
       }

@@ -1,7 +1,6 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { useRouter } from "next/navigation";
 
 interface SignInWithViMoreProps {
   clientId: string;
@@ -12,7 +11,9 @@ interface SignInWithViMoreProps {
   variant?: "purple" | "white";
   size?: "sm" | "md" | "lg";
   popup?: boolean;
+  baseUrl?: string;
   onSuccess?: (data: { code: string; state?: string }) => void;
+  onError?: (data: { error: string; state?: string }) => void;
   className?: string;
 }
 
@@ -33,9 +34,19 @@ export function SignInWithViMore({
   variant = "purple",
   size = "md",
   popup = false,
+  baseUrl,
   onSuccess,
+  onError,
   className,
 }: SignInWithViMoreProps) {
+  function getOrigin() {
+    if (baseUrl) return baseUrl.replace(/\/$/, "");
+    if (typeof window !== "undefined" && window.location?.origin) {
+      return window.location.origin;
+    }
+    return process.env.NEXT_PUBLIC_APP_URL || "https://vimore.cfd";
+  }
+
   function buildUrl() {
     const params = new URLSearchParams({
       client_id: clientId,
@@ -44,7 +55,8 @@ export function SignInWithViMore({
       scope,
     });
     if (state) params.set("state", state);
-    return `https://vimore.cfd/oauth/authorize?${params.toString()}`;
+    if (popup && onSuccess) params.set("popup", "1");
+    return `${getOrigin()}/oauth/authorize?${params.toString()}`;
   }
 
   function handleClick(e: React.MouseEvent) {
@@ -53,19 +65,23 @@ export function SignInWithViMore({
     const w = 480, h = 640;
     const left = screen.width / 2 - w / 2;
     const top = screen.height / 2 - h / 2;
+    const origin = getOrigin();
     const win = window.open(
       buildUrl(),
       "vimore_auth",
       `width=${w},height=${h},left=${left},top=${top},toolbar=no,menubar=no`
     );
 
-    const VIMORE_ORIGIN = "https://vimore.cfd";
     const handler = (event: MessageEvent) => {
-      if (event.origin !== VIMORE_ORIGIN) return;
+      if (event.origin !== origin) return;
       if (event.data?.type === "vimore_oauth_callback") {
         window.removeEventListener("message", handler);
         win?.close();
-        onSuccess?.(event.data);
+        if (event.data.error) {
+          onError?.(event.data);
+        } else {
+          onSuccess?.(event.data);
+        }
       }
     };
     window.addEventListener("message", handler);
@@ -100,12 +116,12 @@ function ViMoreIcon({ className, variant }: { className?: string; variant: "purp
       />
       <path
         d="M4 8L9.5 17L15 8"
-        stroke={variant === "purple" ? "white" : "white"}
+        stroke="white"
         strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
       />
       <path
         d="M11.5 14L15 8L18.5 14"
-        stroke={variant === "purple" ? "white" : "white"}
+        stroke="white"
         strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
       />
     </svg>

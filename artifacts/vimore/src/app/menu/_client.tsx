@@ -41,6 +41,8 @@ import {
   Bot,
   BarChart2,
   Baby,
+  Code2,
+  KeyRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -123,6 +125,7 @@ export default function MenuPage() {
     { label: t('menu_command_core'), icon: Activity, color: "text-indigo-500", bg: "bg-indigo-50", href: "/admin", isHidden: !isAdmin },
     { label: "Advertise", icon: Megaphone, color: "text-violet-500", bg: "bg-violet-50", href: "/advertise" },
     { label: "Mesurado Ai", icon: Bot, color: "text-primary", bg: "bg-primary/10", href: "/intelligent", dotOnly: true },
+    { label: "ViMore OAuth", icon: Code2, color: "text-violet-600", bg: "bg-violet-50", href: "/developer", dotOnly: true },
     { label: "Coming Soon", icon: Zap, color: "text-primary", bg: "bg-primary/10", href: "/coming-soon", dotOnly: true },
   ];
 
@@ -267,6 +270,14 @@ export default function MenuPage() {
                 <Link href="/settings/language" className="w-full flex items-center gap-4 p-3.5 rounded-2xl hover:bg-orange-500/10 transition-colors font-semibold text-[15px] text-left text-orange-600">
                   <Languages className="h-4 w-4" />
                   {t('language_hub')}
+                </Link>
+                <Link href="/developer" className="w-full flex items-center gap-4 p-3.5 rounded-2xl hover:bg-violet-500/10 transition-colors font-semibold text-[15px] text-left text-violet-600">
+                  <Code2 className="h-4 w-4" />
+                  ViMore OAuth
+                </Link>
+                <Link href="/settings/connected-apps" className="w-full flex items-center gap-4 p-3.5 rounded-2xl hover:bg-purple-500/10 transition-colors font-semibold text-[15px] text-left text-purple-600">
+                  <KeyRound className="h-4 w-4" />
+                  Connected Apps
                 </Link>
               </AccordionContent>
             </AccordionItem>

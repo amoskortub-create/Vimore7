@@ -69,6 +69,10 @@ export interface AppSettings {
   isGiftingEnabled: boolean;
   isAiVerificationActive: boolean;
   isSensitivityFilterActive: boolean;
+  autoTranslate: boolean;
+  pushSocialAlerts: boolean;
+  pushMessageAlerts: boolean;
+  isPrivateAccount: boolean;
 }
 
 export interface User {
@@ -397,6 +401,13 @@ interface PostContextType {
   boostNode: (nodeId: string, duration: number, currency: 'CREDIT', type: 'POST' | 'SONIC') => Promise<void>;
   enrollHardwareBiometrics: () => Promise<boolean>;
   verifyHardwareBiometrics: () => Promise<boolean>;
+  hasSecurityPin: boolean;
+  setSecurityPin: (pin: string, currentCredential?: string) => Promise<void>;
+  removeSecurityPin: (credential?: string) => Promise<void>;
+  verifySecurityPinOrPassword: (creds: { pin?: string; password?: string }) => Promise<boolean>;
+  changePassword: (currentPassword: string, newPassword: string, confirmPassword: string) => Promise<void>;
+  deleteAccount: (password: string) => Promise<{ scheduledDeletionAt?: string }>;
+  syncAllSettings: () => Promise<void>;
   blockUser: (username: string) => Promise<void>;
   unblockUser: (username: string) => Promise<void>;
   blockedUsernames: string[];
@@ -440,6 +451,7 @@ const INITIAL_SETTINGS: AppSettings = {
   silenceEnd: "07:00", defaultStream: 'foryou', goldRate: 0.01, diamondRate: 0.01,
   ldMultiplier: 190, isMusicEnabled: true, isGiftingEnabled: true,
   isAiVerificationActive: true, isSensitivityFilterActive: false,
+  autoTranslate: true, pushSocialAlerts: true, pushMessageAlerts: true, isPrivateAccount: false,
 };
 
 const OFFICIAL_GATEWAY = {
@@ -733,7 +745,23 @@ export function PostProvider({ children }: { children: ReactNode }) {
   const [initError] = useState<string | null>(null);
   const [isOffline, setIsOffline] = useState(false);
   const sessionCheckInFlightRef = useRef(false);
-  const [settings, setSettingsState] = useState<AppSettings>(INITIAL_SETTINGS);
+  const [settings, setSettingsState] = useState<AppSettings>(() => {
+    if (typeof window === 'undefined') return INITIAL_SETTINGS;
+    try {
+      const saved = localStorage.getItem('vimore_settings_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') {
+          return { ...INITIAL_SETTINGS, ...parsed };
+        }
+      }
+    } catch {}
+    return INITIAL_SETTINGS;
+  });
+  const settingsRef = useRef<AppSettings>(settings);
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
+  const [hasSecurityPin, setHasSecurityPin] = useState<boolean>(false);
+  const settingsSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [clusters, setClustersState] = useState<Cluster[]>([]);
   const clustersRef = useRef<Cluster[]>([]);
@@ -1162,7 +1190,21 @@ export function PostProvider({ children }: { children: ReactNode }) {
         setActiveSubscriptionsState(new Set(subscriptionsResult.value.documents.map((s: any) => s.creator_username).filter(Boolean)));
       }
       if (blockedUsersResult.status === 'fulfilled') {
-        setBlockedUsernames(blockedUsersResult.value.documents.map((b: any) => b.blocked_username).filter(Boolean));
+        const docs = blockedUsersResult.value.documents;
+        const resolvedNames = docs.map((b: any) => b.blocked_username).filter(Boolean) as string[];
+        const missingIds = docs.filter((b: any) => !b.blocked_username && b.blocked_id).map((b: any) => b.blocked_id);
+        if (missingIds.length > 0) {
+          try {
+            const uRes = await databases.listDocuments(DATABASE_ID, COL.USERS, [
+              Query.equal('$id', missingIds.slice(0, 100)),
+              Query.limit(100),
+            ]);
+            uRes.documents.forEach((u: any) => {
+              if (u.username) resolvedNames.push(u.username);
+            });
+          } catch {}
+        }
+        setBlockedUsernames([...new Set(resolvedNames)]);
       }
     } catch (err) {
       console.error('loadSocialGraph error:', err);
@@ -1909,17 +1951,48 @@ export function PostProvider({ children }: { children: ReactNode }) {
       }
       clearTimeout(timeoutId);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { authUser, profileDoc } = meData as any;
+      const { authUser, profileDoc, hasSecurityPin: serverHasPin } = meData as any;
       if (profileDoc?.$id) authorsCacheRef.current.set(profileDoc.$id, profileDoc);
       const user = mapDocToUser(authUser, profileDoc);
       setCurrentUserState(user);
       offlineCache.saveUser(user);
       setIsOffline(false);
+      setHasSecurityPin(Boolean(serverHasPin ?? profileDoc?.has_security_pin));
+
+      if (profileDoc?.settings_json) {
+        try {
+          const remoteSettings = typeof profileDoc.settings_json === 'string'
+            ? JSON.parse(profileDoc.settings_json)
+            : profileDoc.settings_json;
+          if (remoteSettings && typeof remoteSettings === 'object') {
+            setSettingsState(prev => {
+              const merged = {
+                ...INITIAL_SETTINGS,
+                ...prev,
+                ...remoteSettings,
+                isPrivateAccount: typeof profileDoc.is_private === 'boolean'
+                  ? profileDoc.is_private
+                  : Boolean(remoteSettings.isPrivateAccount ?? prev.isPrivateAccount),
+                isHardwareEnrolled: Boolean(
+                  typeof window !== 'undefined' && localStorage.getItem('vimore_biometric_cred_id')
+                ) || Boolean(remoteSettings.isHardwareEnrolled),
+              };
+              try { localStorage.setItem('vimore_settings_v1', JSON.stringify(merged)); } catch {}
+              return merged;
+            });
+          }
+        } catch {}
+      }
 
       if (typeof window !== 'undefined') {
         try {
           const cached = localStorage.getItem(`vimore_unread_signals_${authUser.$id}`);
           if (cached) setChatLastIncomingAt(safeJsonParse(cached, {}));
+          const savedMutes = localStorage.getItem(`vimore_muted_users_${authUser.$id}`);
+          if (savedMutes) {
+            const parsedMutes = safeJsonParse(savedMutes, []);
+            if (Array.isArray(parsedMutes)) setMutedUserNames(parsedMutes);
+          }
         } catch { /* ignore */ }
       }
 
@@ -2106,6 +2179,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!currentUser?.$id) return;
     const userId = currentUser.$id;
+    const ghostActive = settings.isGhostMode;
 
     const markOnline = async () => {
       try {
@@ -2113,7 +2187,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           cache: 'no-store',
-          body: JSON.stringify({ userId, isOnline: true }),
+          body: JSON.stringify({ userId, isOnline: !ghostActive }),
         });
         if (!response.ok) throw new Error(`Presence update failed (${response.status})`);
       } catch (err: any) {
@@ -2178,7 +2252,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('pagehide', handlePageHide);
       markOffline();
     };
-  }, [currentUser?.$id]);
+  }, [currentUser?.$id, settings.isGhostMode]);
 
   useEffect(() => {
     if (!currentUser?.$id) return;
@@ -2231,9 +2305,11 @@ export function PostProvider({ children }: { children: ReactNode }) {
         m.sender === 'them' && m.status !== 'read' ? { ...m, status: 'read' as const } : m
       ),
     }));
-    unreadMsgs.forEach(m => {
-      databases.updateDocument(DATABASE_ID, COL.MESSAGES, m.$id, { is_read: true }).catch(() => {});
-    });
+    if (settingsRef.current.showReadReceipts) {
+      unreadMsgs.forEach(m => {
+        databases.updateDocument(DATABASE_ID, COL.MESSAGES, m.$id, { is_read: true }).catch(() => {});
+      });
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedChatId, chatMessages, currentUser]);
 
@@ -2298,6 +2374,29 @@ export function PostProvider({ children }: { children: ReactNode }) {
       const user = mapDocToUser(authUser, profileDoc);
       setCurrentUserState(user);
       setIsOffline(false);
+      setHasSecurityPin(Boolean(profileData.hasSecurityPin ?? profileDoc?.has_security_pin));
+
+      if (profileDoc?.settings_json) {
+        try {
+          const remoteSettings = typeof profileDoc.settings_json === 'string'
+            ? JSON.parse(profileDoc.settings_json)
+            : profileDoc.settings_json;
+          if (remoteSettings && typeof remoteSettings === 'object') {
+            setSettingsState(prev => {
+              const merged = {
+                ...INITIAL_SETTINGS,
+                ...prev,
+                ...remoteSettings,
+                isPrivateAccount: typeof profileDoc.is_private === 'boolean'
+                  ? profileDoc.is_private
+                  : Boolean(remoteSettings.isPrivateAccount ?? prev.isPrivateAccount),
+              };
+              try { localStorage.setItem('vimore_settings_v1', JSON.stringify(merged)); } catch {}
+              return merged;
+            });
+          }
+        } catch {}
+      }
 
       try {
         const saved = JSON.parse(localStorage.getItem('vimore_saved_accounts') || '[]');
@@ -2572,9 +2671,26 @@ export function PostProvider({ children }: { children: ReactNode }) {
     toast({ title: "Profile updated" });
   }, [currentUser, toast]);
 
-  const updateSettings = (data: Partial<AppSettings>) => {
-    setSettingsState(prev => ({ ...prev, ...data }));
-  };
+  const updateSettings = useCallback((data: Partial<AppSettings>) => {
+    setSettingsState(prev => {
+      const next = { ...prev, ...data };
+      settingsRef.current = next;
+      if (typeof window !== 'undefined') {
+        try { localStorage.setItem('vimore_settings_v1', JSON.stringify(next)); } catch {}
+      }
+      if (currentUserRef.current?.$id) {
+        if (settingsSyncTimerRef.current) clearTimeout(settingsSyncTimerRef.current);
+        settingsSyncTimerRef.current = setTimeout(() => {
+          authFetch('/api/user/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ settings: settingsRef.current }),
+          }).catch(() => {});
+        }, 250);
+      }
+      return next;
+    });
+  }, []);
 
   const refreshFeed = useCallback(async () => { await loadFeed(); }, [loadFeed]);
   const refreshStories = useCallback(async () => { if (currentUser) await loadStories(); }, [currentUser, loadStories]);
@@ -4700,6 +4816,100 @@ export function PostProvider({ children }: { children: ReactNode }) {
       } catch { /* ignore */ }
     },
     updateCurrentUser, updateSettings,
+    hasSecurityPin,
+    setSecurityPin: async (pin: string, currentCredential?: string) => {
+      const res = await authFetch('/api/user/biometric-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set', pin, currentCredential }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Could not save Security PIN.');
+      setHasSecurityPin(true);
+      updateSettings({ isBiometricActive: true });
+    },
+    removeSecurityPin: async (credential?: string) => {
+      const res = await authFetch('/api/user/biometric-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove', credential }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Could not remove Security PIN.');
+      setHasSecurityPin(false);
+    },
+    verifySecurityPinOrPassword: async (creds: { pin?: string; password?: string }): Promise<boolean> => {
+      const res = await authFetch('/api/user/biometric-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'verify', ...creds }),
+      });
+      return res.ok;
+    },
+    changePassword: async (currentPassword: string, newPassword: string, confirmPassword: string) => {
+      const res = await authFetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword, confirmPassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Failed to update password.');
+      if (typeof data.secret === 'string' && data.secret) {
+        persistAppwriteSession(data.secret);
+        client.setSession(data.secret);
+      }
+    },
+    deleteAccount: async (password: string) => {
+      const res = await authFetch('/api/account/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmPermanent: true, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Failed to delete account.');
+
+      await clearApiResponseCache().catch(() => {});
+      if (typeof window !== 'undefined') {
+        try {
+          const uid = currentUser?.$id;
+          const vimoreId = currentUser?.vimoreId;
+          const saved = JSON.parse(localStorage.getItem('vimore_saved_accounts') || '[]');
+          const filtered = Array.isArray(saved)
+            ? saved.filter((a: any) => a.id !== uid && a.vimoreId !== vimoreId)
+            : [];
+          localStorage.setItem('vimore_saved_accounts', JSON.stringify(filtered));
+          if (uid) {
+            localStorage.removeItem(`vimore_unread_signals_${uid}`);
+            localStorage.removeItem(`vimore_muted_users_${uid}`);
+            localStorage.removeItem(`vimore_session_refreshed_at_${uid}`);
+          }
+          localStorage.removeItem('vimore_settings_v1');
+          localStorage.removeItem('vimore_biometric_cred_id');
+          localStorage.removeItem('cookieFallback');
+          sessionStorage.clear();
+        } catch {}
+      }
+      offlineCache.clearUser();
+      setCurrentUserState(null);
+      setPostsState([]);
+      setStoriesState([]);
+      setConnectionsState([]);
+      setClustersState([]);
+      setChatMessages({});
+      return { scheduledDeletionAt: data.scheduledDeletionAt };
+    },
+    syncAllSettings: async () => {
+      const res = await authFetch('/api/user/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: settingsRef.current }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d?.error || 'Sync failed');
+      }
+      await checkSession();
+    },
     setSearchOpen: setIsSearchOpenState,
     setSelectedChatId: setSelectedChatIdState,
     setSelectedPostId: setSelectedPostIdState,
@@ -4827,7 +5037,13 @@ export function PostProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    toggleMuteUser: (u: string) => setMutedUserNames(p => p.includes(u) ? p.filter(x => x !== u) : [...p, u]),
+    toggleMuteUser: (u: string) => setMutedUserNames(p => {
+      const next = p.includes(u) ? p.filter(x => x !== u) : [...p, u];
+      if (typeof window !== 'undefined' && currentUser?.$id) {
+        try { localStorage.setItem(`vimore_muted_users_${currentUser.$id}`, JSON.stringify(next)); } catch {}
+      }
+      return next;
+    }),
     togglePinPost: async () => {},
     archivePost: async () => {},
     addAuditLog,
@@ -4970,22 +5186,24 @@ export function PostProvider({ children }: { children: ReactNode }) {
       }));
       const isGroupChat = clusters.some(cl => cl.$id === chatId);
       const msgCollection = isGroupChat ? COL.GROUP_MESSAGES : COL.MESSAGES;
-      unreadMsgs.forEach(m => {
-        databases.updateDocument(DATABASE_ID, msgCollection, m.$id, { is_read: true }).catch(() => {});
-      });
-      const now = new Date().toISOString();
-      setChatReadReceipts(prev => ({ ...prev, [chatId]: now }));
-      const existingDocId = chatReadReceiptDocIds[chatId];
-      if (existingDocId) {
-        databases.updateDocument(DATABASE_ID, COL.CHAT_READ_RECEIPTS, existingDocId, { last_read_at: now }).catch(() => {});
-      } else {
-        databases.createDocument(DATABASE_ID, COL.CHAT_READ_RECEIPTS, ID.unique(), {
-          user_id: currentUser.$id,
-          cluster_id: chatId,
-          last_read_at: now,
-        }).then(doc => {
-          setChatReadReceiptDocIds(prev => ({ ...prev, [chatId]: doc.$id }));
-        }).catch(() => {});
+      if (settingsRef.current.showReadReceipts) {
+        unreadMsgs.forEach(m => {
+          databases.updateDocument(DATABASE_ID, msgCollection, m.$id, { is_read: true }).catch(() => {});
+        });
+        const now = new Date().toISOString();
+        setChatReadReceipts(prev => ({ ...prev, [chatId]: now }));
+        const existingDocId = chatReadReceiptDocIds[chatId];
+        if (existingDocId) {
+          databases.updateDocument(DATABASE_ID, COL.CHAT_READ_RECEIPTS, existingDocId, { last_read_at: now }).catch(() => {});
+        } else {
+          databases.createDocument(DATABASE_ID, COL.CHAT_READ_RECEIPTS, ID.unique(), {
+            user_id: currentUser.$id,
+            cluster_id: chatId,
+            last_read_at: now,
+          }).then(doc => {
+            setChatReadReceiptDocIds(prev => ({ ...prev, [chatId]: doc.$id }));
+          }).catch(() => {});
+        }
       }
     },
     applyReadReceipt: (storageKey: string, lastReadAt: string, docId: string) => {
@@ -5002,7 +5220,23 @@ export function PostProvider({ children }: { children: ReactNode }) {
       setPostsState(prev => prev.map(p => p.$id === postId ? { ...p, content } : p));
     },
     purgeVibeCache: async () => setSeenPostIdsState(new Set()),
-    archiveIdentityNode: async () => {},
+    archiveIdentityNode: async () => {
+      const res = await authFetch('/api/user/export', { cache: 'no-store' });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d?.error || 'Could not export account data.');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `vimore-data-${currentUser?.username || 'account'}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast({ title: 'Data Archive Ready', description: 'Your ViMore account data file has been downloaded.' });
+    },
     boostNode,
     enrollHardwareBiometrics: async (): Promise<boolean> => {
       if (typeof window === 'undefined' || !window.PublicKeyCredential) return false;
@@ -5039,7 +5273,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
         if (credential) {
           const credId = btoa(String.fromCharCode(...new Uint8Array(credential.rawId)));
           localStorage.setItem('vimore_biometric_cred_id', credId);
-          setSettingsState(prev => ({ ...prev, isBiometricActive: true, isHardwareEnrolled: true }));
+          updateSettings({ isBiometricActive: true, isHardwareEnrolled: true });
           return true;
         }
         return false;
@@ -5069,26 +5303,31 @@ export function PostProvider({ children }: { children: ReactNode }) {
     blockedUsernames,
     blockUser: async (username: string) => {
       if (!currentUser) return;
-      setBlockedUsernames(prev => [...prev, username]);
+      const clean = username.trim().replace(/^@/, '');
+      if (!clean) return;
+      setBlockedUsernames(prev => prev.includes(clean) ? prev : [...prev, clean]);
       try {
-        await databases.createDocument(DATABASE_ID, COL.BLOCKED_USERS, ID.unique(), {
-          user_id: currentUser.$id,
-          blocker_id: currentUser.$id,
-          blocked_username: username,
+        const res = await authFetch('/api/user/block', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'block', username: clean }),
         });
-      } catch { /* keep optimistic */ }
+        if (!res.ok) throw new Error('Block failed');
+      } catch {
+        setBlockedUsernames(prev => prev.filter(u => u !== clean));
+      }
     },
     unblockUser: async (username: string) => {
       if (!currentUser) return;
-      setBlockedUsernames(prev => prev.filter(u => u !== username));
+      const clean = username.trim().replace(/^@/, '');
+      if (!clean) return;
+      setBlockedUsernames(prev => prev.filter(u => u !== clean));
       try {
-        const existing = await databases.listDocuments(DATABASE_ID, COL.BLOCKED_USERS, [
-          Query.equal('blocker_id', currentUser.$id),
-          Query.equal('blocked_username', username),
-        ]);
-        for (const doc of existing.documents) {
-          await databases.deleteDocument(DATABASE_ID, COL.BLOCKED_USERS, doc.$id);
-        }
+        await authFetch('/api/user/block', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'unblock', username: clean }),
+        });
       } catch { /* keep optimistic */ }
     },
     boostMarketplaceListing: async (productId: string, days: number) => {

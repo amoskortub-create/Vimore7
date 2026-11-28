@@ -176,13 +176,13 @@ interface PostCardProps {
   type?: string;
 }
 
-function FeedVideo({ videoUrl, postId, isShared, isReel }: { videoUrl: string; postId: string; isShared: boolean; isReel: boolean }) {
+function FeedVideo({ videoUrl, postId, isShared, isReel, preferHd }: { videoUrl: string; postId: string; isShared: boolean; isReel: boolean; preferHd?: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [hasActivated, setHasActivated] = useState(false);
   const { tier } = useNetwork();
-  const allowAutoplay = tier === 'rich';
+  const allowAutoplay = tier === 'rich' || Boolean(preferHd && tier !== 'lite');
 
   useEffect(() => {
     const video = videoRef.current;
@@ -275,7 +275,7 @@ function FeedVideo({ videoUrl, postId, isShared, isReel }: { videoUrl: string; p
         loop={tier !== 'lite'}
         muted={isMuted}
         controls={allowAutoplay || hasActivated}
-        preload="metadata"
+        preload={preferHd && tier !== 'lite' ? "auto" : "metadata"}
       />
       {!isPlaying && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
@@ -321,6 +321,7 @@ export function PostCard(props: PostCardProps) {
   const authorIsOnline = !isCampaign && !settings.isGhostMode && (authorConn?.isOnline || false);
   const authorLastSeenAt = authorConn?.lastSeenAt || null;
   const { tier } = useNetwork();
+  const effectiveMediaTier = settings.playbackQuality === 'pro-hd' && tier !== 'lite' ? 'rich' : tier;
 
   const { addSignal } = useNotifications();
   const { triggerHaptic } = useMusic();
@@ -435,8 +436,8 @@ export function PostCard(props: PostCardProps) {
   useEffect(() => { if (typeof window !== 'undefined') setViewerLanguage(window.navigator.language.split('-')[0]); }, []);
 
   const showTranslateButton = useMemo(
-    () => !isShared && !!content && !!viewerLanguage && isTextForeignToUser(content, viewerLanguage),
-    [isShared, content, viewerLanguage]
+    () => !isShared && settings.autoTranslate !== false && !!content && !!viewerLanguage && isTextForeignToUser(content, viewerLanguage),
+    [isShared, settings.autoTranslate, content, viewerLanguage]
   );
 
   const handleTranslate = async () => {
@@ -656,11 +657,32 @@ export function PostCard(props: PostCardProps) {
               {allImages.length > 0 && (
                   <div className={cn("relative mt-2", isShared ? "-mx-1" : "-mx-3 sm:mx-0")}>
                     {allImages.length > 1 && <div className="absolute top-3 right-3 z-20 bg-black/40 backdrop-blur-md px-2 py-1 rounded-xl border border-white/10 text-white text-[10px] font-black">{currentSlide + 1}/{allImages.length}</div>}
-                    <Carousel className="w-full" setApi={(api) => api?.on("select", () => setCurrentSlide(api.selectedScrollSnap()))}><CarouselContent>{allImages.map((img, i) => (<CarouselItem key={i}><div className="relative aspect-[4/5] overflow-hidden rounded-lg cursor-pointer bg-secondary/20" onClick={() => setSelectedImageUrl(img)}>{Math.abs(i - currentSlide) <= 1 ? <IOSImage src={getAdaptivePreview(img, 'feed', tier) || img} alt="Post" className="w-full h-full object-cover" /> : null}</div></CarouselItem>))}</CarouselContent></Carousel>
+                    <Carousel className="w-full" setApi={(api) => api?.on("select", () => setCurrentSlide(api.selectedScrollSnap()))}><CarouselContent>{allImages.map((img, i) => (<CarouselItem key={i}><div className="relative aspect-[4/5] overflow-hidden rounded-lg cursor-pointer bg-secondary/20" onClick={() => !isSensitiveNode && setSelectedImageUrl(img)}>{Math.abs(i - currentSlide) <= 1 ? <IOSImage src={getAdaptivePreview(img, 'feed', effectiveMediaTier) || img} alt="Post" className={cn("w-full h-full object-cover transition-all", isSensitiveNode && "blur-2xl scale-105")} /> : null}</div></CarouselItem>))}</CarouselContent></Carousel>
+                    {isSensitiveNode && (
+                      <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/45 backdrop-blur-md p-6 text-center rounded-lg">
+                        <EyeOff className="h-8 w-8 text-white/80 mb-2" />
+                        <p className="text-xs font-black uppercase tracking-widest text-white">Sensitive Content Filtered</p>
+                        <p className="text-[11px] text-white/70 mt-1 mb-4">Hidden by your privacy filter</p>
+                        <Button size="sm" variant="secondary" className="rounded-xl font-black uppercase text-[10px] tracking-widest" onClick={(e) => { e.stopPropagation(); setIsRevealedManually(true); }}>
+                          Tap to View
+                        </Button>
+                      </div>
+                    )}
                   </div>
               )}
               {videoUrl && (
-                  <FeedVideo videoUrl={videoUrl} postId={$id} isShared={isShared} isReel={postType === 'reel'} />
+                  <div className="relative">
+                    <FeedVideo videoUrl={videoUrl} postId={$id} isShared={isShared} isReel={postType === 'reel'} preferHd={settings.playbackQuality === 'pro-hd'} />
+                    {isSensitiveNode && allImages.length === 0 && (
+                      <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/60 backdrop-blur-xl p-6 text-center rounded-lg">
+                        <EyeOff className="h-8 w-8 text-white/80 mb-2" />
+                        <p className="text-xs font-black uppercase tracking-widest text-white">Sensitive Content Filtered</p>
+                        <Button size="sm" variant="secondary" className="mt-4 rounded-xl font-black uppercase text-[10px] tracking-widest" onClick={(e) => { e.stopPropagation(); setIsRevealedManually(true); }}>
+                          Tap to View
+                        </Button>
+                      </div>
+                    )}
+                  </div>
               )}
             </>
           )}

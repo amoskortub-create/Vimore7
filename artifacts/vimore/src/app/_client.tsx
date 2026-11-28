@@ -255,11 +255,19 @@ const MAX_CACHED_POSTS = 15;
 export default function Home() {
   const router = useRouter();
   const { t } = useTranslation();
-  const { posts, campaigns, isLoading, initError, followingUsernames, followingUserIds, friendUsernames, seenPostIds, isAuthenticated, isOffline, currentUser, triggerHaptic, loadMoreFeed, hasMoreFeed, isFeedLoading } = usePosts();
+  const { posts, campaigns, isLoading, initError, followingUsernames, followingUserIds, friendUsernames, seenPostIds, isAuthenticated, isOffline, currentUser, triggerHaptic, loadMoreFeed, hasMoreFeed, isFeedLoading, settings, blockedUsernames, mutedUserNames } = usePosts();
   const { currentTrack, isExpanded } = useMusic();
   const { tier } = useNetwork();
   const { newFollowingPostsCount, clearNewPosts, uploadProgress } = useFeedSignal();
   const [isStoryModalOpen, setIsStoryModalOpen] = useState(false);
+  const [activeStream, setActiveStream] = useState<'foryou' | 'following'>(settings.defaultStream || 'foryou');
+  const hasUserSwitchedStreamRef = useRef(false);
+
+  useEffect(() => {
+    if (!hasUserSwitchedStreamRef.current && settings.defaultStream) {
+      setActiveStream(settings.defaultStream);
+    }
+  }, [settings.defaultStream]);
 
   const [cachedPosts, setCachedPosts] = useState<any[]>(() => {
     if (typeof window === 'undefined') return [];
@@ -340,23 +348,39 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [posts, isOffline]);
 
+  const visiblePosts = useMemo(() => {
+    const blocked = new Set(blockedUsernames);
+    const muted = new Set(mutedUserNames);
+    return posts.filter(p => {
+      const uname = p.user?.username || '';
+      const name = p.user?.name || '';
+      if (blocked.has(uname) || muted.has(uname) || muted.has(name)) return false;
+      if (activeStream === 'following') {
+        const isOwn = (currentUser?.$id && p.user?.$id === currentUser.$id) || (currentUser?.username && uname === currentUser.username);
+        const isFol = followingUsernames.has(uname) || followingUserIds.has(p.user?.$id || '') || friendUsernames.has(uname);
+        return Boolean(isOwn || isFol);
+      }
+      return true;
+    });
+  }, [posts, blockedUsernames, mutedUserNames, activeStream, currentUser?.$id, currentUser?.username, followingUsernames, followingUserIds, friendUsernames]);
+
   const shuffledBoostedRegular = useMemo(() => {
-    const boosted = posts.filter(p => p.isBoosted && p.type !== 'reel' && !p.isFeedAppend);
+    const boosted = visiblePosts.filter(p => p.isBoosted && p.type !== 'reel' && !p.isFeedAppend);
     return seededShuffle(boosted, feedSessionSeedRef.current + 1);
-  }, [posts]);
+  }, [visiblePosts]);
 
   const shuffledBoostedReels = useMemo(() => {
-    const boosted = posts.filter(p => p.isBoosted && p.type === 'reel' && !p.isFeedAppend);
+    const boosted = visiblePosts.filter(p => p.isBoosted && p.type === 'reel' && !p.isFeedAppend);
     return seededShuffle(boosted, feedSessionSeedRef.current + 2);
-  }, [posts]);
+  }, [visiblePosts]);
 
   // Regular posts only (excludes ads & boosted posts):
   // - 80% from people the user is following (4 following : 1 non-following)
   // - Cap user's own posts so the home feed isn't flooded with own posts
   // - Random order per session using stable per-post random weights
   const organicSorted = useMemo(() => {
-    const regular = posts.filter(p => !p.isBoosted && !p.isFeedAppend);
-    const appendedPosts = posts.filter(p => !p.isBoosted && p.isFeedAppend);
+    const regular = visiblePosts.filter(p => !p.isBoosted && !p.isFeedAppend);
+    const appendedPosts = visiblePosts.filter(p => !p.isBoosted && p.isFeedAppend);
     const allRegular = [...regular, ...appendedPosts];
     allRegular.forEach(p => { if (!(p.$id in weights.current)) weights.current[p.$id] = Math.random(); });
 
@@ -421,7 +445,7 @@ export default function Home() {
     }
 
     return combined;
-  }, [posts, currentUser?.$id, currentUser?.username, followingUsernames.size, followingUserIds.size]);
+  }, [visiblePosts, currentUser?.$id, currentUser?.username, followingUsernames.size, followingUserIds.size]);
 
   const shuffledFeedCampaigns = useMemo(() => {
     const active = campaigns.filter((c: any) => c.is_active && c.placement === 'feed');
@@ -429,7 +453,7 @@ export default function Home() {
   }, [campaigns]);
 
   const feedItems = useMemo(() => {
-    if (posts.length === 0) return [];
+    if (visiblePosts.length === 0) return [];
     const result: any[] = [];
     let totalOrganicCount = 0;
     let organicPostCount = 0;
@@ -507,7 +531,7 @@ export default function Home() {
     result.push({ type: 'load-trigger', id: 'load-trigger-end' });
 
     return result;
-  }, [organicSorted, posts.length, shuffledFeedCampaigns, shuffledBoostedRegular, shuffledBoostedReels, currentUser?.$id]);
+  }, [organicSorted, visiblePosts.length, shuffledFeedCampaigns, shuffledBoostedRegular, shuffledBoostedReels, currentUser?.$id]);
 
   // Preload the next batch when the end sentinel is close to the viewport.
   useEffect(() => {
@@ -576,6 +600,27 @@ export default function Home() {
         <main className="flex flex-col gap-4 w-full max-w-[680px] mx-auto">
           <Stories onOpenCreate={() => setIsStoryModalOpen(true)} />
 
+          <div className="flex items-center gap-1.5 bg-white/80 dark:bg-card/80 backdrop-blur-md p-1 rounded-2xl border border-border/50 w-fit mx-auto shadow-sm">
+            <button
+              onClick={() => { triggerHaptic(10); hasUserSwitchedStreamRef.current = true; setActiveStream('foryou'); }}
+              className={cn(
+                "px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                activeStream === 'foryou' ? "bg-primary text-white shadow" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              For You
+            </button>
+            <button
+              onClick={() => { triggerHaptic(10); hasUserSwitchedStreamRef.current = true; setActiveStream('following'); }}
+              className={cn(
+                "px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                activeStream === 'following' ? "bg-primary text-white shadow" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Following
+            </button>
+          </div>
+
           {uploadProgress !== null && (
             <div className="px-4 pb-1 animate-in fade-in duration-300">
               <div className="flex items-center justify-between mb-1">
@@ -605,7 +650,7 @@ export default function Home() {
           )}
 
           <div className="flex flex-col gap-1">
-            {posts.length > 0 ? (
+            {visiblePosts.length > 0 ? (
               <>
                 {feedItems.map((item, idx) => {
                   if (item.type === 'suggestions') return <SuggestedFollows key={item.id} />;

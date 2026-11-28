@@ -53,7 +53,13 @@ import {
   ZapOff,
   LayoutDashboard,
   Gauge,
-  Code2
+  Code2,
+  Ban,
+  VolumeX,
+  BellRing,
+  MessageSquare,
+  Heart,
+  Trash2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AcronymCard } from "@/components/branding/acronym-meaning";
@@ -64,59 +70,117 @@ import { Progress } from "@/components/ui/progress";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
-} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { usePosts } from "@/context/PostContext";
 import { useMusic } from "@/context/MusicContext";
+import { useNotifications } from "@/context/NotificationContext";
 import { useTranslation } from "@/context/LanguageContext";
 import { useNetwork } from "@/context/NetworkContext";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useToast } from "@/hooks/use-toast";
 import { clearAllLocalCaches } from "@/lib/offline-cache";
+import { playNotificationSound } from "@/lib/notification-sound";
+import { authFetch } from "@/lib/auth-fetch";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { NativeAdNode } from "@/components/ad/native-ad-node";
 import ProfileLoading from "../profile/loading";
 
+interface BlockedUserEntry {
+  docId?: string;
+  userId?: string;
+  username: string;
+  name: string;
+  avatar: string;
+}
+
 export default function SettingsPage() {
-  const { settings, updateSettings, triggerHaptic, currentUser, connections, posts, savedPostIds, activeSubscriptions, cancelSubscription, seenPostIds, archiveIdentityNode, isLoading, logout, enrollHardwareBiometrics } = usePosts();
+  const {
+    settings,
+    updateSettings,
+    triggerHaptic,
+    currentUser,
+    connections,
+    savedPostIds,
+    activeSubscriptions,
+    seenPostIds,
+    archiveIdentityNode,
+    isLoading,
+    logout,
+    enrollHardwareBiometrics,
+    hasSecurityPin,
+    setSecurityPin,
+    removeSecurityPin,
+    syncAllSettings,
+    blockedUsernames,
+    unblockUser,
+    mutedUserNames,
+    toggleMuteUser,
+  } = usePosts();
   const { currentTrack, isExpanded, downloadedSongIds, userSongs } = useMusic();
+  const { hasPushPermission, requestPushPermission } = useNotifications();
   const { t } = useTranslation();
   const { tier, effectiveType, forcedTier, setForcedTier, saveData } = useNetwork();
   const { toast } = useToast();
-  
+
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
   const [isLegacySelectorOpen, setIsLegacySelectorOpen] = useState(false);
   const [legacySearch, setLegacySearch] = useState("");
   const [isEnrollingBiometric, setIsEnrollingBiometric] = useState(false);
   const [isClearingCache, setIsClearingCache] = useState(false);
+  const [isTogglingPush, setIsTogglingPush] = useState(false);
+  const [pushPreferenceEnabled, setPushPreferenceEnabled] = useState(true);
+
+  // Security PIN dialog state
+  const [isPinDialogOpen, setIsPinDialogOpen] = useState(false);
+  const [pinMode, setPinMode] = useState<'set' | 'remove'>('set');
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [currentCred, setCurrentCred] = useState("");
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [isSavingPin, setIsSavingPin] = useState(false);
+
+  // Blocked & Muted dialog state
+  const [isBlockedDialogOpen, setIsBlockedDialogOpen] = useState(false);
+  const [blockedList, setBlockedList] = useState<BlockedUserEntry[]>([]);
+  const [isLoadingBlocked, setIsLoadingBlocked] = useState(false);
+
+  useEffect(() => {
+    setPushPreferenceEnabled((currentUser as any)?.push_enabled !== false);
+  }, [currentUser]);
 
   const isPlayerActive = currentTrack && !isExpanded;
+  void isPlayerActive;
 
-  const handleSync = () => {
+  const handleSync = async () => {
     setIsSyncing(true);
     triggerHaptic(50);
-    setTimeout(() => {
+    try {
+      await syncAllSettings();
+      toast({ title: t('ui_linguistic_sync'), description: "All settings and account data are synchronized." });
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Sync Failed",
+        description: err?.message || "Could not synchronize settings right now.",
+      });
+    } finally {
       setIsSyncing(false);
-      toast({ title: t('ui_linguistic_sync'), description: "All digital nodes and identity pulses are now synchronized." });
-    }, 2500);
+    }
   };
 
-  const handleUpdate = (data: any) => { 
-    triggerHaptic(10); 
-    updateSettings(data); 
+  const handleUpdate = (data: any) => {
+    triggerHaptic(10);
+    updateSettings(data);
   };
 
   const handleClearCache = async () => {
@@ -132,30 +196,192 @@ export default function SettingsPage() {
     }
   };
 
+  const handleArchiveExport = async () => {
+    triggerHaptic(20);
+    setIsArchiving(true);
+    try {
+      await archiveIdentityNode();
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Export Failed",
+        description: err?.message || "Could not generate your account data archive.",
+      });
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
   const handleBiometricToggle = async (val: boolean) => {
     triggerHaptic(10);
     if (!val) {
       updateSettings({ isBiometricActive: false });
-      toast({ title: "Biometric Disabled", description: "Messages and Earnings are no longer locked." });
+      toast({ title: "Device Lock Disabled", description: "Messages, Earnings, and Credit Hub are no longer locked." });
       return;
     }
-    if (settings.isHardwareEnrolled) {
+
+    if (settings.isHardwareEnrolled || hasSecurityPin) {
       updateSettings({ isBiometricActive: true });
-      toast({ title: "Biometric Enabled", description: "Messages and Earnings are now protected." });
+      toast({ title: "Device Lock Active", description: "Protected areas are now locked with your security credential." });
       return;
     }
+
     setIsEnrollingBiometric(true);
     try {
       const success = await enrollHardwareBiometrics();
-      if (!success) {
-        toast({ variant: "destructive", title: "Enrollment Failed", description: "Device biometric/PIN not available or was denied. Try from Account Settings." });
-      } else {
+      if (success) {
         toast({ title: "Biometric Vault Active", description: "Messages and Earnings are now protected by your device." });
+      } else {
+        // Always enable lock with account password fallback + invite user to set a Security PIN
+        updateSettings({ isBiometricActive: true });
+        setPinMode('set');
+        setNewPin("");
+        setConfirmPin("");
+        setCurrentCred("");
+        setPinError(null);
+        setIsPinDialogOpen(true);
+        toast({
+          title: "Device Lock Enabled",
+          description: "Protected with your account password. Set a 4–8 digit PIN below for faster unlocking.",
+        });
       }
     } catch {
-      toast({ variant: "destructive", title: "Enrollment Error", description: "Could not reach device authenticator." });
+      updateSettings({ isBiometricActive: true });
+      toast({
+        title: "Device Lock Enabled",
+        description: "Protected with your account password. You can also set a Security PIN.",
+      });
     } finally {
       setIsEnrollingBiometric(false);
+    }
+  };
+
+  const handleReEnrollBiometrics = async () => {
+    triggerHaptic(15);
+    setIsEnrollingBiometric(true);
+    try {
+      const ok = await enrollHardwareBiometrics();
+      if (ok) {
+        toast({ title: "Fingerprint / Face Registered", description: "Biometric unlock is ready on this device." });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Biometrics Unavailable",
+          description: "This browser or device couldn't register WebAuthn biometrics. Security PIN & account password are active.",
+        });
+      }
+    } finally {
+      setIsEnrollingBiometric(false);
+    }
+  };
+
+  const handlePinSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPinError(null);
+    if (pinMode === 'set') {
+      if (!/^\d{4,8}$/.test(newPin.trim())) {
+        setPinError("Security PIN must be 4 to 8 digits.");
+        return;
+      }
+      if (newPin.trim() !== confirmPin.trim()) {
+        setPinError("PIN entries do not match.");
+        return;
+      }
+      if (hasSecurityPin && !currentCred.trim()) {
+        setPinError("Enter your current PIN or account password to replace your PIN.");
+        return;
+      }
+      setIsSavingPin(true);
+      try {
+        await setSecurityPin(newPin.trim(), currentCred.trim() || undefined);
+        setIsPinDialogOpen(false);
+        setNewPin("");
+        setConfirmPin("");
+        setCurrentCred("");
+        toast({ title: "Security PIN Saved", description: "You can now unlock Messages and Earnings with your PIN." });
+      } catch (err: any) {
+        setPinError(err?.message || "Could not save Security PIN.");
+      } finally {
+        setIsSavingPin(false);
+      }
+    } else {
+      if (!currentCred.trim()) {
+        setPinError("Enter your current PIN or account password to confirm.");
+        return;
+      }
+      setIsSavingPin(true);
+      try {
+        await removeSecurityPin(currentCred.trim());
+        setIsPinDialogOpen(false);
+        setCurrentCred("");
+        toast({ title: "Security PIN Removed", description: "Account password remains available as fallback." });
+      } catch (err: any) {
+        setPinError(err?.message || "Could not remove Security PIN.");
+      } finally {
+        setIsSavingPin(false);
+      }
+    }
+  };
+
+  const handlePushToggle = async (val: boolean) => {
+    triggerHaptic(10);
+    setIsTogglingPush(true);
+    try {
+      if (val) {
+        await requestPushPermission();
+      }
+      setPushPreferenceEnabled(val);
+      const res = await authFetch('/api/user/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pushEnabled: val }),
+      });
+      if (!res.ok) throw new Error('Could not update notification preference.');
+      toast({
+        title: val ? "Push Alerts Enabled" : "Push Alerts Muted",
+        description: val
+          ? "Browser/device alerts are active when permission is granted."
+          : "Background push notifications are turned off.",
+      });
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Notification Update Failed",
+        description: err?.message || "Check browser notification permissions and try again.",
+      });
+    } finally {
+      setIsTogglingPush(false);
+    }
+  };
+
+  const openBlockedManager = async () => {
+    triggerHaptic(10);
+    setIsBlockedDialogOpen(true);
+    setIsLoadingBlocked(true);
+    try {
+      const res = await authFetch('/api/user/block', { cache: 'no-store' });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(data.blocked)) {
+        setBlockedList(data.blocked);
+      } else {
+        setBlockedList(
+          blockedUsernames.map((uname) => ({
+            username: uname,
+            name: uname,
+            avatar: '',
+          }))
+        );
+      }
+    } catch {
+      setBlockedList(
+        blockedUsernames.map((uname) => ({
+          username: uname,
+          name: uname,
+          avatar: '',
+        }))
+      );
+    } finally {
+      setIsLoadingBlocked(false);
     }
   };
 
@@ -357,6 +583,90 @@ export default function SettingsPage() {
               </div>
               <Slider value={[settings.fontScale]} min={0.8} max={1.4} step={0.05} onValueChange={(val) => handleUpdate({ fontScale: val[0] })} />
             </div>
+
+            <div className="h-px bg-border -mx-6" />
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <Smartphone className="h-4 w-4 text-primary" />
+                    <p className="font-bold text-sm">Haptic Feedback</p>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground uppercase font-black">Vibration intensity on taps</p>
+                </div>
+                <Badge className="bg-primary/5 text-primary border-primary/10 text-[10px] font-black">
+                  {settings.hapticIntensity === 0 ? "Off" : `${settings.hapticIntensity}%`}
+                </Badge>
+              </div>
+              <Slider
+                value={[settings.hapticIntensity]}
+                min={0}
+                max={100}
+                step={10}
+                onValueChange={(val) => {
+                  updateSettings({ hapticIntensity: val[0] });
+                  if (val[0] > 0 && typeof navigator !== 'undefined' && navigator.vibrate) {
+                    navigator.vibrate(Math.max(8, Math.round(val[0] * 0.4)));
+                  }
+                }}
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* NOTIFICATIONS & ALERTS */}
+        <section className="space-y-4">
+          <h3 className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground ml-2">Notifications</h3>
+          <div className="bg-white dark:bg-card rounded-[2.5rem] border border-border shadow-xl shadow-black/5 p-6 space-y-6">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <BellRing className="h-4 w-4 text-primary" />
+                  <p className="font-bold text-sm">Push Notifications</p>
+                </div>
+                <p className="text-[10px] text-muted-foreground uppercase font-black">
+                  {hasPushPermission && pushPreferenceEnabled ? "Active on this device" : "Enable background alerts"}
+                </p>
+              </div>
+              <Switch
+                checked={pushPreferenceEnabled && hasPushPermission}
+                onCheckedChange={handlePushToggle}
+                disabled={isTogglingPush}
+              />
+            </div>
+
+            <div className="h-px bg-border -mx-6" />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4 text-primary" />
+                  <p className="font-bold text-sm">Message Alerts</p>
+                </div>
+                <p className="text-[10px] text-muted-foreground uppercase font-black">Play chimes for incoming DMs</p>
+              </div>
+              <Switch
+                checked={settings.pushMessageAlerts}
+                onCheckedChange={(val) => handleUpdate({ pushMessageAlerts: val })}
+              />
+            </div>
+
+            <div className="h-px bg-border -mx-6" />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <Heart className="h-4 w-4 text-primary" />
+                  <p className="font-bold text-sm">Social Activity Alerts</p>
+                </div>
+                <p className="text-[10px] text-muted-foreground uppercase font-black">Chimes for likes, comments &amp; follows</p>
+              </div>
+              <Switch
+                checked={settings.pushSocialAlerts}
+                onCheckedChange={(val) => handleUpdate({ pushSocialAlerts: val })}
+              />
+            </div>
           </div>
         </section>
 
@@ -427,6 +737,19 @@ export default function SettingsPage() {
               </div>
             </div>
 
+            <div className="h-px bg-border -mx-6" />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <Languages className="h-4 w-4 text-primary" />
+                  <p className="font-bold text-sm">Auto-Translate Posts</p>
+                </div>
+                <p className="text-[10px] text-muted-foreground uppercase font-black">Offer one-tap translation on foreign posts</p>
+              </div>
+              <Switch checked={settings.autoTranslate} onCheckedChange={(val) => handleUpdate({ autoTranslate: val })} />
+            </div>
+
           </div>
         </section>
 
@@ -474,15 +797,16 @@ export default function SettingsPage() {
             <div className="grid grid-cols-1 gap-3">
               <Button 
                 variant="outline" 
+                disabled={isArchiving}
                 className="h-16 rounded-2xl border-primary/10 bg-white dark:bg-card justify-start gap-4 px-6 group hover:bg-primary/5 transition-all"
-                onClick={() => archiveIdentityNode()}
+                onClick={handleArchiveExport}
               >
                 <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
-                  <Archive className="h-5 w-5" />
+                  {isArchiving ? <Loader2 className="h-5 w-5 animate-spin" /> : <Archive className="h-5 w-5" />}
                 </div>
                 <div className="flex flex-col items-start">
-                  <span className="font-bold text-sm">{t('settings_archive')}</span>
-                  <span className="text-[9px] font-black uppercase text-muted-foreground tracking-widest">Download full data pulse</span>
+                  <span className="font-bold text-sm">{isArchiving ? "Preparing Archive..." : t('settings_archive')}</span>
+                  <span className="text-[9px] font-black uppercase text-muted-foreground tracking-widest">Download full account data JSON</span>
                 </div>
                 <ArrowDownToLine className="ml-auto h-4 w-4 text-muted-foreground/40" />
               </Button>
@@ -562,12 +886,23 @@ export default function SettingsPage() {
                 <Switch checked={settings.isBiometricActive} onCheckedChange={handleBiometricToggle} disabled={isEnrollingBiometric} />
               </div>
 
-              {/* Expanded area selector — shown only when security is ON */}
+              {/* Expanded area selector & credentials — shown when security is ON */}
               {settings.isBiometricActive && (
                 <div className="mt-3 mx-2 bg-secondary/30 rounded-2xl overflow-hidden animate-in slide-in-from-top-2 duration-300">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground px-4 pt-3 pb-2">
-                    Protected Areas — tap to toggle
-                  </p>
+                  <div className="flex items-center justify-between gap-2 px-4 pt-3 pb-2 flex-wrap">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
+                      Protected Areas — tap to toggle
+                    </p>
+                    <div className="flex items-center gap-1.5">
+                      {settings.isHardwareEnrolled && (
+                        <Badge className="bg-green-500/15 text-green-600 border-none text-[8px] font-black uppercase">Biometric</Badge>
+                      )}
+                      {hasSecurityPin && (
+                        <Badge className="bg-primary/15 text-primary border-none text-[8px] font-black uppercase">PIN Set</Badge>
+                      )}
+                      <Badge className="bg-secondary text-muted-foreground border-none text-[8px] font-black uppercase">Password Backup</Badge>
+                    </div>
+                  </div>
                   {([
                     { key: 'messages', label: 'Messages',       icon: '💬', desc: 'Direct messages & chats' },
                     { key: 'earnings', label: 'Earnings',        icon: '💰', desc: 'Wallet & earnings portal' },
@@ -603,9 +938,60 @@ export default function SettingsPage() {
                       </button>
                     );
                   })}
-                  <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground px-4 py-3 border-t border-border/40 flex items-center gap-1.5">
-                    <ShieldCheck className="h-3 w-3 text-green-500" />
-                    Uses your device lock — fingerprint, face, PIN, pattern or password
+
+                  <div className="flex flex-wrap gap-2 px-4 py-3 border-t border-border/40 bg-secondary/20">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 rounded-xl text-[10px] font-black uppercase tracking-wider gap-1.5"
+                      onClick={() => {
+                        triggerHaptic(10);
+                        setPinMode('set');
+                        setNewPin("");
+                        setConfirmPin("");
+                        setCurrentCred("");
+                        setPinError(null);
+                        setIsPinDialogOpen(true);
+                      }}
+                    >
+                      <KeyRound className="h-3 w-3" />
+                      {hasSecurityPin ? "Change Security PIN" : "Set Security PIN"}
+                    </Button>
+                    {hasSecurityPin && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 rounded-xl text-[10px] font-black uppercase tracking-wider text-destructive hover:bg-destructive/10 gap-1"
+                        onClick={() => {
+                          triggerHaptic(10);
+                          setPinMode('remove');
+                          setCurrentCred("");
+                          setPinError(null);
+                          setIsPinDialogOpen(true);
+                        }}
+                      >
+                        <Trash2 className="h-3 w-3" /> Remove PIN
+                      </Button>
+                    )}
+                    {!settings.isHardwareEnrolled && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={isEnrollingBiometric}
+                        className="h-8 rounded-xl text-[10px] font-black uppercase tracking-wider gap-1.5"
+                        onClick={handleReEnrollBiometrics}
+                      >
+                        <Fingerprint className="h-3 w-3" /> Register Biometric
+                      </Button>
+                    )}
+                  </div>
+
+                  <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground px-4 py-2.5 border-t border-border/40 flex items-center gap-1.5">
+                    <ShieldCheck className="h-3 w-3 text-green-500 shrink-0" />
+                    Unlocks with fingerprint, face ID, Security PIN, or your account password
                   </p>
                 </div>
               )}
@@ -639,7 +1025,7 @@ export default function SettingsPage() {
               </div>
               <div className="grid grid-cols-2 gap-2 bg-secondary/40 p-1.5 rounded-2xl">
                 <button
-                  onClick={() => handleUpdate({ activeSoundSet: 'cyberpunk' })}
+                  onClick={() => { handleUpdate({ activeSoundSet: 'cyberpunk' }); playNotificationSound('cyberpunk'); }}
                   className={cn(
                     "flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
                     settings.activeSoundSet === 'cyberpunk' ? "bg-white dark:bg-zinc-800 text-primary shadow-md" : "text-muted-foreground"
@@ -648,7 +1034,7 @@ export default function SettingsPage() {
                   <Zap className="h-3.5 w-3.5" /> Cyberpunk
                 </button>
                 <button
-                  onClick={() => handleUpdate({ activeSoundSet: 'lofi' })}
+                  onClick={() => { handleUpdate({ activeSoundSet: 'lofi' }); playNotificationSound('lofi'); }}
                   className={cn(
                     "flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
                     settings.activeSoundSet === 'lofi' ? "bg-white dark:bg-zinc-800 text-primary shadow-md" : "text-muted-foreground"
@@ -719,8 +1105,98 @@ export default function SettingsPage() {
 
             <div className="h-px bg-border -mx-6" />
 
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <Lock className="h-4 w-4 text-primary" />
+                  <p className="font-bold text-sm">Private Account</p>
+                </div>
+                <p className="text-[10px] text-muted-foreground uppercase font-black">Limit full profile updates to approved followers</p>
+              </div>
+              <Switch checked={settings.isPrivateAccount} onCheckedChange={(val) => handleUpdate({ isPrivateAccount: val })} />
+            </div>
+
+            <div className="h-px bg-border -mx-6" />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="h-4 w-4 text-primary" />
+                  <p className="font-bold text-sm">Sensitive Content Filter</p>
+                </div>
+                <p className="text-[10px] text-muted-foreground uppercase font-black">Blur sensitive posts until you tap to view</p>
+              </div>
+              <Switch checked={settings.isSensitivityFilterActive} onCheckedChange={(val) => handleUpdate({ isSensitivityFilterActive: val })} />
+            </div>
+
+            <div className="h-px bg-border -mx-6" />
+
+            <div className="flex flex-col gap-3">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <UserCheck className="h-4 w-4 text-primary" />
+                  <p className="font-bold text-sm">Tagging Privacy</p>
+                </div>
+                <p className="text-[10px] text-muted-foreground uppercase font-black">Who can tag you in posts &amp; stories</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 bg-secondary/40 p-1.5 rounded-2xl">
+                <button
+                  onClick={() => handleUpdate({ taggingPrivacy: 'everyone' })}
+                  className={cn(
+                    "flex items-center justify-center px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                    settings.taggingPrivacy === 'everyone' ? "bg-white dark:bg-zinc-800 text-primary shadow-md" : "text-muted-foreground"
+                  )}
+                >
+                  Everyone
+                </button>
+                <button
+                  onClick={() => handleUpdate({ taggingPrivacy: 'friends' })}
+                  className={cn(
+                    "flex items-center justify-center px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                    settings.taggingPrivacy === 'friends' ? "bg-white dark:bg-zinc-800 text-primary shadow-md" : "text-muted-foreground"
+                  )}
+                >
+                  Friends Only
+                </button>
+              </div>
+            </div>
+
+            <div className="h-px bg-border -mx-6" />
+
+            <div className="flex flex-col gap-3">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <Users2 className="h-4 w-4 text-primary" />
+                  <p className="font-bold text-sm">Discovery Visibility</p>
+                </div>
+                <p className="text-[10px] text-muted-foreground uppercase font-black">Who sees you in creator suggestions</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 bg-secondary/40 p-1.5 rounded-2xl">
+                <button
+                  onClick={() => handleUpdate({ discoveryVisibility: 'everyone' })}
+                  className={cn(
+                    "flex items-center justify-center px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                    settings.discoveryVisibility === 'everyone' ? "bg-white dark:bg-zinc-800 text-primary shadow-md" : "text-muted-foreground"
+                  )}
+                >
+                  Everyone
+                </button>
+                <button
+                  onClick={() => handleUpdate({ discoveryVisibility: 'mutual' })}
+                  className={cn(
+                    "flex items-center justify-center px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                    settings.discoveryVisibility === 'mutual' ? "bg-white dark:bg-zinc-800 text-primary shadow-md" : "text-muted-foreground"
+                  )}
+                >
+                  Mutuals Only
+                </button>
+              </div>
+            </div>
+
+            <div className="h-px bg-border -mx-6" />
+
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-2">
                     <Activity className="h-4 w-4 text-primary" />
@@ -728,43 +1204,78 @@ export default function SettingsPage() {
                   </div>
                   <p className="text-[10px] text-muted-foreground uppercase font-black">Trusted node for vault management</p>
                 </div>
-                <Dialog open={isLegacySelectorOpen} onOpenChange={setIsLegacySelectorOpen}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline" className="h-9 px-4 rounded-xl border-primary/10 text-[9px] font-black uppercase tracking-widest gap-2">
-                      {selectedLegacyNode ? `@${selectedLegacyNode.username}` : "Assign Node"}
-                      <ChevronRight className="h-3 w-3" />
+                <div className="flex items-center gap-1.5">
+                  {settings.legacyContact && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 rounded-xl text-destructive hover:bg-destructive/10"
+                      onClick={() => handleUpdate({ legacyContact: null })}
+                      title="Remove Legacy Contact"
+                    >
+                      <X className="h-4 w-4" />
                     </Button>
-                  </DialogTrigger>
-                  <DialogContent className="rounded-t-[2.5rem] p-0 overflow-hidden border-primary/10 bg-white/95 dark:bg-[#050505]/95 backdrop-blur-3xl h-[60vh] flex flex-col">
-                    <DialogHeader className="p-6 bg-primary/5 border-b border-primary/10">
-                      <DialogTitle className="text-xl font-black italic uppercase tracking-widest">Select Legacy Node</DialogTitle>
-                    </DialogHeader>
-                    <div className="p-4 space-y-4 shrink-0">
-                      <div className="relative group">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary" />
-                        <Input placeholder="Query established friends..." className="pl-10 h-12 bg-secondary/30 border-none rounded-2xl" value={legacySearch} onChange={(e) => setLegacySearch(e.target.value)} />
+                  )}
+                  <Dialog open={isLegacySelectorOpen} onOpenChange={setIsLegacySelectorOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" className="h-9 px-4 rounded-xl border-primary/10 text-[9px] font-black uppercase tracking-widest gap-2">
+                        {selectedLegacyNode ? `@${selectedLegacyNode.username}` : settings.legacyContact ? `@${settings.legacyContact}` : "Assign Node"}
+                        <ChevronRight className="h-3 w-3" />
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="rounded-t-[2.5rem] p-0 overflow-hidden border-primary/10 bg-white/95 dark:bg-[#050505]/95 backdrop-blur-3xl h-[60vh] flex flex-col">
+                      <DialogHeader className="p-6 bg-primary/5 border-b border-primary/10">
+                        <DialogTitle className="text-xl font-black italic uppercase tracking-widest">Select Legacy Node</DialogTitle>
+                      </DialogHeader>
+                      <div className="p-4 space-y-4 shrink-0">
+                        <div className="relative group">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary" />
+                          <Input placeholder="Query established friends..." className="pl-10 h-12 bg-secondary/30 border-none rounded-2xl" value={legacySearch} onChange={(e) => setLegacySearch(e.target.value)} />
+                        </div>
                       </div>
-                    </div>
-                    <ScrollArea className="flex-1 px-4">
-                      <div className="space-y-2 pb-10">
-                        {filteredConnections.length > 0 ? filteredConnections.map((c) => (
-                          <button key={c.username} onClick={() => { handleUpdate({ legacyContact: c.username }); setIsLegacySelectorOpen(false); }} className={cn("w-full flex items-center justify-between p-3 rounded-2xl transition-all border", settings.legacyContact === c.username ? "bg-primary/10 border-primary/20" : "bg-transparent border-transparent hover:bg-secondary/40")}>
-                            <div className="flex items-center gap-3">
-                              <Avatar className="h-10 w-10 border border-primary/10"><AvatarImage src={c.avatar} /></Avatar>
-                              <div className="text-left">
-                                <p className="font-bold text-sm leading-none">{c.name}</p>
-                                <p className="text-[10px] text-muted-foreground uppercase font-black mt-1">@{c.username}</p>
+                      <ScrollArea className="flex-1 px-4">
+                        <div className="space-y-2 pb-10">
+                          {filteredConnections.length > 0 ? filteredConnections.map((c) => (
+                            <button key={c.username} onClick={() => { handleUpdate({ legacyContact: c.username }); setIsLegacySelectorOpen(false); }} className={cn("w-full flex items-center justify-between p-3 rounded-2xl transition-all border", settings.legacyContact === c.username ? "bg-primary/10 border-primary/20" : "bg-transparent border-transparent hover:bg-secondary/40")}>
+                              <div className="flex items-center gap-3">
+                                <Avatar className="h-10 w-10 border border-primary/10"><AvatarImage src={c.avatar} /></Avatar>
+                                <div className="text-left">
+                                  <p className="font-bold text-sm leading-none">{c.name}</p>
+                                  <p className="text-[10px] text-muted-foreground uppercase font-black mt-1">@{c.username}</p>
+                                </div>
                               </div>
-                            </div>
-                            {settings.legacyContact === c.username && <CheckCircle2 className="h-5 w-5 text-primary" />}
-                          </button>
-                        )) : <div className="py-20 text-center opacity-40 italic text-xs uppercase">No mutual nodes found</div>}
-                      </div>
-                    </ScrollArea>
-                  </DialogContent>
-                </Dialog>
+                              {settings.legacyContact === c.username && <CheckCircle2 className="h-5 w-5 text-primary" />}
+                            </button>
+                          )) : <div className="py-20 text-center opacity-40 italic text-xs uppercase">No mutual nodes found</div>}
+                        </div>
+                      </ScrollArea>
+                    </DialogContent>
+                  </Dialog>
+                </div>
               </div>
             </div>
+
+            <div className="h-px bg-border -mx-6" />
+
+            <button
+              type="button"
+              onClick={openBlockedManager}
+              className="w-full flex items-center justify-between p-2 -mx-2 rounded-2xl hover:bg-secondary/40 transition-all group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-destructive/10 flex items-center justify-center text-destructive group-hover:scale-105 transition-transform">
+                  <Ban className="h-5 w-5" />
+                </div>
+                <div className="text-left space-y-0.5">
+                  <p className="font-bold text-sm">Blocked &amp; Muted Users</p>
+                  <p className="text-[10px] text-muted-foreground uppercase font-black">
+                    {blockedUsernames.length} blocked · {mutedUserNames.length} muted
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="h-5 w-5 text-muted-foreground/40" />
+            </button>
           </div>
         </section>
 
@@ -780,6 +1291,185 @@ export default function SettingsPage() {
           <p className="text-center text-[9px] font-black text-muted-foreground uppercase tracking-[0.3em] mt-6">ViMore Node v1.5.0-HighVelocity</p>
         </section>
       </main>
+
+      {/* Security PIN Setup / Removal Dialog */}
+      <Dialog open={isPinDialogOpen} onOpenChange={(open) => { if (!isSavingPin) setIsPinDialogOpen(open); }}>
+        <DialogContent className="rounded-[2.5rem] p-0 overflow-hidden border-primary/10 bg-white/95 dark:bg-[#050505]/95 backdrop-blur-3xl sm:max-w-[400px]">
+          <DialogHeader className="p-6 bg-primary/5 border-b border-primary/10">
+            <DialogTitle className="font-black italic uppercase tracking-widest text-xl text-primary">
+              {pinMode === 'set' ? (hasSecurityPin ? "Change Security PIN" : "Set Security PIN") : "Remove Security PIN"}
+            </DialogTitle>
+            <DialogDescription className="text-xs font-medium text-muted-foreground pt-1">
+              {pinMode === 'set'
+                ? "Choose a 4–8 digit PIN to unlock Messages, Earnings, and Credit Hub on any device."
+                : "Enter your current PIN or account password to remove your Security PIN."}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handlePinSubmit}>
+            <div className="p-6 space-y-4">
+              {(hasSecurityPin || pinMode === 'remove') && (
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground ml-1">
+                    Current PIN or Account Password
+                  </Label>
+                  <Input
+                    type="password"
+                    value={currentCred}
+                    onChange={(e) => setCurrentCred(e.target.value)}
+                    placeholder="Enter current PIN or password"
+                    className="h-12 bg-secondary/30 border-none rounded-xl"
+                    disabled={isSavingPin}
+                  />
+                </div>
+              )}
+
+              {pinMode === 'set' && (
+                <>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground ml-1">
+                      New 4–8 Digit PIN
+                    </Label>
+                    <Input
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={8}
+                      value={newPin}
+                      onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
+                      placeholder="••••"
+                      className="h-12 bg-secondary/30 border-none rounded-xl tracking-[0.4em] text-center font-bold"
+                      disabled={isSavingPin}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground ml-1">
+                      Confirm PIN
+                    </Label>
+                    <Input
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={8}
+                      value={confirmPin}
+                      onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ''))}
+                      placeholder="••••"
+                      className="h-12 bg-secondary/30 border-none rounded-xl tracking-[0.4em] text-center font-bold"
+                      disabled={isSavingPin}
+                    />
+                  </div>
+                </>
+              )}
+
+              {pinError && (
+                <p className="text-xs font-bold text-destructive bg-destructive/10 px-3 py-2 rounded-xl">
+                  {pinError}
+                </p>
+              )}
+            </div>
+            <DialogFooter className="p-6 pt-0 gap-2">
+              <Button type="button" variant="ghost" className="rounded-xl h-11 font-bold" onClick={() => setIsPinDialogOpen(false)} disabled={isSavingPin}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant={pinMode === 'remove' ? "destructive" : "default"}
+                disabled={isSavingPin}
+                className="flex-1 rounded-xl h-11 font-black italic uppercase tracking-widest text-xs"
+              >
+                {isSavingPin ? <Loader2 className="h-4 w-4 animate-spin" /> : pinMode === 'set' ? "Save PIN" : "Remove PIN"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Blocked & Muted Users Manager Dialog */}
+      <Dialog open={isBlockedDialogOpen} onOpenChange={setIsBlockedDialogOpen}>
+        <DialogContent className="rounded-[2.5rem] p-0 overflow-hidden border-primary/10 bg-white/95 dark:bg-[#050505]/95 backdrop-blur-3xl sm:max-w-[440px] max-h-[75vh] flex flex-col">
+          <DialogHeader className="p-6 bg-primary/5 border-b border-primary/10">
+            <DialogTitle className="font-black italic uppercase tracking-widest text-xl flex items-center gap-2">
+              <Ban className="h-5 w-5 text-destructive" /> Blocked &amp; Muted Users
+            </DialogTitle>
+            <DialogDescription className="text-xs font-medium text-muted-foreground">
+              Manage accounts you have blocked or muted across ViMore.
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="flex-1 p-6">
+            <div className="space-y-6">
+              <div className="space-y-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  Blocked Users ({blockedList.length || blockedUsernames.length})
+                </p>
+                {isLoadingBlocked ? (
+                  <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+                ) : blockedList.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic py-2">No blocked users.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {blockedList.map((u) => (
+                      <div key={u.userId || u.username} className="flex items-center justify-between p-3 rounded-2xl bg-secondary/30">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <Avatar className="h-9 w-9">
+                            <AvatarImage src={u.avatar} />
+                            <AvatarFallback>{(u.name || u.username || 'U')[0]}</AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0">
+                            <p className="font-bold text-sm truncate">{u.name || u.username}</p>
+                            <p className="text-[10px] text-muted-foreground font-black uppercase truncate">@{u.username}</p>
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="rounded-xl h-8 text-[10px] font-black uppercase"
+                          onClick={async () => {
+                            await unblockUser(u.username);
+                            setBlockedList(prev => prev.filter(item => item.username !== u.username));
+                            toast({ title: "Unblocked", description: `@${u.username} was unblocked.` });
+                          }}
+                        >
+                          Unblock
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="h-px bg-border" />
+
+              <div className="space-y-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  Muted Users ({mutedUserNames.length})
+                </p>
+                {mutedUserNames.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic py-2">No muted users.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {mutedUserNames.map((uname) => (
+                      <div key={uname} className="flex items-center justify-between p-3 rounded-2xl bg-secondary/30">
+                        <div className="flex items-center gap-2.5">
+                          <VolumeX className="h-4 w-4 text-muted-foreground" />
+                          <span className="font-bold text-sm">@{uname}</span>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="rounded-xl h-8 text-[10px] font-black uppercase"
+                          onClick={() => {
+                            toggleMuteUser(uname);
+                            toast({ title: "Unmuted", description: `@${uname} was unmuted.` });
+                          }}
+                        >
+                          Unmute
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

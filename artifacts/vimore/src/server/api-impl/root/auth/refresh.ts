@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { extractRequestSessionToken, getSessionUser } from '@/lib/session';
-import { APPWRITE_PROJECT_ID } from '@/lib/server-helpers';
+import { extractRequestSessionToken } from '@/lib/session';
+import { APPWRITE_PROJECT_ID, getRawAuthenticatedProfile, isAccountDeleted } from '@/lib/server-helpers';
 
 export async function POST(req: NextRequest) {
   const token = extractRequestSessionToken(req);
@@ -8,14 +8,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const user = await getSessionUser(req);
-  if (!user) {
+  const session = await getRawAuthenticatedProfile(req);
+  if (!session) {
     return NextResponse.json({ error: 'Session expired' }, { status: 401 });
+  }
+
+  if (isAccountDeleted(session.profileDoc)) {
+    const res = NextResponse.json({ error: 'Account deleted' }, { status: 403 });
+    res.cookies.set(`a_session_${APPWRITE_PROJECT_ID}`, '', {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 0,
+    });
+    return res;
   }
 
   const response = NextResponse.json({
     ok: true,
-    userId: user.$id,
+    userId: session.authUser.$id,
     secret: token,
   });
 

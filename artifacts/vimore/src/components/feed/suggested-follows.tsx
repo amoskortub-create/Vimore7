@@ -16,7 +16,7 @@ import { getAdaptivePreview } from "@/lib/adaptive-media";
 import { databases, Query, COL, DATABASE_ID, BUCKET, getFileUrl, avatarFallback } from "@/lib/appwrite";
 
 export function SuggestedFollows() {
-  const { connections, posts, isFriend, isRequestSent, isRequestReceived, sendFriendRequest, cancelFriendRequest, currentUser, settings } = usePosts();
+  const { connections, posts, isFriend, isRequestSent, isRequestReceived, sendFriendRequest, cancelFriendRequest, currentUser, settings, blockedUsernames, mutedUserNames } = usePosts();
   const { triggerHaptic } = useMusic();
   const { t } = useTranslation();
   const { tier } = useNetwork();
@@ -27,6 +27,9 @@ export function SuggestedFollows() {
 
   const suggestions = useMemo(() => {
     if (!currentUser) return [];
+    const blockedSet = new Set(blockedUsernames || []);
+    const mutedSet = new Set(mutedUserNames || []);
+    const isHiddenUser = (u: any) => !u?.username || blockedSet.has(u.username) || mutedSet.has(u.username) || mutedSet.has(u.name);
 
     // Boosted post authors: active boost, not already following, not self
     const now = Date.now();
@@ -37,6 +40,7 @@ export function SuggestedFollows() {
         post.isBoosted &&
         post.boostExpiry &&
         post.boostExpiry > now &&
+        !isHiddenUser(post.user) &&
         !isFriend(post.user.username) &&
         !isRequestReceived(post.user.username) &&
         post.user.username !== currentUser?.username &&
@@ -50,6 +54,7 @@ export function SuggestedFollows() {
     // Keep sent requests visible so the same card can switch to its Sent state.
     const connectionSuggestions = connections
       .filter(c =>
+        !isHiddenUser(c) &&
         !isFriend(c.username) &&
         !isRequestReceived(c.username) &&
         c.username !== currentUser?.username
@@ -65,13 +70,16 @@ export function SuggestedFollows() {
     const rankUser = (u: any) => (u.isVerified ? 2 : u.isBoosted ? 1 : 0);
     combined.sort((a, b) => rankUser(b) - rankUser(a));
 
-    // If we have enough, return immediately
-    if (combined.length >= 3) return combined.slice(0, 10);
+    // If user restricts discoveryVisibility to 'mutual', do not inject global strangers
+    if (settings.discoveryVisibility === 'mutual' || combined.length >= 3) {
+      return combined.slice(0, 10);
+    }
 
     // Otherwise fill with fallback users
     const existingAll = new Set([...combined.map(u => u.username), currentUser.username]);
     const extras = fallbackUsers
       .filter(u =>
+        !isHiddenUser(u) &&
         !existingAll.has(u.username) &&
         !isFriend(u.username) &&
         !isRequestReceived(u.username)
@@ -81,7 +89,7 @@ export function SuggestedFollows() {
     const all = [...combined, ...extras];
     all.sort((a, b) => rankUser(b) - rankUser(a));
     return all.slice(0, 10);
-  }, [connections, posts, isFriend, isRequestSent, isRequestReceived, currentUser, fallbackUsers]);
+  }, [connections, posts, isFriend, isRequestSent, isRequestReceived, currentUser, fallbackUsers, settings.discoveryVisibility, blockedUsernames, mutedUserNames]);
 
   useEffect(() => {
     const el = containerRef.current;

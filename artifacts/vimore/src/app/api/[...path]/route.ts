@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import * as AuthChangePassword from '@/server/api-impl/root/auth/change-password';
 import * as AuthLogin from '@/server/api-impl/root/auth/login';
 import * as AuthLogout from '@/server/api-impl/root/auth/logout';
 import * as AuthMe from '@/server/api-impl/root/auth/me';
@@ -8,6 +9,7 @@ import * as AuthRefresh from '@/server/api-impl/root/auth/refresh';
 import * as AuthResetPassword from '@/server/api-impl/root/auth/reset-password';
 import * as AuthLookupPhone from '@/server/api-impl/root/auth/lookup-phone';
 import * as AuthCreateProfile from '@/server/api-impl/root/auth/create-profile';
+import * as AccountDelete from '@/server/api-impl/root/account/delete';
 import * as AdvertiseSubmit from '@/server/api-impl/root/advertise/submit';
 import * as CronCleanup from '@/server/api-impl/root/cron/cleanup';
 import * as CronExpiryAlerts from '@/server/api-impl/root/cron/expiry-alerts';
@@ -53,7 +55,11 @@ import * as UploadReel from '@/server/api-impl/root/upload-reel';
 import * as UploadVoice from '@/server/api-impl/root/upload-voice';
 import * as StoriesCreate from '@/server/api-impl/root/stories/create';
 import * as UserActivity from '@/server/api-impl/root/user/activity';
+import * as UserBiometricPin from '@/server/api-impl/root/user/biometric-pin';
+import * as UserBlock from '@/server/api-impl/root/user/block';
+import * as UserExport from '@/server/api-impl/root/user/export';
 import * as UserProfile from '@/server/api-impl/root/user/profile';
+import * as UserSettings from '@/server/api-impl/root/user/settings';
 import * as Withdraw from '@/server/api-impl/root/withdraw';
 import * as WithdrawProcess from '@/server/api-impl/root/withdraw/process';
 import * as PostReaction from '@/server/api-impl/root/post-reaction';
@@ -72,6 +78,7 @@ export const maxDuration = 30;
 type Handler = Partial<Record<'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'OPTIONS', (...args: any[]) => Promise<Response> | Response>>;
 
 const ROUTES: Record<string, Handler> = {
+  'auth/change-password': AuthChangePassword,
   'auth/login': AuthLogin,
   'auth/logout': AuthLogout,
   'auth/me': AuthMe,
@@ -80,6 +87,7 @@ const ROUTES: Record<string, Handler> = {
   'auth/reset-password': AuthResetPassword,
   'auth/lookup-phone': AuthLookupPhone,
   'auth/create-profile': AuthCreateProfile,
+  'account/delete': AccountDelete,
   'advertise/submit': AdvertiseSubmit,
   'cron/cleanup': CronCleanup,
   'cron/expiry-alerts': CronExpiryAlerts,
@@ -126,7 +134,11 @@ const ROUTES: Record<string, Handler> = {
   'upload/reel': UploadReel,
   'upload/voice': UploadVoice,
   'user/activity': UserActivity,
+  'user/biometric-pin': UserBiometricPin,
+  'user/block': UserBlock,
+  'user/export': UserExport,
   'user/profile': UserProfile,
+  'user/settings': UserSettings,
   'withdraw': Withdraw,
   'withdraw/process': WithdrawProcess,
   'post/reaction': PostReaction,

@@ -23,7 +23,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const isOnline = body.isOnline !== false;
+    let isGhostMode = false;
+    if (session?.profileDoc?.settings_json) {
+      try {
+        const parsed = JSON.parse(session.profileDoc.settings_json);
+        isGhostMode = Boolean(parsed?.isGhostMode);
+      } catch {}
+    }
+
+    const isOnline = isGhostMode ? false : body.isOnline !== false;
     const db = getAdminDatabases();
     await db.updateDocument(DATABASE_ID, COL.USERS, targetUserId, {
       is_online: isOnline,

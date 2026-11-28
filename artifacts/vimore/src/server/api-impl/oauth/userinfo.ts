@@ -43,6 +43,9 @@ async function handleUserInfo(req: NextRequest) {
     if (!profile) {
       return NextResponse.json({ error: 'user_not_found' }, { status: 404, headers: USERINFO_CORS_HEADERS });
     }
+    if (profile.is_deleted === true || String(profile.status || '').toLowerCase() === 'deleted') {
+      return NextResponse.json({ error: 'account_deleted' }, { status: 403, headers: USERINFO_CORS_HEADERS });
+    }
 
     const scopes = new Set(String(verified.scopes || '').split(' ').filter(Boolean));
     const origin = getBaseOrigin(req);

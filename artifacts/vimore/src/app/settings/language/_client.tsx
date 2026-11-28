@@ -1,7 +1,6 @@
 
 "use client";
 
-import { useState } from "react";
 import { ArrowLeft, Languages, Zap, Check, Sparkles, Globe, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -25,11 +24,10 @@ const LANGUAGES = [
 ];
 
 export default function LanguageHub() {
-  const { triggerHaptic, updateCurrentUser, currentUser, isLoading } = usePosts();
+  const { triggerHaptic, updateCurrentUser, currentUser, isLoading, settings, updateSettings } = usePosts();
   const { currentTrack, isExpanded } = useMusic();
   const { language, setLanguage, t } = useTranslation();
   const { toast } = useToast();
-  const [autoTranslate, setAutoTranslate] = useState(true);
 
   const isPlayerActive = currentTrack && !isExpanded;
 
@@ -37,15 +35,22 @@ export default function LanguageHub() {
     return <ProfileLoading />;
   }
 
-  const handleLanguageSelect = (langId: LanguageCode) => {
+  const handleLanguageSelect = async (langId: LanguageCode) => {
     triggerHaptic(10);
     setLanguage(langId);
-    updateCurrentUser({ language: langId });
-    
-    toast({ 
-      title: t('ui_linguistic_sync'), 
-      description: `Platform UI is now tuned to ${LANGUAGES.find(l => l.id === langId)?.name}.` 
-    });
+    try {
+      await updateCurrentUser({ language: langId });
+      toast({ 
+        title: t('ui_linguistic_sync'), 
+        description: `Platform UI is now tuned to ${LANGUAGES.find(l => l.id === langId)?.name}.` 
+      });
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Language Sync Failed",
+        description: err?.message || "Could not save your language preference.",
+      });
+    }
   };
 
   return (
@@ -91,7 +96,14 @@ export default function LanguageHub() {
               <p className="font-bold text-sm">{t('ui_auto_pulse')}</p>
               <p className="text-[10px] text-muted-foreground uppercase font-black">{t('ui_auto_pulse_desc')}</p>
             </div>
-            <Switch checked={autoTranslate} onCheckedChange={setAutoTranslate} className="data-[state=checked]:bg-primary" />
+            <Switch
+              checked={settings.autoTranslate}
+              onCheckedChange={(val) => {
+                triggerHaptic(10);
+                updateSettings({ autoTranslate: val });
+              }}
+              className="data-[state=checked]:bg-primary"
+            />
           </div>
         </section>
 

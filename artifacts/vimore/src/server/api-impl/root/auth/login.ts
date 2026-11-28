@@ -163,6 +163,31 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    try {
+      const db = getAdminDatabases();
+      const profileDoc = await db.getDocument(DATABASE_ID, COL.USERS, userId);
+      if (profileDoc?.is_deleted === true || String(profileDoc?.status || '').toLowerCase() === 'deleted') {
+        await fetch(`${APPWRITE_ENDPOINT}/account/sessions/current`, {
+          method: 'DELETE',
+          headers: {
+            'X-Appwrite-Project': APPWRITE_PROJECT_ID,
+            'X-Appwrite-Session': secret,
+          },
+          cache: 'no-store',
+        }).catch(() => {});
+        return NextResponse.json(
+          {
+            error: 'This account has been deleted. Your access was removed and all data is scheduled for permanent deletion after 90 days.',
+            code: 403,
+            type: 'account_deleted',
+          },
+          { status: 403 }
+        );
+      }
+    } catch {
+      // profile may not exist yet for incomplete signups; proceed
+    }
+
     const response = NextResponse.json({
       ok: true,
       secret,

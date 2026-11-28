@@ -8,6 +8,7 @@ import { firePush } from '@/lib/push-fire';
 import { authFetch } from '@/lib/auth-fetch';
 import { subscribeToPush } from '@/lib/push-notifications';
 import { safeJson } from '@/lib/utils';
+import { isWithinQuietHours, playNotificationSound } from '@/lib/notification-sound';
 
 export type SignalType = 'SOCIAL' | 'SONIC' | 'POST' | 'SYSTEM';
 export type PulseCategory = 'HOME' | 'FRIENDS' | 'MUSIC' | 'MESSAGES' | 'ADMIN';
@@ -135,17 +136,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   // Polling is intentionally removed to save mobile data.
 
   const triggerSound = useCallback(() => {
-    if (settings.isSilenceActive) {
-      const now = new Date();
-      const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-      const isSilenced = settings.silenceStart < settings.silenceEnd
-        ? (currentTime >= settings.silenceStart && currentTime <= settings.silenceEnd)
-        : (currentTime >= settings.silenceStart || currentTime <= settings.silenceEnd);
-      if (isSilenced) return;
-    }
-    const audio = new Audio(NOTIFICATION_SOUND);
-    audio.volume = 0.5;
-    audio.play().catch(() => {});
+    if (isWithinQuietHours(settings)) return;
+    playNotificationSound(settings.activeSoundSet);
   }, [settings]);
 
   const addSignal = useCallback((signal: Omit<NotificationNode, 'id' | 'time' | 'isRead'>) => {

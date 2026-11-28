@@ -46,7 +46,7 @@ import {
 } from "lucide-react";
 import { getAvatarUrl, BUCKET, getFileUrl } from "@/lib/appwrite";
 import { cn } from "@/lib/utils";
-import { playNotificationSound } from "@/lib/notification-sound";
+import { playNotificationSound, isWithinQuietHours } from "@/lib/notification-sound";
 import { Connection, Cluster, usePosts } from "@/context/PostContext";
 import { useNetwork } from "@/context/NetworkContext";
 import { saveChatMessages, loadChatMessages } from "@/lib/offline-cache";
@@ -236,12 +236,12 @@ export function ChatWindow({ contact, onBack }: ChatWindowProps) {
     const count = messages.length;
     if (count > prevMsgCountRef.current && count > 0) {
       const last = messages[count - 1];
-      if (last && last.sender !== 'me' && last.sender !== currentUser?.username && !settings.isSilenceActive) {
-        playNotificationSound();
+      if (last && last.sender !== 'me' && last.sender !== currentUser?.username && !isWithinQuietHours(settings)) {
+        playNotificationSound(settings.activeSoundSet);
       }
     }
     prevMsgCountRef.current = count;
-  }, [messages, currentUser?.username, settings.isSilenceActive]);
+  }, [messages, currentUser?.username, settings]);
 
   // ── Real-time typing indicator subscription ───────────────────────────────
   useEffect(() => {
@@ -334,7 +334,7 @@ export function ChatWindow({ contact, onBack }: ChatWindowProps) {
   // ── Typing sound (plays once when the other person starts typing) ────────
   const prevIsOtherTypingRef = useRef(false);
   const playTypingSound = useCallback(() => {
-    if (settings.isSilenceActive) return;
+    if (isWithinQuietHours(settings)) return;
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioCtx) return;
@@ -355,7 +355,7 @@ export function ChatWindow({ contact, onBack }: ChatWindowProps) {
       });
       setTimeout(() => ctx.close(), 600);
     } catch { /* audio not available */ }
-  }, [settings.isSilenceActive]);
+  }, [settings]);
 
   useEffect(() => {
     // Only fire the sound on the rising edge (false → true)

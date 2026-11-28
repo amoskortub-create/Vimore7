@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
+import { DATABASE_ID, getAdminDatabases, getAdminUsers } from '@/lib/appwrite-server';
 import { COL } from '@/lib/appwrite';
 import { getAuthenticatedProfile } from '@/lib/server-helpers';
 
 const ALLOWED_FIELDS = new Set([
   'name',
+  'display_name',
   'bio',
+  'category',
   'avatar',
   'avatar_id',
   'cover',
@@ -39,8 +41,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    if (typeof updates.name === 'string') {
+      const cleanName = updates.name.trim();
+      if (!cleanName || cleanName.length > 120) {
+        return NextResponse.json({ error: 'Name must be between 1 and 120 characters.' }, { status: 400 });
+      }
+      updates.name = cleanName;
+      updates.display_name = cleanName;
+    }
+
+    if (typeof updates.phone === 'string') {
+      updates.phone = updates.phone.replace(/[\s\-().]/g, '').slice(0, 32);
+    }
+
     if (Object.keys(updates).length === 0) {
-      return NextResponse.json({ ok: true, profileDoc: session.profileDoc });
+      const { biometric_pin_hash: _pin, security_answer: _sa, ...safeDoc } = session.profileDoc;
+      return NextResponse.json({ ok: true, profileDoc: safeDoc });
     }
 
     const db = getAdminDatabases();
@@ -51,7 +67,12 @@ export async function POST(req: NextRequest) {
       updates
     );
 
-    return NextResponse.json({ ok: true, profileDoc: updated });
+    if (updates.name) {
+      getAdminUsers().updateName(session.authUser.$id, updates.name).catch(() => {});
+    }
+
+    const { biometric_pin_hash: _pin, security_answer: _sa, ...safeUpdated } = updated as any;
+    return NextResponse.json({ ok: true, profileDoc: safeUpdated });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || 'Profile update failed' }, { status: 500 });
   }

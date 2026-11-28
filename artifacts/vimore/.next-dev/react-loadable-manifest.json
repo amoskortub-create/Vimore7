@@ -1,6 +1,10 @@
 {
-  "components/feed/create-story-modal.tsx -> @/lib/upload": {
-    "id": "components/feed/create-story-modal.tsx -> @/lib/upload",
+  "components/chat/chat-window.tsx -> @/lib/appwrite": {
+    "id": "components/chat/chat-window.tsx -> @/lib/appwrite",
+    "files": []
+  },
+  "components/chat/chat-window.tsx -> @/lib/upload": {
+    "id": "components/chat/chat-window.tsx -> @/lib/upload",
     "files": []
   },
   "components/layout/deferred-global-ui.tsx -> @/components/ad/ad-portal": {

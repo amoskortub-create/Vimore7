@@ -21,7 +21,49 @@ export function extractSessionCookie(setCookieHeader: string | null, projectId =
   return match ? decodeURIComponent(match[1]) : '';
 }
 
-export async function getAuthenticatedProfile(req: NextRequest | Request): Promise<{
+export function isAccountDeleted(profileDoc: any): boolean {
+  if (!profileDoc) return false;
+  return Boolean(
+    profileDoc.is_deleted === true ||
+    String(profileDoc.status || '').toLowerCase() === 'deleted'
+  );
+}
+
+export async function verifyUserPassword(email: string, password: string): Promise<boolean> {
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  if (!cleanEmail || !password) return false;
+  try {
+    const res = await fetch(`${APPWRITE_ENDPOINT}/account/sessions/email`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Appwrite-Project': APPWRITE_PROJECT_ID,
+      },
+      body: JSON.stringify({ email: cleanEmail, password }),
+      cache: 'no-store',
+    });
+    if (!res.ok) return false;
+    const data = await res.json().catch(() => ({}));
+    const cookieSecret = extractSessionCookie(res.headers.get('set-cookie'));
+    const tempSecret = cookieSecret || String(data?.secret || '');
+    if (tempSecret) {
+      // Clean up the temporary verification session immediately
+      fetch(`${APPWRITE_ENDPOINT}/account/sessions/current`, {
+        method: 'DELETE',
+        headers: {
+          'X-Appwrite-Project': APPWRITE_PROJECT_ID,
+          'X-Appwrite-Session': tempSecret,
+        },
+        cache: 'no-store',
+      }).catch(() => {});
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function getRawAuthenticatedProfile(req: NextRequest | Request): Promise<{
   authUser: SessionUser;
   profileDoc: any;
 } | null> {
@@ -48,6 +90,16 @@ export async function getAuthenticatedProfile(req: NextRequest | Request): Promi
   } catch {
     return { authUser, profileDoc: null };
   }
+}
+
+export async function getAuthenticatedProfile(req: NextRequest | Request): Promise<{
+  authUser: SessionUser;
+  profileDoc: any;
+} | null> {
+  const session = await getRawAuthenticatedProfile(req);
+  if (!session) return null;
+  if (isAccountDeleted(session.profileDoc)) return null;
+  return session;
 }
 
 export async function requireAdminUser(

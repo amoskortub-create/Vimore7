@@ -37,6 +37,7 @@ import {
   Check,
   ShoppingBag,
   Film,
+  Ban,
 } from "lucide-react";
 import { UserListings } from "@/components/marketplace/UserListings";
 import Link from "next/link";
@@ -76,7 +77,7 @@ import {
 import { useTranslation } from "@/context/LanguageContext";
 
 export default function UserProfilePage({ username }: { username: string }) {
-  const { currentUser, connections, isFriend, isRequestSent, isRequestReceived, sendFriendRequest, confirmFriendRequest, cancelFriendRequest, unfriendUser, isSubscribed, subscribeToCreator, cancelSubscription, fetchProfileByUsername, fetchProfilePosts, settings, followerUsernames, friendUsernames, sendMessageRequest } = usePosts();
+  const { currentUser, connections, isFriend, isRequestSent, isRequestReceived, sendFriendRequest, confirmFriendRequest, cancelFriendRequest, unfriendUser, isSubscribed, subscribeToCreator, cancelSubscription, fetchProfileByUsername, fetchProfilePosts, settings, followerUsernames, friendUsernames, sendMessageRequest, blockedUsernames, blockUser, unblockUser } = usePosts();
   const { currentTrack, isExpanded, triggerHaptic } = useMusic();
   const { tier } = useNetwork();
   const { addSignal } = useNotifications();
@@ -380,7 +381,28 @@ export default function UserProfilePage({ username }: { username: string }) {
           <header className="sticky top-0 z-50 bg-white/95 dark:bg-card/95 backdrop-blur-sm border-b border-border h-14 px-4 flex items-center justify-between">
             <div className="flex items-center gap-3"><Link href="/"><Button variant="ghost" size="icon" className="rounded-full"><ArrowLeft className="h-5 w-5" /></Button></Link><div className="flex items-center gap-1"><span className="font-bold text-lg truncate">{displayUser.name}</span>{displayUser.isVerified && <CheckCircle2 className="h-3 w-3 text-primary fill-primary text-white" />}</div></div>
             <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="rounded-full"><MoreHorizontal className="h-5 w-5" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-48 rounded-xl p-1.5">
-              {!isMe && <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onClick={() => toast({ title: "Report Sent" })}><Flag className="h-4 w-4" /> Report Node</DropdownMenuItem>}
+              {!isMe && (
+                <>
+                  <DropdownMenuItem
+                    className="gap-2 text-destructive focus:text-destructive"
+                    onClick={async () => {
+                      triggerHaptic(15);
+                      const isBlocked = blockedUsernames.includes(username);
+                      if (isBlocked) {
+                        await unblockUser(username);
+                        toast({ title: "User Unblocked", description: `@${username} has been unblocked.` });
+                      } else {
+                        await blockUser(username);
+                        toast({ title: "User Blocked", description: `You will no longer see posts from @${username}.` });
+                      }
+                    }}
+                  >
+                    <Ban className="h-4 w-4" />
+                    {blockedUsernames.includes(username) ? "Unblock User" : "Block User"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onClick={() => toast({ title: "Report Sent" })}><Flag className="h-4 w-4" /> Report Node</DropdownMenuItem>
+                </>
+              )}
               <DropdownMenuItem className="gap-2" onClick={() => { triggerHaptic(); navigator.clipboard.writeText(window.location.href); toast({ title: "Link Copied" }); }}><Share2 className="h-4 w-4" /> Share Profile</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
           </header>
           <div className="relative">

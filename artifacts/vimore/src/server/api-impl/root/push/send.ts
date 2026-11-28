@@ -65,6 +65,8 @@ export async function POST(req: NextRequest) {
     const serializedPayload = JSON.stringify(payload);
 
     for (const u of users.documents) {
+      if (u.push_enabled === false) continue;
+
       if (hasWebPush && u.push_subscription) {
         try {
           const sub =
@@ -80,10 +82,11 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      if (fcm && u.fcm_token) {
+      const fcmToken = String(u.fcm_token || u.push_token || '').trim();
+      if (fcm && fcmToken) {
         try {
           await fcm.send({
-            token: String(u.fcm_token),
+            token: fcmToken,
             notification: {
               title: String(payload.title || 'ViMore'),
               body: String(payload.body || ''),

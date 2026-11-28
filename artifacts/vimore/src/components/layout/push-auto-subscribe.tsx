@@ -12,12 +12,13 @@ export function PushAutoSubscribe() {
 
   useEffect(() => {
     if (Capacitor.isNativePlatform()) return;
+    if ((currentUser as any)?.push_enabled === false) return;
     if (!currentUser?.$id || !hasPushPermission || !isPushSupported()) return;
 
     subscribeToPush().catch((error) => {
       console.warn("[push] automatic subscription failed", error);
     });
-  }, [currentUser?.$id, hasPushPermission]);
+  }, [currentUser?.$id, (currentUser as any)?.push_enabled, hasPushPermission]);
 
   return null;
 }

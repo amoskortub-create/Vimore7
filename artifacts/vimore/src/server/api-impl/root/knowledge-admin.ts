@@ -6,7 +6,7 @@ import { requireAdminUser } from '@/lib/server-helpers';
 const COLLECTION = 'ai_knowledge_bank';
 
 export async function GET(req: NextRequest) {
-  const admin = await requireAdminUser(req);
+  const admin = await requireAdminUser(req, ['SUPER']);
   if (!admin) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const admin = await requireAdminUser(req);
+  const admin = await requireAdminUser(req, ['SUPER']);
   if (!admin) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }

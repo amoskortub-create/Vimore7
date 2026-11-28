@@ -2,11 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { usePosts } from "@/context/PostContext";
-import { databases, DATABASE_ID, COL } from "@/lib/appwrite";
-import { Query, ID } from "appwrite";
+import { authFetch } from "@/lib/auth-fetch";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { LiteLink as Link } from "@/components/ui/lite-link";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -47,6 +45,7 @@ export default function AdminShieldPage() {
   const { toast } = useToast();
 
   const [reports, setReports] = useState<AdminReport[]>([]);
+  const [counts, setCounts] = useState<{ open: number; resolved: number; dismissed: number }>({ open: 0, resolved: 0, dismissed: 0 });
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"open" | "resolved" | "dismissed">("open");
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -56,12 +55,17 @@ export default function AdminShieldPage() {
   const loadReports = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await databases.listDocuments(DATABASE_ID, COL.ADMIN_REPORTS, [
-        Query.equal("status", filter),
-        Query.orderDesc("reported_at"),
-        Query.limit(50),
-      ]);
-      setReports(res.documents as any);
+      const res = await authFetch(`/api/admin/shield?status=${encodeURIComponent(filter)}&ts=${Date.now()}`, { cache: "no-store" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) throw new Error(data?.error || "Failed to load reports");
+      setReports(Array.isArray(data.reports) ? data.reports : []);
+      if (data.counts) {
+        setCounts({
+          open: Number(data.counts.open || 0),
+          resolved: Number(data.counts.resolved || 0),
+          dismissed: Number(data.counts.dismissed || 0),
+        });
+      }
     } catch {
       setReports([]);
     } finally {
@@ -70,33 +74,26 @@ export default function AdminShieldPage() {
   }, [filter]);
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!isAdmin) {
+      setLoading(false);
+      return;
+    }
     loadReports();
   }, [isAdmin, loadReports]);
 
   async function handleRemove(report: AdminReport) {
     setProcessingId(report.$id);
     try {
-      await databases.deleteDocument(DATABASE_ID, report.collection_name, report.doc_id);
-      await databases.updateDocument(DATABASE_ID, COL.ADMIN_REPORTS, report.$id, {
-        status: "resolved",
-        resolved_by: currentUser!.$id,
-        resolved_at: new Date().toISOString(),
+      const res = await authFetch("/api/admin/shield", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportId: report.$id, action: "remove" }),
       });
-
-      if (report.user_id) {
-        try {
-          await databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
-            user_id: report.user_id,
-            type: "MODERATION",
-            title: "Content removed",
-            message: `Your recent post was removed for violating ViMore's Terms of Service. Reason: ${report.reason}`,
-            is_read: false,
-          });
-        } catch { /* notification failure is non-critical */ }
-      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Failed to remove");
 
       setReports((prev) => prev.filter((r) => r.$id !== report.$id));
+      setCounts((prev) => ({ ...prev, open: Math.max(0, prev.open - 1), resolved: prev.resolved + 1 }));
       toast({ title: "Content removed", description: "User has been notified." });
     } catch (e: any) {
       toast({ variant: "destructive", title: "Failed to remove", description: e.message });
@@ -108,17 +105,16 @@ export default function AdminShieldPage() {
   async function handleDismiss(report: AdminReport) {
     setProcessingId(report.$id);
     try {
-      await databases.updateDocument(DATABASE_ID, COL.ADMIN_REPORTS, report.$id, {
-        status: "dismissed",
-        resolved_by: currentUser!.$id,
-        resolved_at: new Date().toISOString(),
+      const res = await authFetch("/api/admin/shield", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportId: report.$id, action: "dismiss" }),
       });
-      try {
-        await databases.updateDocument(DATABASE_ID, report.collection_name, report.doc_id, {
-          status: "published",
-        });
-      } catch { /* content may already be gone */ }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Failed to dismiss");
+
       setReports((prev) => prev.filter((r) => r.$id !== report.$id));
+      setCounts((prev) => ({ ...prev, open: Math.max(0, prev.open - 1), dismissed: prev.dismissed + 1 }));
       toast({ title: "Report dismissed", description: "Content restored to published." });
     } catch (e: any) {
       toast({ variant: "destructive", title: "Failed", description: e.message });
@@ -191,7 +187,7 @@ export default function AdminShieldPage() {
                 {s}
               </p>
               <p className={cn("text-xl font-black", filter === s ? "text-white" : "text-foreground")}>
-                {s === filter ? reports.length : "—"}
+                {counts[s]}
               </p>
             </button>
           ))}

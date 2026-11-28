@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
-import { COL } from '@/lib/appwrite';
+import { BUCKET, COL, getAvatarUrl } from '@/lib/appwrite';
 import { roundCredits } from '@/lib/transaction-fee';
-import { getUserBalance, requireAdminUser, safeNotify } from '@/lib/server-helpers';
+import { getUserBalance, requireAdminUser, safeNotify, logSecurityEvent, createAuditEntry, getClientIp } from '@/lib/server-helpers';
 
 export async function POST(req: NextRequest) {
   const admin = await requireAdminUser(req, ['SUPER', 'FINANCIAL']);
@@ -33,9 +33,22 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const wdUpdate: Record<string, any> = { status };
+    const adminUsername = String(admin.profileDoc.username || admin.authUser.$id);
+    const adminName = String(admin.profileDoc.name || admin.profileDoc.display_name || adminUsername);
+    const nowIso = new Date().toISOString();
+
+    const wdUpdate: Record<string, any> = {
+      status,
+      reviewed_by: adminUsername,
+      reviewed_by_id: admin.authUser.$id,
+      reviewed_by_name: adminName,
+      reviewed_at: nowIso,
+    };
     if (adminMessage) {
       wdUpdate.admin_message = adminMessage;
+    }
+    if (proofImageUrl) {
+      wdUpdate.proof_image_url = proofImageUrl;
     }
 
     await db.updateDocument(DATABASE_ID, COL.WITHDRAWAL_REQUESTS, id, wdUpdate);
@@ -78,13 +91,39 @@ export async function POST(req: NextRequest) {
       await safeNotify({
         user_id: wdDoc.user_id,
         from_user_id: admin.authUser.$id,
-        from_user_name: admin.profileDoc.name || admin.profileDoc.username || 'ViMore Admin',
+        from_user_name: adminName,
         type: 'SYSTEM',
         title: status === 'APPROVED' ? 'Withdrawal Approved' : 'Withdrawal Rejected',
         content: details,
         action_href: '/earnings',
       });
     }
+
+    await Promise.allSettled([
+      logSecurityEvent({
+        event_type: status === 'APPROVED' ? 'WITHDRAWAL_APPROVED' : 'WITHDRAWAL_REJECTED',
+        severity: status === 'APPROVED' ? 'INFO' : 'WARN',
+        user_id: wdDoc.user_id || '',
+        actor_id: admin.authUser.$id,
+        actor_role: admin.role,
+        target_id: id,
+        amount: payoutAmount || amount,
+        currency: payoutCurrency,
+        result: 'success',
+        endpoint: '/api/withdraw/process',
+        method: 'POST',
+        ip_address: getClientIp(req),
+        details: `${adminName} (@${adminUsername}) ${status.toLowerCase()} withdrawal #${id} for @${wdDoc.username || wdDoc.user_id} ($${payoutAmount.toFixed(2)} ${payoutCurrency})`,
+      }),
+      createAuditEntry({
+        action: status === 'APPROVED' ? 'WITHDRAWAL_APPROVED' : 'WITHDRAWAL_REJECTED',
+        details: `${status === 'APPROVED' ? 'Approved' : 'Rejected'} withdrawal #${id} for @${wdDoc.username || wdDoc.user_id}: ${amount} Credits ($${payoutAmount.toFixed(2)} ${payoutCurrency})${adminMessage ? ` — ${adminMessage}` : ''}`,
+        performedBy: adminUsername,
+        performedByName: adminName,
+        performedById: admin.authUser.$id,
+        performedByAvatar: admin.profileDoc.avatar_id ? getAvatarUrl(BUCKET.AVATARS, admin.profileDoc.avatar_id) : '',
+      }),
+    ]);
 
     return NextResponse.json({ ok: true, status });
   } catch (err: any) {

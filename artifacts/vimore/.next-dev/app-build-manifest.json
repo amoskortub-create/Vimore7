@@ -16,40 +16,40 @@
       "static/chunks/main-app.js",
       "static/chunks/app/loading.js"
     ],
-    "/settings/loading": [
+    "/admin/loading": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/settings/loading.js"
+      "static/chunks/app/admin/loading.js"
     ],
-    "/settings/page": [
+    "/admin/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/settings/page.js"
+      "static/chunks/app/admin/page.js"
     ],
-    "/settings/account/page": [
+    "/admin/shield/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/settings/account/page.js"
+      "static/chunks/app/admin/shield/page.js"
     ],
-    "/settings/language/page": [
+    "/admin/financial-audit/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/settings/language/page.js"
+      "static/chunks/app/admin/financial-audit/page.js"
     ],
-    "/messages/loading": [
+    "/admin/financial-monitor/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/messages/loading.js"
+      "static/chunks/app/admin/financial-monitor/page.js"
     ],
-    "/messages/page": [
+    "/admin/system/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/messages/page.js"
+      "static/chunks/app/admin/system/page.js"
     ],
-    "/api/[...path]/route": [
+    "/api/admin/[...path]/route": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/api/[...path]/route.js"
+      "static/chunks/app/api/admin/[...path]/route.js"
     ]
   }
 }

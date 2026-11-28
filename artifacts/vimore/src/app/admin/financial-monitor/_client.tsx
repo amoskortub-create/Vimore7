@@ -3,15 +3,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { usePosts } from '@/context/PostContext';
 import {
-  databases,
   DATABASE_ID,
   COL,
   client,
-  Query,
-  getFileUrl,
+  getAvatarUrl,
   BUCKET,
   avatarFallback,
 } from '@/lib/appwrite';
+import { authFetch } from '@/lib/auth-fetch';
 import Link from 'next/link';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -90,68 +89,36 @@ export default function FinancialMonitorPage() {
     if (!silent) setIsLoading(true);
     else setIsRefreshing(true);
     try {
-      const [adminsRes, paymentsRes, withdrawalsRes] = await Promise.allSettled([
-        databases.listDocuments(DATABASE_ID, COL.USERS, [
-          Query.equal('role', 'FINANCIAL'),
-          Query.limit(50),
-        ]),
-        databases.listDocuments(DATABASE_ID, COL.PAYMENT_REQUESTS, [
-          Query.orderDesc('$createdAt'),
-          Query.limit(200),
-        ]),
-        databases.listDocuments(DATABASE_ID, COL.WITHDRAWAL_REQUESTS, [
-          Query.orderDesc('$createdAt'),
-          Query.limit(200),
-        ]),
+      const [oversightRes, dashRes] = await Promise.allSettled([
+        authFetch(`/api/admin/super-oversight?ts=${Date.now()}`, { cache: 'no-store' }),
+        authFetch(`/api/admin/dashboard-data?includeUsers=1&ts=${Date.now()}`, { cache: 'no-store' }),
       ]);
 
-      if (adminsRes.status === 'fulfilled') {
-        setFinancialAdmins(adminsRes.value.documents.map((doc: any) => ({
+      if (dashRes.status === 'fulfilled' && dashRes.value.ok) {
+        const dashData = await dashRes.value.json().catch(() => null);
+        const usersList: any[] = dashData?.allUsers || dashData?.staff || [];
+        const finAdmins = usersList.filter((doc: any) => String(doc.role || '').toUpperCase() === 'FINANCIAL');
+        setFinancialAdmins(finAdmins.map((doc: any) => ({
           $id: doc.$id,
-          name: doc.name || doc.username,
+          name: doc.name || doc.display_name || doc.username,
           username: doc.username,
           avatar: doc.avatar_id
-            ? getFileUrl(BUCKET.AVATARS, doc.avatar_id)
+            ? getAvatarUrl(BUCKET.AVATARS, doc.avatar_id)
             : (doc.avatar || avatarFallback(doc.name || doc.username || 'FA')),
-          isVerified: doc.is_verified || false,
-          joinedAt: doc.$createdAt,
-          goldBalance: doc.gold_balance || 0,
-          diamondBalance: doc.diamond_balance || 0,
-          starBalance: doc.star_balance || 0,
+          isVerified: Boolean(doc.is_verified || doc.isVerified),
+          joinedAt: doc.$createdAt || doc.joinDate || doc.join_date,
+          goldBalance: doc.gold_balance ?? doc.goldBalance ?? 0,
+          diamondBalance: doc.diamond_balance ?? doc.diamondBalance ?? 0,
+          starBalance: doc.star_balance ?? doc.starBalance ?? 0,
         })));
       }
 
-      if (paymentsRes.status === 'fulfilled') {
-        setPaymentRequests(paymentsRes.value.documents.map((doc: any) => ({
-          $id: doc.$id,
-          username: doc.username || '—',
-          name: doc.name || doc.username || '—',
-          packageName: doc.package_name || doc.message || 'Package',
-          amount: doc.amount || 0,
-          currency: doc.currency || 'USD',
-          coinType: doc.coin_type || '—',
-          coinAmount: doc.coin_amount || 0,
-          status: doc.status || 'PENDING',
-          createdAt: doc.$createdAt,
-          screenshotId: doc.screenshot_id,
-        })));
-      }
-
-      if (withdrawalsRes.status === 'fulfilled') {
-        setWithdrawalRequests(withdrawalsRes.value.documents.map((doc: any) => ({
-          $id: doc.$id,
-          username: doc.username || '—',
-          accountName: doc.account_name || doc.accountName || '—',
-          payoutAmount: doc.payout_amount ?? doc.payoutAmount ?? 0,
-          payoutCurrency: doc.payout_currency || doc.payoutCurrency || 'USD',
-          method: doc.method || doc.payment_method || '—',
-          amount: doc.amount ?? 0,
-          currency: doc.currency || 'USD',
-          status: doc.status || 'PENDING',
-          createdAt: doc.$createdAt,
-          proofImageUrl: doc.proof_image_url,
-          adminMessage: doc.admin_message,
-        })));
+      if (oversightRes.status === 'fulfilled' && oversightRes.value.ok) {
+        const oversightData = await oversightRes.value.json().catch(() => null);
+        if (oversightData) {
+          setPaymentRequests(oversightData.payments || []);
+          setWithdrawalRequests(oversightData.withdrawals || []);
+        }
       }
 
       setLastUpdated(new Date());
@@ -164,7 +131,10 @@ export default function FinancialMonitorPage() {
   }, [toast]);
 
   useEffect(() => {
-    if (!isSuper) return;
+    if (!isSuper) {
+      setIsLoading(false);
+      return;
+    }
     loadData();
   }, [isSuper, loadData]);
 
@@ -474,14 +444,29 @@ export default function FinancialMonitorPage() {
                                 {coinIcon(req.coinType)}
                                 <span className="text-[10px] text-white/50 font-bold">{fmt(req.coinAmount)} {req.coinType}</span>
                               </div>
+                              {req.code && (
+                                <div className="flex items-center gap-1.5 bg-white/5 rounded-lg px-2 py-1">
+                                  <span className="text-[10px] text-white/50 font-mono font-bold">Ref: {req.code}</span>
+                                </div>
+                              )}
                               <span className="text-[9px] text-white/25 font-bold">{timeAgo(req.createdAt)}</span>
                             </div>
+                            {req.status !== 'PENDING' && req.reviewedByName && (
+                              <p className="text-[10px] font-bold text-emerald-400 mt-2">
+                                {req.status === 'APPROVED' ? 'Accepted' : 'Rejected'} by {req.reviewedByName}
+                                {req.reviewedByUsername ? ` (@${req.reviewedByUsername})` : ''}
+                                {req.reviewedAt ? ` · ${new Date(req.reviewedAt).toLocaleString()}` : ''}
+                              </p>
+                            )}
+                            {req.rejectionReason && (
+                              <p className="text-[10px] text-red-400 mt-1">Reason: {req.rejectionReason}</p>
+                            )}
                           </div>
                         </div>
-                        {req.screenshotId && (
+                        {req.screenshotUrl && (
                           <div className="mt-3 pt-3 border-t border-white/5 flex items-center gap-2">
                             <a
-                              href={getFileUrl(BUCKET.PAYMENT_SCREENSHOTS, req.screenshotId)}
+                              href={req.screenshotUrl}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-[10px] font-black text-primary hover:underline uppercase tracking-widest"
@@ -547,8 +532,20 @@ export default function FinancialMonitorPage() {
                                 <Zap className="w-3 h-3 text-yellow-400" />
                                 <span className="text-[10px] text-white/50 font-bold">{fmt(req.amount)} {req.currency} coins</span>
                               </div>
+                              {req.accountNumber && (
+                                <div className="flex items-center gap-1.5 bg-white/5 rounded-lg px-2 py-1">
+                                  <span className="text-[10px] text-white/50 font-mono font-bold">{req.accountNumber}</span>
+                                </div>
+                              )}
                               <span className="text-[9px] text-white/25 font-bold">{timeAgo(req.createdAt)}</span>
                             </div>
+                            {req.status !== 'PENDING' && req.reviewedByName && (
+                              <p className="text-[10px] font-bold text-cyan-400 mt-2">
+                                {req.status === 'APPROVED' ? 'Approved' : 'Rejected'} by {req.reviewedByName}
+                                {req.reviewedByUsername ? ` (@${req.reviewedByUsername})` : ''}
+                                {req.reviewedAt ? ` · ${new Date(req.reviewedAt).toLocaleString()}` : ''}
+                              </p>
+                            )}
                             {req.adminMessage && (
                               <div className="mt-2 bg-white/5 rounded-xl px-2.5 py-1.5">
                                 <p className="text-[10px] text-white/40 font-bold">Admin note: {req.adminMessage}</p>

@@ -112,6 +112,14 @@ export interface User {
   suspendedUntil?: string;
   suspensionReason?: string;
   suspensionMessage?: string;
+  banReason?: string;
+  bannedAt?: string;
+  bannedBy?: string;
+  bannedByName?: string;
+  suspendedAt?: string;
+  suspendedBy?: string;
+  suspendedByName?: string;
+  assignedAt?: string;
   warningCount?: number;
 }
 
@@ -356,7 +364,7 @@ interface PostContextType {
   cancelTransaction: () => void;
   createPaymentRequest: (screenshot: string) => Promise<void>;
   approvePaymentRequest: (id: string) => Promise<void>;
-  rejectPaymentRequest: (id: string) => Promise<void>;
+  rejectPaymentRequest: (id: string, reason?: string) => Promise<void>;
   recordWithdrawal: (node: any) => Promise<void>;
   processWithdrawal: (id: string, status: 'APPROVED' | 'REJECTED', adminMessage?: string, proofImageUrl?: string) => Promise<void>;
   verifyUser: (cost: number, currency: 'DIAMOND' | 'STAR') => Promise<void>;
@@ -493,8 +501,16 @@ function mapDocToUser(authUser: Models.User<Models.Preferences>, doc: Models.Doc
     language: doc.language || '',
     status: (doc.status as 'active' | 'suspended' | 'banned') || 'active',
     suspendedUntil: doc.suspended_until || undefined,
-    suspensionReason: doc.suspension_reason || undefined,
+    suspensionReason: doc.suspension_reason || doc.ban_reason || undefined,
     suspensionMessage: doc.suspension_message || undefined,
+    banReason: doc.ban_reason || undefined,
+    bannedAt: doc.banned_at || undefined,
+    bannedBy: doc.banned_by || undefined,
+    bannedByName: doc.banned_by_name || undefined,
+    suspendedAt: doc.suspended_at || undefined,
+    suspendedBy: doc.suspended_by || undefined,
+    suspendedByName: doc.suspended_by_name || undefined,
+    assignedAt: doc.$updatedAt || doc.join_date || authUser.$createdAt,
     warningCount: doc.warning_count || 0,
   };
 }
@@ -529,8 +545,16 @@ function mapProfileDocToUser(doc: Models.Document): User {
     language: doc.language || '',
     status: (doc.status as 'active' | 'suspended' | 'banned') || 'active',
     suspendedUntil: doc.suspended_until || undefined,
-    suspensionReason: doc.suspension_reason || undefined,
+    suspensionReason: doc.suspension_reason || doc.ban_reason || undefined,
     suspensionMessage: doc.suspension_message || undefined,
+    banReason: doc.ban_reason || undefined,
+    bannedAt: doc.banned_at || undefined,
+    bannedBy: doc.banned_by || undefined,
+    bannedByName: doc.banned_by_name || undefined,
+    suspendedAt: doc.suspended_at || undefined,
+    suspendedBy: doc.suspended_by || undefined,
+    suspendedByName: doc.suspended_by_name || undefined,
+    assignedAt: doc.$updatedAt || doc.join_date || doc.$createdAt,
     warningCount: doc.warning_count || 0,
   };
 }
@@ -2697,57 +2721,28 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
   const refreshAdminData = useCallback(async () => {
     try {
-      const [reportsRes, ticketsRes, campaignsRes, payReqRes, wdRes, logsRes, staffRes] = await Promise.allSettled([
-        databases.listDocuments(DATABASE_ID, COL.REPORTS, [Query.orderDesc('$createdAt'), Query.limit(100)]),
-        databases.listDocuments(DATABASE_ID, COL.SUPPORT_TICKETS, [Query.orderDesc('$createdAt'), Query.limit(100)]),
-        databases.listDocuments(DATABASE_ID, COL.AD_CAMPAIGNS, [Query.orderDesc('$createdAt'), Query.limit(100)]),
-        databases.listDocuments(DATABASE_ID, COL.PAYMENT_REQUESTS, [Query.orderDesc('$createdAt'), Query.limit(100)]),
-        databases.listDocuments(DATABASE_ID, COL.WITHDRAWAL_REQUESTS, [Query.orderDesc('$createdAt'), Query.limit(100)]),
-        databases.listDocuments(DATABASE_ID, COL.AUDIT_LOGS, [Query.orderDesc('$createdAt'), Query.limit(100)]),
-        databases.listDocuments(DATABASE_ID, COL.USERS, [Query.notEqual('role', 'USER'), Query.limit(50)]),
-      ]);
+      const res = await authFetch('/api/admin/dashboard-data', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json().catch(() => null);
+      if (!data) return;
 
-      if (reportsRes.status === 'fulfilled') setReports(reportsRes.value.documents);
-      if (ticketsRes.status === 'fulfilled') setTickets(ticketsRes.value.documents);
-      if (campaignsRes.status === 'fulfilled') setCampaignsState(campaignsRes.value.documents);
-      if (payReqRes.status === 'fulfilled') setPaymentRequests(payReqRes.value.documents.map((doc: any) => ({
-        ...doc,
-        packageName: doc.package_name || doc.message || 'Package',
-        screenshot: doc.screenshot_id ? getFileUrl(BUCKET.PAYMENT_SCREENSHOTS, doc.screenshot_id) : '',
-      })));
-      if (wdRes.status === 'fulfilled') setWithdrawalHistory(wdRes.value.documents.map((doc: any) => ({
-        ...doc,
-        username: doc.username || '',
-        accountName: doc.account_name || doc.accountName || '',
-        payoutAmount: doc.payout_amount ?? doc.payoutAmount ?? 0,
-        payoutCurrency: doc.payout_currency || doc.payoutCurrency || 'USD',
-        method: doc.method || doc.payment_method || '',
-        amount: doc.amount ?? 0,
-        currency: doc.currency || '',
-      })));
-      if (logsRes.status === 'fulfilled') setAuditLogs(logsRes.value.documents);
-      if (staffRes.status === 'fulfilled') setStaff(staffRes.value.documents.map(mapProfileDocToUser));
+      if (Array.isArray(data.reports)) setReports(data.reports);
+      if (Array.isArray(data.tickets)) setTickets(data.tickets);
+      if (Array.isArray(data.campaigns)) setCampaignsState(data.campaigns);
+      if (Array.isArray(data.paymentRequests)) setPaymentRequests(data.paymentRequests);
+      if (Array.isArray(data.withdrawalHistory)) setWithdrawalHistory(data.withdrawalHistory);
+      if (Array.isArray(data.auditLogs)) setAuditLogs(data.auditLogs);
+      if (Array.isArray(data.staff)) setStaff(data.staff.map(mapProfileDocToUser));
+      if (Array.isArray(data.allUsers)) setAllUsers(data.allUsers.map(mapProfileDocToUser));
+      if (Array.isArray(data.broadcastHistory)) setBroadcastHistory(data.broadcastHistory);
     } catch (err) {
       logAppwriteError('refreshAdminData', err);
     }
   }, []);
 
   const refreshAllUsers = useCallback(async () => {
-    try {
-      const [allUsersRes, broadcastRes] = await Promise.allSettled([
-        databases.listDocuments(DATABASE_ID, COL.USERS, [Query.orderDesc('$createdAt'), Query.limit(200)]),
-        databases.listDocuments(DATABASE_ID, COL.ADMIN_NOTIFICATIONS, [Query.orderDesc('$createdAt'), Query.limit(50)]),
-      ]);
-      if (allUsersRes.status === 'fulfilled') {
-        setAllUsers(allUsersRes.value.documents.map(mapProfileDocToUser));
-      }
-      if (broadcastRes.status === 'fulfilled') {
-        setBroadcastHistory(broadcastRes.value.documents);
-      }
-    } catch (err) {
-      logAppwriteError('refreshAllUsers', err);
-    }
-  }, []);
+    await refreshAdminData();
+  }, [refreshAdminData]);
 
   const banUser = useCallback(async (userId: string, reason: string, note?: string) => {
     if (!currentUser) return;
@@ -2809,60 +2804,20 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
   const sendAdminBroadcast = useCallback(async (opts: { title: string; message: string; actionUrl?: string; targetUserIds: string[] | 'all' }) => {
     if (!currentUser) return 0;
-    let targets: string[];
-    if (opts.targetUserIds === 'all') {
-      targets = allUsers.map(u => u.$id).filter(id => id !== currentUser.$id);
-    } else {
-      targets = opts.targetUserIds;
+    const res = await authFetch('/api/admin/broadcast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(opts),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error || 'Could not send broadcast');
     }
-    try {
-      const broadcastDoc = await databases.createDocument(DATABASE_ID, COL.ADMIN_NOTIFICATIONS, ID.unique(), {
-        user_id: currentUser.$id,
-        type: 'BROADCAST',
-        title: opts.title,
-        content: opts.message,
-        message: opts.message,
-        is_read: false,
-      });
-      setBroadcastHistory(prev => [broadcastDoc, ...prev]);
-    } catch (err: any) {
-      logAppwriteError('sendAdminBroadcast:log', err);
-      const fallbackDoc = {
-        $id: 'local_' + Date.now(),
-        $createdAt: new Date().toISOString(),
-        type: 'BROADCAST',
-        title: opts.title,
-        content: opts.message,
-        message: opts.message,
-        user_id: currentUser.$id,
-      };
-      setBroadcastHistory(prev => [fallbackDoc, ...prev]);
+    if (data.broadcastDoc) {
+      setBroadcastHistory(prev => [data.broadcastDoc, ...prev]);
     }
-    if (targets.length === 0) {
-      throw new Error('No target users found. Ensure users are loaded before broadcasting.');
-    }
-    const results = await Promise.allSettled(
-      targets.map(uid =>
-        databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
-          user_id: uid,
-          type: 'SYSTEM',
-          title: opts.title,
-          content: opts.message,
-          message: opts.message,
-          is_read: false,
-          ...(opts.actionUrl ? { action_url: opts.actionUrl } : {}),
-        })
-      )
-    );
-    const succeeded = results.filter(r => r.status === 'fulfilled').length;
-    const failed = results.filter(r => r.status === 'rejected').length;
-    if (failed > 0) {
-      const sample = (results.find(r => r.status === 'rejected') as PromiseRejectedResult)?.reason;
-      const detail = sample?.message || sample?.type || 'Unknown Appwrite error';
-      throw new Error(`${succeeded}/${targets.length} delivered. ${failed} failed: ${detail}`);
-    }
-    return succeeded;
-  }, [currentUser, allUsers]);
+    return Number(data.delivered || 0);
+  }, [currentUser]);
 
   const addPost = async (p: any) => {
     if (!currentUser) return;
@@ -4163,16 +4118,23 @@ export function PostProvider({ children }: { children: ReactNode }) {
       action,
       details,
       performed_by: currentUser?.username || 'system',
-      performed_by_avatar: currentUser?.avatar,
+      performed_by_name: currentUser?.name || currentUser?.username || 'system',
+      performed_by_avatar: currentUser?.avatar || '',
       $createdAt: new Date().toISOString(),
     };
     setAuditLogs(prev => [newLog, ...prev]);
     try {
-      await databases.createDocument(DATABASE_ID, COL.AUDIT_LOGS, ID.unique(), {
-        action, details,
-        performed_by: currentUser?.username || 'system',
-        performed_by_avatar: currentUser?.avatar || '',
+      const res = await authFetch('/api/admin/audit-logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, details }),
       });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data?.doc) {
+          setAuditLogs(prev => prev.map(item => item.$id === newLog.$id ? data.doc : item));
+        }
+      }
     } catch (err) { logAppwriteError('addAuditLog', err); }
   }, [currentUser]);
 
@@ -4280,15 +4242,17 @@ export function PostProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const rejectPaymentRequest = async (id: string) => {
-    setPaymentRequests(prev => prev.map(r => r.$id === id ? { ...r, status: 'REJECTED' } : r));
+  const rejectPaymentRequest = async (id: string, reason?: string) => {
+    setPaymentRequests(prev => prev.map(r => r.$id === id ? { ...r, status: 'REJECTED', rejection_reason: reason || '' } : r));
     const res = await authFetch('/api/payment/reject', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requestId: id }),
+      body: JSON.stringify({ requestId: id, reason: reason || '' }),
     });
     if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
       setPaymentRequests(prev => prev.map(r => r.$id === id ? { ...r, status: 'PENDING' } : r));
+      throw new Error(data?.error || 'Rejection failed');
     }
   };
 
@@ -4512,16 +4476,37 @@ export function PostProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteCampaign = async (id: string) => {
+    const prevList = campaigns;
     setCampaignsState(prev => prev.filter(c => c.$id !== id));
-    try { await databases.deleteDocument(DATABASE_ID, COL.AD_CAMPAIGNS, id); } catch { /* ignore */ }
+    try {
+      const res = await authFetch('/api/admin/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', id }),
+      });
+      if (!res.ok) throw new Error('Delete failed');
+    } catch {
+      setCampaignsState(prevList);
+    }
   };
 
   const toggleCampaignStatus = async (id: string) => {
     const camp = campaigns.find(c => c.$id === id);
+    const prevStatus = camp?.status;
+    const prevActive = camp?.is_active;
     const newStatus = (camp?.status === 'ACTIVE' || camp?.is_active) ? 'PAUSED' : 'ACTIVE';
     const newIsActive = newStatus === 'ACTIVE';
     setCampaignsState(prev => prev.map(c => c.$id === id ? { ...c, status: newStatus, is_active: newIsActive } : c));
-    try { await databases.updateDocument(DATABASE_ID, COL.AD_CAMPAIGNS, id, { status: newStatus, is_active: newIsActive }); } catch { /* ignore */ }
+    try {
+      const res = await authFetch('/api/admin/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'toggle', id }),
+      });
+      if (!res.ok) throw new Error('Toggle failed');
+    } catch {
+      setCampaignsState(prev => prev.map(c => c.$id === id ? { ...c, status: prevStatus, is_active: prevActive } : c));
+    }
   };
 
   const recordView = useCallback(async (id: string) => {
@@ -4610,22 +4595,23 @@ export function PostProvider({ children }: { children: ReactNode }) {
 
   const submitTicket = async (data: { subject: string; message: string; category: string; priority?: string }) => {
     if (!currentUser) return;
-    const ticket: Record<string, any> = {
-      $id: 'tkt_' + Date.now(),
-      username: currentUser.username,
-      avatar: currentUser.avatar,
-      subject: data.subject, message: data.message,
-      category: data.category, status: 'OPEN',
-      priority: data.priority || 'MEDIUM',
-      $createdAt: new Date().toISOString(),
-    };
     try {
-      await databases.createDocument(DATABASE_ID, COL.SUPPORT_TICKETS, ID.unique(), {
+      const created = await databases.createDocument(DATABASE_ID, COL.SUPPORT_TICKETS, ID.unique(), {
         user_id: currentUser.$id,
-        subject: data.subject, message: data.message,
+        username: currentUser.username,
+        subject: data.subject,
+        message: data.message,
+        category: data.category || 'GENERAL',
+        priority: data.priority || 'MEDIUM',
         status: 'OPEN',
       });
-      setTickets(prev => [ticket, ...prev]);
+      setTickets(prev => [{
+        ...created,
+        username: currentUser.username,
+        avatar: currentUser.avatar,
+        category: data.category || 'GENERAL',
+        priority: data.priority || 'MEDIUM',
+      }, ...prev]);
     } catch (err: any) {
       logAppwriteError('submitTicket', err);
       throw err;
@@ -4633,25 +4619,54 @@ export function PostProvider({ children }: { children: ReactNode }) {
   };
 
   const handleReportAction = async (reportId: string, action: any) => {
+    const prevReports = reports;
     setReports(prev => prev.map((r: any) => r.$id === reportId ? { ...r, status: action } : r));
-    try { await databases.updateDocument(DATABASE_ID, COL.REPORTS, reportId, { status: action }); } catch { /* ignore */ }
+    try {
+      const res = await authFetch('/api/admin/support', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'report_action', reportId, action }),
+      });
+      if (!res.ok) throw new Error('Report update failed');
+    } catch (err) {
+      setReports(prevReports);
+      logAppwriteError('handleReportAction', err);
+    }
   };
 
   const handleTicketAction = async (ticketId: string, status: any) => {
+    const prevTickets = tickets;
     setTickets(prev => prev.map((t: any) => t.$id === ticketId ? { ...t, status } : t));
-    try { await databases.updateDocument(DATABASE_ID, COL.SUPPORT_TICKETS, ticketId, { status }); } catch { /* ignore */ }
+    try {
+      const res = await authFetch('/api/admin/support', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'ticket_status', ticketId, status }),
+      });
+      if (!res.ok) throw new Error('Ticket update failed');
+    } catch (err) {
+      setTickets(prevTickets);
+      logAppwriteError('handleTicketAction', err);
+    }
   };
 
   const replyToTicket = async (ticketUserId: string, ticketId: string, reply: string) => {
     if (!currentUser || !reply.trim()) return;
-    await databases.createDocument(DATABASE_ID, COL.NOTIFICATIONS, ID.unique(), {
-      user_id: ticketUserId,
-      type: 'SYSTEM',
-      message: reply.trim(),
-      is_read: false,
+    const res = await authFetch('/api/admin/support', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'ticket_reply', ticketUserId, ticketId, reply: reply.trim() }),
     });
-    await databases.updateDocument(DATABASE_ID, COL.SUPPORT_TICKETS, ticketId, { status: 'IN_REVIEW' });
-    setTickets(prev => prev.map((t: any) => t.$id === ticketId ? { ...t, status: 'IN_REVIEW' } : t));
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || 'Reply failed');
+    setTickets(prev => prev.map((t: any) => t.$id === ticketId ? {
+      ...t,
+      status: 'IN_REVIEW',
+      admin_reply: data.admin_reply || reply.trim(),
+      replied_by: data.replied_by,
+      replied_by_name: data.replied_by_name,
+      replied_at: data.replied_at,
+    } : t));
   };
 
   const updateUserIdentity = async (userId: string, data: Partial<User>) => {
@@ -4667,39 +4682,39 @@ export function PostProvider({ children }: { children: ReactNode }) {
   };
 
   const promoteUser = async (username: string, role: any) => {
-    setStaff(prev => {
-      const existing = prev.find((s: any) => s.username === username);
-      if (existing) return prev.map((s: any) => s.username === username ? { ...s, role } : s);
-      return prev;
+    const res = await authFetch('/api/admin/staff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'promote', username, role }),
     });
-    try {
-      const res = await databases.listDocuments(DATABASE_ID, COL.USERS, [Query.equal('username', username), Query.limit(1)]);
-      if (res.documents[0]) {
-        await databases.updateDocument(DATABASE_ID, COL.USERS, res.documents[0].$id, { role });
-      }
-    } catch { /* ignore */ }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error || 'Failed to assign role');
+    }
+    if (data.user) {
+      setStaff(prev => {
+        const exists = prev.some((s: any) => s.$id === data.user.$id || s.username === username);
+        if (exists) {
+          return prev.map((s: any) => (s.$id === data.user.$id || s.username === username) ? { ...s, ...data.user } : s);
+        }
+        return [data.user, ...prev];
+      });
+      setAllUsers(prev => prev.map(u => (u.$id === data.user.$id || u.username === username) ? { ...u, role: data.user.role } : u));
+    }
   };
 
   const demoteUser = async (username: string) => {
-    try {
-      const res = await databases.listDocuments(DATABASE_ID, COL.USERS, [Query.equal('username', username), Query.limit(1)]);
-      if (res.documents[0]) {
-        const targetId = res.documents[0].$id;
-
-        // Find the first user ever created — they can never be demoted
-        const allRes = await databases.listDocuments(DATABASE_ID, COL.USERS, [Query.orderAsc('join_date'), Query.limit(1)]);
-        const firstUserId = allRes.documents[0]?.$id;
-        if (firstUserId && targetId === firstUserId) {
-          return; // silently blocked — UI should already hide the button
-        }
-
-        await databases.updateDocument(DATABASE_ID, COL.USERS, targetId, { role: 'USER' });
-        setStaff(prev => prev.filter((s: any) => s.username !== username));
-      }
-    } catch (err: any) {
-      if (err?.message?.includes('PROTECTED_SUPER_ADMIN')) return;
-      logAppwriteError('removeStaff', err);
+    const res = await authFetch('/api/admin/staff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'demote', username }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error || 'Failed to remove staff');
     }
+    setStaff(prev => prev.filter((s: any) => s.username !== username));
+    setAllUsers(prev => prev.map(u => u.username === username ? { ...u, role: 'USER' } : u));
   };
 
   const boostNode = async (nodeId: string, duration: number, _currency: 'CREDIT', type: 'POST' | 'SONIC') => {

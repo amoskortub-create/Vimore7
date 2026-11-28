@@ -1,8 +1,8 @@
-// File: /app/applet/artifacts/vimore/src/app/notifications/page.tsx
-import * as entry from '../../../../src/app/notifications/page.js'
+// File: /app/applet/artifacts/vimore/src/app/admin/shield/page.tsx
+import * as entry from '../../../../../src/app/admin/shield/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 
-type TEntry = typeof import('../../../../src/app/notifications/page.js')
+type TEntry = typeof import('../../../../../src/app/admin/shield/page.js')
 
 type SegmentParams<T extends Object = any> = T extends Record<string, any>
   ? { [K in keyof T]: T[K] extends string ? string | string[] | undefined : never }

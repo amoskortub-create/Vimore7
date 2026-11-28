@@ -215,7 +215,10 @@ export default function SystemPage() {
   }, [loadStats]);
 
   useEffect(() => {
-    if (!isSuper) return;
+    if (!isSuper) {
+      setLoading(false);
+      return;
+    }
     loadStats();
     startAutoRefresh();
     loadRecentSignups();

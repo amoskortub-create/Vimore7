@@ -43,6 +43,7 @@ import * as PushSend from '@/server/api-impl/root/push/send';
 import * as PushSubscribe from '@/server/api-impl/root/push/subscribe';
 import * as PushUnsubscribe from '@/server/api-impl/root/push/unsubscribe';
 import * as NativePushSubscribe from '@/server/api-impl/root/push/native-subscribe';
+import * as PushVapidKey from '@/server/api-impl/root/push/vapid-key';
 import * as TransactionBoost from '@/server/api-impl/root/transaction/boost';
 import * as TransactionGift from '@/server/api-impl/root/transaction/gift';
 import * as TransactionLockPost from '@/server/api-impl/root/transaction/lock-post';
@@ -122,6 +123,7 @@ const ROUTES: Record<string, Handler> = {
   'push/native-subscribe': NativePushSubscribe,
   'push/web-subscribe': NativePushSubscribe,
   'push/web-unsubscribe': PushUnsubscribe,
+  'push/vapid-key': PushVapidKey,
   'transaction/boost': TransactionBoost,
   'transaction/gift': TransactionGift,
   'transaction/lock-post': TransactionLockPost,

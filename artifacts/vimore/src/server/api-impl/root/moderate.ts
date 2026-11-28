@@ -21,16 +21,22 @@ export async function POST(req: NextRequest) {
 
     const matched = SEVERE_PATTERNS.some((re) => re.test(text));
     if (matched) {
+      const nowIso = new Date().toISOString();
       try {
         const db = getAdminDatabases();
         await db.createDocument(DATABASE_ID, COL.ADMIN_REPORTS, ID.unique(), {
+          doc_id: docId || 'unknown',
+          collection_name: collection || COL.POSTS,
           target_id: docId || 'unknown',
           target_collection: collection || COL.POSTS,
           user_id: userId || 'unknown',
           reason: 'Automated Content Shield Flag',
+          severity: 'high',
+          content_preview: text.slice(0, 500),
           excerpt: text.slice(0, 500),
-          status: 'PENDING',
-          created_at: new Date().toISOString(),
+          status: 'open',
+          reported_at: nowIso,
+          created_at: nowIso,
         });
       } catch {
         // non-fatal

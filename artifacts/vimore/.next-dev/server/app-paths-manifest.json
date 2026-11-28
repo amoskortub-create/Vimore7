@@ -1,7 +1,8 @@
 {
-  "/api/[...path]/route": "app/api/[...path]/route.js",
-  "/settings/page": "app/settings/page.js",
-  "/settings/account/page": "app/settings/account/page.js",
-  "/settings/language/page": "app/settings/language/page.js",
-  "/messages/page": "app/messages/page.js"
+  "/api/admin/[...path]/route": "app/api/admin/[...path]/route.js",
+  "/admin/page": "app/admin/page.js",
+  "/admin/shield/page": "app/admin/shield/page.js",
+  "/admin/financial-audit/page": "app/admin/financial-audit/page.js",
+  "/admin/financial-monitor/page": "app/admin/financial-monitor/page.js",
+  "/admin/system/page": "app/admin/system/page.js"
 }

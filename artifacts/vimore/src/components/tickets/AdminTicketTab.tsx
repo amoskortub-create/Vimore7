@@ -81,21 +81,27 @@ export function AdminTicketTab({ currentUserId }: { currentUserId: string }) {
 
   const loadStats = async (evs: AppwriteEvent[]) => {
     const stats: Record<string, EventStats> = {};
-    for (const ev of evs) {
-      try {
-        const ticketRes = await databases.listDocuments(DATABASE_ID, COL.TICKETS, [
-          Query.equal('event_id', ev.$id),
-          Query.limit(1000),
-        ]);
-        const tickets = ticketRes.documents;
-        stats[ev.$id] = {
-          eventId: ev.$id,
-          totalTickets: tickets.length,
-          totalDiamonds: tickets.reduce((sum: number, t: any) => sum + (t.price_paid || 0), 0),
-        };
-      } catch {
-        stats[ev.$id] = { eventId: ev.$id, totalTickets: 0, totalDiamonds: 0 };
-      }
+    const CHUNK = 5;
+    for (let i = 0; i < evs.length; i += CHUNK) {
+      const batch = evs.slice(i, i + CHUNK);
+      await Promise.all(
+        batch.map(async (ev) => {
+          try {
+            const ticketRes = await databases.listDocuments(DATABASE_ID, COL.TICKETS, [
+              Query.equal('event_id', ev.$id),
+              Query.limit(1000),
+            ]);
+            const tickets = ticketRes.documents;
+            stats[ev.$id] = {
+              eventId: ev.$id,
+              totalTickets: tickets.length,
+              totalDiamonds: tickets.reduce((sum: number, t: any) => sum + (t.price_paid || 0), 0),
+            };
+          } catch {
+            stats[ev.$id] = { eventId: ev.$id, totalTickets: 0, totalDiamonds: 0 };
+          }
+        })
+      );
     }
     setEventStats(stats);
   };
@@ -285,15 +291,23 @@ export function AdminTicketTab({ currentUserId }: { currentUserId: string }) {
                   </Button>
                 </div>
               ) : (
-                <label
+                <div
+                  role="button"
+                  tabIndex={0}
                   className="flex flex-col items-center justify-center h-40 rounded-3xl border-2 border-dashed border-border/50 hover:border-primary/50 cursor-pointer transition-colors bg-secondary/20 hover:bg-primary/5"
                   onClick={() => flyerInputRef.current?.click()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      flyerInputRef.current?.click();
+                    }
+                  }}
                 >
                   <ImageIcon className="h-8 w-8 text-muted-foreground mb-2" />
                   <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Upload Event Flyer</span>
                   <span className="text-[9px] text-muted-foreground mt-1">PNG, JPG, WebP</span>
                   <input ref={flyerInputRef} type="file" accept="image/*" className="hidden" onChange={handleFlyerChange} />
-                </label>
+                </div>
               )}
             </div>
 

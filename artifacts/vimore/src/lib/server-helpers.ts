@@ -152,25 +152,114 @@ export async function safeNotify(data: {
 
 export async function logSecurityEvent(data: {
   event_type: string;
-  severity?: 'INFO' | 'WARNING' | 'CRITICAL';
+  severity?: 'INFO' | 'WARN' | 'WARNING' | 'ERROR' | 'CRITICAL';
   user_id?: string;
   username?: string;
+  actor_id?: string;
+  actor_role?: string;
+  target_id?: string;
+  amount?: string | number;
+  currency?: string;
+  result?: 'success' | 'failure' | 'blocked';
+  endpoint?: string;
+  method?: string;
   ip_address?: string;
   user_agent?: string;
   details?: string;
 }): Promise<void> {
   try {
     const db = getAdminDatabases();
-    await db.createDocument(DATABASE_ID, COL.SECURITY_EVENTS, ID.unique(), {
+    const rawSeverity = data.severity || 'INFO';
+    const normalizedSeverity = rawSeverity === 'WARNING' ? 'WARN' : rawSeverity;
+    const payload: Record<string, any> = {
       event_type: data.event_type,
-      severity: data.severity || 'INFO',
-      user_id: data.user_id || '',
+      severity: normalizedSeverity,
+      user_id: data.user_id || data.target_id || '',
       ip_address: data.ip_address || '',
       user_agent: data.user_agent || '',
       details: data.details || '',
-    });
+      result: data.result || 'success',
+    };
+    if (data.actor_id) payload.actor_id = data.actor_id;
+    if (data.actor_role) payload.actor_role = data.actor_role;
+    if (data.target_id) payload.target_id = data.target_id;
+    if (data.amount !== undefined && data.amount !== null && data.amount !== '') {
+      payload.amount = String(data.amount);
+    }
+    if (data.currency) payload.currency = data.currency;
+    if (data.endpoint) payload.endpoint = data.endpoint;
+    if (data.method) payload.method = data.method;
+
+    await db.createDocument(DATABASE_ID, COL.SECURITY_EVENTS, ID.unique(), payload);
   } catch {
     // non-fatal
+  }
+}
+
+export async function createAuditEntry(data: {
+  action: string;
+  details: string;
+  performedBy: string;
+  performedByName?: string;
+  performedById?: string;
+  performedByAvatar?: string;
+}): Promise<any | null> {
+  try {
+    const db = getAdminDatabases();
+    return await db.createDocument(DATABASE_ID, COL.AUDIT_LOGS, ID.unique(), {
+      action: data.action,
+      details: data.details,
+      performed_by: data.performedBy || 'system',
+      performed_by_name: data.performedByName || data.performedBy || 'System',
+      performed_by_id: data.performedById || '',
+      performed_by_avatar: data.performedByAvatar || '',
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function listAllDocuments(
+  db: ReturnType<typeof getAdminDatabases>,
+  collectionId: string,
+  baseQueries: string[] = [],
+  maxDocs = 2000
+): Promise<any[]> {
+  const results: any[] = [];
+  let cursor: string | null = null;
+  const pageSize = 100;
+  while (results.length < maxDocs) {
+    const queries: string[] = cursor
+      ? [...baseQueries, Query.limit(pageSize), Query.cursorAfter(cursor)]
+      : [...baseQueries, Query.limit(pageSize)];
+    const res: any = await db.listDocuments(DATABASE_ID, collectionId, queries);
+    results.push(...res.documents);
+    if (res.documents.length < pageSize) break;
+    cursor = res.documents[res.documents.length - 1].$id;
+  }
+  return results;
+}
+
+export async function getFirstProtectedUserId(
+  db: ReturnType<typeof getAdminDatabases>
+): Promise<string | null> {
+  try {
+    const res = await db.listDocuments(DATABASE_ID, COL.USERS, [
+      Query.orderAsc('join_date'),
+      Query.limit(1),
+    ]);
+    if (res.documents[0]?.$id) return res.documents[0].$id;
+  } catch {
+    // fallback below
+  }
+  try {
+    const res = await db.listDocuments(DATABASE_ID, COL.USERS, [
+      Query.orderAsc('$createdAt'),
+      Query.limit(1),
+    ]);
+    return res.documents[0]?.$id ?? null;
+  } catch {
+    return null;
   }
 }
 

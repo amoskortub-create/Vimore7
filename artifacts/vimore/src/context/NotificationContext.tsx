@@ -7,6 +7,7 @@ import { databases, DATABASE_ID, COL, ID, Query } from '@/lib/appwrite';
 import { firePush } from '@/lib/push-fire';
 import { authFetch } from '@/lib/auth-fetch';
 import { subscribeToPush } from '@/lib/push-notifications';
+import { checkNativePushPermission, isNativePushAvailable, registerNativePush } from '@/lib/native-push';
 import { safeJson } from '@/lib/utils';
 import { isWithinQuietHours, playNotificationSound } from '@/lib/notification-sound';
 
@@ -52,7 +53,7 @@ interface NotificationContextType {
   decrementUnreadMessageCount: (by?: number) => void;
   updateMessagePreview: (clusterId: string, text: string, time: string) => void;
   refreshNotifications: (userId: string) => Promise<void>;
-  requestPushPermission: () => Promise<void>;
+  requestPushPermission: () => Promise<{ granted: boolean; backgroundPush: boolean; platform: 'native' | 'web' }>;
   hasPushPermission: boolean;
 }
 
@@ -79,9 +80,16 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const { settings, triggerHaptic, currentUser, selectedChatId } = usePosts();
 
   useEffect(() => {
-    if (!currentUser?.$id || Capacitor.isNativePlatform() || typeof window === 'undefined' || !('Notification' in window)) return;
-
-    setHasPushPermission(Notification.permission === 'granted');
+    if (!currentUser?.$id || typeof window === 'undefined') return;
+    if (isNativePushAvailable()) {
+      checkNativePushPermission().then((granted) => {
+        setHasPushPermission(granted);
+      }).catch(() => {});
+      return;
+    }
+    if ('Notification' in window) {
+      setHasPushPermission(Notification.permission === 'granted');
+    }
   }, [currentUser?.$id]);
 
   // Tracks IDs currently being deleted so polls don't re-add them
@@ -328,21 +336,51 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     await loadNotifications(userId);
   }, [loadNotifications]);
 
-  const requestPushPermission = async () => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
+  const requestPushPermission = async (): Promise<{ granted: boolean; backgroundPush: boolean; platform: 'native' | 'web' }> => {
+    if (isNativePushAvailable()) {
+      const status = await registerNativePush(currentUser?.$id);
+      if (status === 'granted') {
+        setHasPushPermission(true);
+        return { granted: true, backgroundPush: true, platform: 'native' };
+      }
+      setHasPushPermission(false);
+      if (status === 'denied') {
+        throw new Error('Notification permission was denied. Open your phone App Settings for ViMore and enable Notifications.');
+      }
+      throw new Error('Device push notifications could not be initialized on this Android device.');
+    }
+
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setHasPushPermission(false);
+      throw new Error('This browser does not support push notifications. Install the ViMore app or open ViMore in Chrome.');
+    }
+
+    if (Notification.permission === 'denied') {
+      setHasPushPermission(false);
+      throw new Error('Notifications are blocked in your browser. Tap the lock icon next to the address bar and set Notifications to Allow.');
+    }
+
     const permission = await Notification.requestPermission();
     const granted = permission === 'granted';
     setHasPushPermission(granted);
-    if (granted) {
-      try {
-        const token = await subscribeToPush();
-        if (!token) {
-          throw new Error('This browser could not register for Firebase push notifications.');
-        }
-      } catch (error) {
-        setHasPushPermission(false);
-        throw error;
-      }
+
+    if (!granted) {
+      throw new Error('Notification permission was not granted. Please tap Allow when your browser asks for notification permission.');
+    }
+
+    try {
+      const endpoint = await subscribeToPush();
+      return {
+        granted: true,
+        backgroundPush: Boolean(endpoint),
+        platform: 'web',
+      };
+    } catch {
+      return {
+        granted: true,
+        backgroundPush: false,
+        platform: 'web',
+      };
     }
   };
 

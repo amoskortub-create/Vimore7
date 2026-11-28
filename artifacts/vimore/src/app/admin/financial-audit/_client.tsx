@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { usePosts } from "@/context/PostContext";
-import { databases, DATABASE_ID, COL, client, Query } from "@/lib/appwrite";
-import { calculatePlatformFee } from "@/lib/transaction-fee";
+import { DATABASE_ID, COL, client } from "@/lib/appwrite";
+import { authFetch } from "@/lib/auth-fetch";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -33,51 +33,6 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-
-async function fetchAll(collectionId: string, queries: string[] = []): Promise<any[]> {
-  const results: any[] = [];
-  let cursor: string | null = null;
-  const limit = 100;
-  while (true) {
-    const q: string[] = cursor
-      ? [...queries, Query.limit(limit), Query.cursorAfter(cursor)]
-      : [...queries, Query.limit(limit)];
-    const res: any = await databases.listDocuments(DATABASE_ID, collectionId, q);
-    results.push(...res.documents);
-    if (res.documents.length < limit) break;
-    cursor = res.documents[res.documents.length - 1].$id;
-  }
-  return results;
-}
-
-const FEE_SPLIT_TYPES = new Set(["GIFT_SENT", "POST_UNLOCK", "SUBSCRIPTION", "TRACK_PURCHASE"]);
-
-async function sumTransactionsByTypes(types: string[]): Promise<{ total: number; count: number }> {
-  let total = 0;
-  let count = 0;
-  for (const type of types) {
-    const docs = await fetchAll(COL.TRANSACTIONS, [Query.equal("type", type)]);
-    for (const d of docs) {
-      const raw = Number(d.amount || 0);
-      total += FEE_SPLIT_TYPES.has(type) ? calculatePlatformFee(raw) : raw;
-      count++;
-    }
-  }
-  return { total: Math.round(total * 100) / 100, count };
-}
-
-async function deleteTransactionsByTypes(types: string[]): Promise<number> {
-  let deleted = 0;
-  for (const type of types) {
-    const docs = await fetchAll(COL.TRANSACTIONS, [Query.equal("type", type)]);
-    await Promise.all(
-      docs.map((d) =>
-        databases.deleteDocument(DATABASE_ID, COL.TRANSACTIONS, d.$id).then(() => deleted++)
-      )
-    );
-  }
-  return deleted;
-}
 
 interface RevenueMetric {
   id: string;
@@ -170,7 +125,7 @@ const METRIC_DEFS: Omit<RevenueMetric, "total" | "count">[] = [
 ];
 
 export default function FinancialAuditPage() {
-  const { currentUser, addAuditLog } = usePosts();
+  const { currentUser } = usePosts();
   const { toast } = useToast();
 
   const role = currentUser?.role;
@@ -188,45 +143,28 @@ export default function FinancialAuditPage() {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
-      const allUsers = await fetchAll(COL.USERS, [
-        Query.select(["$id", "gold_balance", "diamond_balance"]),
-      ]);
-      let totalGold = 0;
-      let totalDiamond = 0;
-      for (const u of allUsers) {
-        totalGold += u.gold_balance || 0;
-        totalDiamond += u.diamond_balance || 0;
-      }
+      const res = await authFetch(`/api/admin/financial-audit?ts=${Date.now()}`, { cache: "no-store" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) throw new Error(data?.error || "Failed to load financial audit");
 
-      const metricPromises = METRIC_DEFS.filter((m) => !m.isFromCampaigns).map((m) =>
-        sumTransactionsByTypes(m.types).then((r) => ({ id: m.id, ...r }))
-      );
-      const metricResults = await Promise.all(metricPromises);
-
-      const allCampaigns = await fetchAll(COL.AD_CAMPAIGNS, [Query.select(["$id", "budget"])]).catch(
-        () => []
-      );
-      let campaignRevenue = 0;
-      for (const c of allCampaigns) {
-        campaignRevenue += c.budget || 0;
-      }
-
+      const serverMetrics: any[] = Array.isArray(data.metrics) ? data.metrics : [];
       const metrics: RevenueMetric[] = METRIC_DEFS.map((def) => {
-        if (def.isFromCampaigns) {
-          return { ...def, total: campaignRevenue, count: allCampaigns.length };
-        }
-        const r = metricResults.find((m) => m.id === def.id);
-        return { ...def, total: r?.total || 0, count: r?.count || 0 };
+        const m = serverMetrics.find((x) => x.id === def.id);
+        return {
+          ...def,
+          total: Number(m?.total || 0),
+          count: Number(m?.count || 0),
+        };
       });
 
       setStats({
-        totalGold,
-        totalDiamond,
-        userCount: allUsers.length,
+        totalGold: Number(data.totalGold || 0),
+        totalDiamond: Number(data.totalDiamond || 0),
+        userCount: Number(data.userCount || 0),
         metrics,
-        campaignRevenue,
-        campaignCount: allCampaigns.length,
-        lastUpdated: new Date(),
+        campaignRevenue: Number(data.campaignRevenue || 0),
+        campaignCount: Number(data.campaignCount || 0),
+        lastUpdated: new Date(data.lastUpdated || Date.now()),
       });
     } catch (err) {
       console.error("Financial audit load error:", err);
@@ -242,7 +180,10 @@ export default function FinancialAuditPage() {
   }, [loadStats]);
 
   useEffect(() => {
-    if (!isAllowed) return;
+    if (!isAllowed) {
+      setLoading(false);
+      return;
+    }
     loadStats();
 
     const channels = [
@@ -262,28 +203,18 @@ export default function FinancialAuditPage() {
   async function handleReset(metric: (typeof METRIC_DEFS)[0]) {
     setIsResetting(true);
     try {
-      let deleted = 0;
-      if (metric.isFromCampaigns) {
-        const all = await fetchAll(COL.AD_CAMPAIGNS, [Query.select(["$id"])]);
-        await Promise.all(
-          all.map((c) =>
-            databases.updateDocument(DATABASE_ID, COL.AD_CAMPAIGNS, c.$id, {
-              budget: 0,
-            })
-          )
-        );
-        deleted = all.length;
-      } else {
-        deleted = await deleteTransactionsByTypes(metric.types);
-      }
+      const res = await authFetch("/api/admin/financial-audit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ categoryId: metric.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Could not reset this revenue category.");
 
-      addAuditLog(
-        "FINANCIAL_AUDIT_RESET",
-        `Revenue for "${metric.label}" reset by @${currentUser?.username}. ${deleted} records affected.`
-      );
+      const affected = Number(data.affected || 0);
       toast({
         title: "Revenue reset",
-        description: `${deleted} record${deleted !== 1 ? "s" : ""} cleared for "${metric.label}".`,
+        description: `${affected} record${affected !== 1 ? "s" : ""} cleared for "${metric.label}".`,
       });
       setResetTarget(null);
       await loadStats(true);

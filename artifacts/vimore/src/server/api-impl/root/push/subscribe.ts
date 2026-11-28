@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
     const db = getAdminDatabases();
     await db.updateDocument(DATABASE_ID, COL.USERS, session.authUser.$id, {
       push_subscription: JSON.stringify(subscription),
+      push_enabled: true,
     });
 
     return NextResponse.json({ ok: true });

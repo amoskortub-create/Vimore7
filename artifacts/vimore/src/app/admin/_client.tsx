@@ -38,6 +38,7 @@ import {
   Clock,
   ArrowDownCircle,
   ArrowUpCircle,
+  CreditCard,
   ImageIcon,
   X,
   Smartphone,
@@ -152,7 +153,7 @@ import { AdminTicketTab } from "@/components/tickets/AdminTicketTab";
 import { AdminCheckTicketTab } from "@/components/tickets/AdminCheckTicketTab";
 import { SecurityEventsTab } from "@/components/admin/SecurityEventsTab";
 
-type AdminTab = "economy" | "safety" | "campaigns" | "resolution" | "logs" | "staff" | "users" | "broadcast" | "tickets" | "check_ticket" | "treasury" | "referrals" | "knowledge" | "sync" | "verifications" | "security" | "active_users" | "cleanup";
+type AdminTab = "economy" | "oversight" | "safety" | "campaigns" | "resolution" | "logs" | "staff" | "users" | "broadcast" | "tickets" | "check_ticket" | "treasury" | "referrals" | "knowledge" | "sync" | "verifications" | "security" | "active_users" | "cleanup";
 
 interface TreasurySnapshot {
   totalUsers: number;
@@ -276,11 +277,43 @@ export default function AdminDashboard() {
   const [isProcessingVerification, setIsProcessingVerification] = useState(false);
 
   // Cleanup tab state (Super + Moderator)
-  const [cleanupResult, setCleanupResult] = useState<{ postBoosts: number; trackBoosts: number; verifications: number; campaigns: number } | null>(null);
+  const [cleanupResult, setCleanupResult] = useState<{ postBoosts: number; trackBoosts: number; verifications: number; campaigns: number; purgedUsers?: number } | null>(null);
   const [alertResult, setAlertResult] = useState<{ posts: number; tracks: number; users: number } | null>(null);
   const [isRunningCleanup, setIsRunningCleanup] = useState(false);
   const [isRunningAlerts, setIsRunningAlerts] = useState(false);
   const [cleanupLastRun, setCleanupLastRun] = useState<Date | null>(null);
+
+  // Super Admin Oversight (Audit & Restore) state
+  const [oversightSubTab, setOversightSubTab] = useState<'payments' | 'withdrawals' | 'restricted'>('payments');
+  const [oversightData, setOversightData] = useState<{
+    payments: any[];
+    withdrawals: any[];
+    restrictedUsers: any[];
+    restoredHistory: any[];
+  } | null>(null);
+  const [isLoadingOversight, setIsLoadingOversight] = useState(false);
+  const [oversightSearch, setOversightSearch] = useState('');
+  const [oversightStatusFilter, setOversightStatusFilter] = useState<string>('ALL');
+  const [restoreTarget, setRestoreTarget] = useState<any | null>(null);
+  const [restoreNote, setRestoreNote] = useState('');
+  const [isRestoringUser, setIsRestoringUser] = useState(false);
+
+  // Safety tab confirmation dialogs (replacing browser confirm())
+  const [safetyWarnTarget, setSafetyWarnTarget] = useState<{
+    sellerId: string;
+    sellerUsername: string;
+    productName: string;
+    reportId: string;
+    targetId: string;
+    reason: string;
+  } | null>(null);
+  const [safetyWarnSeverity, setSafetyWarnSeverity] = useState<'SOFT' | 'FINAL'>('SOFT');
+  const [safetyDeleteTarget, setSafetyDeleteTarget] = useState<{
+    targetId: string;
+    productName: string;
+    reportId: string;
+  } | null>(null);
+  const [isSafetyProcessing, setIsSafetyProcessing] = useState(false);
 
   // Active Users tab state (SUPER admin only)
   const [activeUsersData, setActiveUsersData] = useState<{
@@ -336,11 +369,12 @@ export default function AdminDashboard() {
     if (isUnauthorized) return;
     const fetchShieldCount = async () => {
       try {
-        const res = await databases.listDocuments(DATABASE_ID, COL.ADMIN_REPORTS, [
-          Query.equal('status', 'open'),
-          Query.limit(1),
-        ]);
-        setAiShieldCount(res.total);
+        const res = await authFetch('/api/admin/shield?status=open');
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (data) {
+          setAiShieldCount(Number(data?.counts?.open ?? (data?.reports?.length || 0)));
+        }
       } catch { /* non-critical */ }
     };
     fetchShieldCount();
@@ -358,13 +392,13 @@ export default function AdminDashboard() {
       refreshAdminData();
       const interval = setInterval(() => {
         refreshAdminData();
-      }, 5000);
+      }, 10000);
       return () => clearInterval(interval);
     }
   }, [isUnauthorized, refreshAdminData, addAuditLog, currentUser?.username]);
 
   useEffect(() => {
-    if ((activeTab === 'users' || activeTab === 'broadcast') && !isUnauthorized) {
+    if ((activeTab === 'users' || activeTab === 'broadcast' || activeTab === 'staff') && !isUnauthorized) {
       refreshAllUsers();
       const interval = setInterval(() => {
         refreshAllUsers();
@@ -379,10 +413,10 @@ export default function AdminDashboard() {
     setIsBanning(true);
     try {
       await banUser(banTarget.$id, banReason, banNote);
-      await addAuditLog('USER_BANNED', `@${banTarget.username} permanently banned. Reason: ${banReason}${banNote ? ` | Note: ${banNote}` : ''}`);
       toast({ title: "Account Terminated", description: `@${banTarget.username} has been banned from ViMore.` });
       setBanTarget(null); setBanReason("Violation of Community Guidelines"); setBanNote(""); setBanConfirmText("");
-    } catch { toast({ variant: "destructive", title: "Ban failed" }); }
+      await refreshAdminData();
+    } catch (e: any) { toast({ variant: "destructive", title: "Ban failed", description: e?.message || "Could not ban user." }); }
     finally { setIsBanning(false); }
   };
 
@@ -392,10 +426,10 @@ export default function AdminDashboard() {
     setIsSuspending(true);
     try {
       await suspendUser(suspendTarget.$id, suspendDays, suspendReason, suspendMessage);
-      await addAuditLog('USER_SUSPENDED', `@${suspendTarget.username} suspended for ${suspendDays} day(s). Reason: ${suspendReason}`);
       toast({ title: "Account Suspended", description: `@${suspendTarget.username} suspended for ${suspendDays} day(s).` });
       setSuspendTarget(null); setSuspendDays(7); setSuspendReason("Repeated Policy Violations"); setSuspendMessage("");
-    } catch { toast({ variant: "destructive", title: "Suspension failed" }); }
+      await refreshAdminData();
+    } catch (e: any) { toast({ variant: "destructive", title: "Suspension failed", description: e?.message || "Could not suspend user." }); }
     finally { setIsSuspending(false); }
   };
 
@@ -404,10 +438,9 @@ export default function AdminDashboard() {
     setIsWarning(true);
     try {
       await warnUser(warnTarget.$id, warnMessage, warnSeverity);
-      await addAuditLog('USER_WARNED', `@${warnTarget.username} issued a ${warnSeverity} warning.`);
       toast({ title: "Warning Issued", description: `@${warnTarget.username} has been notified.` });
       setWarnTarget(null); setWarnMessage(""); setWarnSeverity('SOFT');
-    } catch { toast({ variant: "destructive", title: "Warning failed" }); }
+    } catch (e: any) { toast({ variant: "destructive", title: "Warning failed", description: e?.message }); }
     finally { setIsWarning(false); }
   };
 
@@ -455,7 +488,7 @@ export default function AdminDashboard() {
   }, [allUsers]);
 
   const availableTabs = useMemo(() => {
-    if (isSuper) return ["economy", "treasury", "referrals", "safety", "users", "broadcast", "campaigns", "tickets", "check_ticket", "resolution", "verifications", "logs", "staff", "knowledge", "active_users", "cleanup", "sync", "security"] as AdminTab[];
+    if (isSuper) return ["economy", "oversight", "treasury", "referrals", "safety", "users", "broadcast", "campaigns", "tickets", "check_ticket", "resolution", "verifications", "logs", "staff", "knowledge", "active_users", "cleanup", "sync", "security"] as AdminTab[];
     const tabs: AdminTab[] = ["logs"];
     if (isFinancial) tabs.push("economy", "treasury");
     if (isModerator) tabs.push("safety", "users", "campaigns", "resolution", "tickets", "check_ticket", "security", "cleanup");
@@ -463,22 +496,72 @@ export default function AdminDashboard() {
   }, [isSuper, isFinancial, isModerator]);
 
   const stats = useMemo(() => ({
-    totalNodes: connections.length,
+    totalNodes: allUsers.length || connections.length,
     totalSignatures: posts.length,
-    totalEnergy: connections.reduce((acc, c) => acc + (c.goldBalance || 0), 0),
+    totalEnergy: (allUsers.length ? allUsers : connections).reduce((acc, c) => acc + (c.goldBalance || 0), 0),
     auditEntries: auditLogs.length
-  }), [posts, connections, auditLogs]);
+  }), [posts, allUsers, connections, auditLogs]);
 
   // The first user ever created is permanently protected — their SUPER role can never be removed
   const firstUserId = useMemo(() => {
-    const allUsers = [currentUser, ...connections].filter(Boolean) as any[];
-    allUsers.sort((a, b) =>
+    const mergedMap = new Map<string, any>();
+    for (const u of [currentUser, ...allUsers, ...staff, ...connections]) {
+      if (u?.$id && !mergedMap.has(u.$id)) mergedMap.set(u.$id, u);
+    }
+    const list = Array.from(mergedMap.values());
+    list.sort((a, b) =>
       new Date(a.joinDate || a.$createdAt || 0).getTime() -
       new Date(b.joinDate || b.$createdAt || 0).getTime()
     );
-    return allUsers[0]?.$id ?? null;
-  }, [currentUser, connections]);
+    return list[0]?.$id ?? null;
+  }, [currentUser, allUsers, staff, connections]);
 
+  const fetchOversightData = async () => {
+    if (!isSuper) return;
+    setIsLoadingOversight(true);
+    try {
+      const res = await authFetch(`/api/admin/super-oversight?ts=${Date.now()}`, { cache: 'no-store' });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || 'Failed to load oversight records');
+      setOversightData(data);
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Oversight Load Failed', description: e?.message });
+    } finally {
+      setIsLoadingOversight(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'oversight' && isSuper && !isUnauthorized) {
+      fetchOversightData();
+    }
+  }, [activeTab, isSuper, isUnauthorized]);
+
+  const handleRestoreUser = async () => {
+    if (!restoreTarget) return;
+    setIsRestoringUser(true);
+    triggerHaptic(40);
+    try {
+      const res = await authFetch('/api/admin/restore-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: restoreTarget.$id, note: restoreNote.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Restore failed');
+      toast({
+        title: 'Access Restored',
+        description: `@${restoreTarget.username || restoreTarget.$id} can now sign in and use ViMore again.`,
+      });
+      setRestoreTarget(null);
+      setRestoreNote('');
+      await Promise.allSettled([fetchOversightData(), refreshAdminData()]);
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Restore Failed', description: e?.message || 'Could not restore access.' });
+    } finally {
+      setIsRestoringUser(false);
+    }
+  };
 
   const handleOpenWithdrawalDialog = (id: string, action: 'APPROVED' | 'REJECTED') => {
     setWithdrawalAdminMessage("");
@@ -500,8 +583,9 @@ export default function AdminDashboard() {
       }
       await processWithdrawal(withdrawalActionTarget.id, withdrawalActionTarget.action, withdrawalAdminMessage || undefined, proofImageUrl);
       toast({ title: withdrawalActionTarget.action === 'APPROVED' ? "Withdrawal Approved" : "Withdrawal Rejected" });
-    } catch {
-      toast({ variant: 'destructive', title: 'Action Failed', description: 'Could not process withdrawal.' });
+      if (oversightData) fetchOversightData();
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Action Failed', description: e?.message || 'Could not process withdrawal.' });
     } finally {
       setIsProcessingWithdrawal(false);
       setWithdrawalActionTarget(null);
@@ -523,14 +607,16 @@ export default function AdminDashboard() {
       if (paymentActionTarget.action === 'APPROVED') {
         await approvePaymentRequest(paymentActionTarget.id);
       } else {
-        await rejectPaymentRequest(paymentActionTarget.id);
+        await rejectPaymentRequest(paymentActionTarget.id, paymentRejectReason);
       }
       toast({ title: paymentActionTarget.action === 'APPROVED' ? "Payment Approved" : "Payment Rejected" });
-    } catch {
-      toast({ variant: 'destructive', title: 'Action Failed', description: 'Could not process payment.' });
+      if (oversightData) fetchOversightData();
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Action Failed', description: e?.message || 'Could not process payment.' });
     } finally {
       setIsProcessingPayment(false);
       setPaymentActionTarget(null);
+      setPaymentRejectReason("");
     }
   };
 
@@ -611,83 +697,24 @@ export default function AdminDashboard() {
   const fetchTreasuryData = async () => {
     setIsFetchingTreasury(true);
     try {
-      // Paginate through all users
-      let fetched: any[] = [];
-      let offset = 0;
-      const PAGE = 100;
-      while (true) {
-        const res = await databases.listDocuments(DATABASE_ID, COL.USERS, [Query.limit(PAGE), Query.offset(offset)]);
-        fetched = [...fetched, ...res.documents];
-        if (res.documents.length < PAGE) break;
-        offset += PAGE;
-      }
-
-      let totalGold = 0, totalDiamond = 0, totalStar = 0;
-      fetched.forEach(u => {
-        totalGold += u.gold_balance || 0;
-        totalDiamond += u.diamond_balance || 0;
-        totalStar += u.star_balance || 0;
-      });
-
-      const GOLD_RATE = 0.01;
-      const DIAMOND_RATE = 0.01;
-      const LD_MULTIPLIER = 190;
-      const goldUSD = totalGold * GOLD_RATE;
-      const diamondUSD = totalDiamond * DIAMOND_RATE;
-      const totalUSD = goldUSD + diamondUSD;
-      const totalLRD = totalUSD * LD_MULTIPLIER;
-
-      // Calculate platform fees from transactions (20% of all sender-side tx amounts)
-      let pfGold = 0, pfDiamond = 0;
-      try {
-        const txRes = await databases.listDocuments(DATABASE_ID, COL.TRANSACTIONS, [
-          Query.orderDesc('$createdAt'), Query.limit(500),
-        ]);
-        txRes.documents.forEach((tx: any) => {
-          const senderTypes = ['GIFT_SENT', 'POST_UNLOCK', 'SUBSCRIPTION'];
-          if (!senderTypes.includes(tx.type)) return;
-          const cut = calculatePlatformFee(Number(tx.amount || 0));
-          if (tx.currency === 'GOLD') pfGold += cut;
-          else if (tx.currency === 'DIAMOND') pfDiamond += cut;
-        });
-      } catch { /* ignore */ }
-
-      const platformFeesUSD = pfGold * GOLD_RATE + pfDiamond * DIAMOND_RATE;
-      const platformFeesLRD = platformFeesUSD * LD_MULTIPLIER;
-
-      const topHolders = fetched
-        .map(u => ({
-          username: u.username || 'unknown',
-          gold: u.gold_balance || 0,
-          diamond: u.diamond_balance || 0,
-          usd: (u.gold_balance || 0) * GOLD_RATE + (u.diamond_balance || 0) * DIAMOND_RATE,
-        }))
-        .sort((a, b) => b.usd - a.usd)
-        .slice(0, 20);
-
+      const res = await authFetch(`/api/admin/treasury?ts=${Date.now()}`, { cache: 'no-store' });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) throw new Error(data?.error || 'Failed to load treasury');
       setTreasurySnapshot({
-        totalUsers: fetched.length,
-        totalGold,
-        totalDiamond,
-        totalStar,
-        goldUSD,
-        diamondUSD,
-        totalUSD,
-        totalLRD,
-        platformFeesUSD,
-        platformFeesLRD,
-        topHolders,
-        snapshotTime: new Date(),
+        ...data,
+        snapshotTime: new Date(data.snapshotTime || Date.now()),
       });
       setTreasuryCountdown(3600);
-    } catch { /* ignore */ }
-    finally { setIsFetchingTreasury(false); }
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Treasury Load Failed', description: e?.message });
+    } finally {
+      setIsFetchingTreasury(false);
+    }
   };
 
   useEffect(() => {
     if (activeTab !== 'treasury') return;
     fetchTreasuryData();
-    // Countdown timer — tick every second, refetch at 0
     const ticker = setInterval(() => {
       setTreasuryCountdown(prev => {
         if (prev <= 1) {
@@ -700,29 +727,23 @@ export default function AdminDashboard() {
     return () => clearInterval(ticker);
   }, [activeTab]);
 
+  const fetchReferrals = async () => {
+    setIsFetchingReferrals(true);
+    try {
+      const res = await authFetch(`/api/admin/referrals?ts=${Date.now()}`, { cache: 'no-store' });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data) {
+        setReferralLeaders(data.leaders || []);
+        setTotalReferralCount(Number(data.totalReferralCount || 0));
+        setRecentReferralActivity(data.recentActivity || []);
+      }
+    } catch { /* silent */ }
+    finally { setIsFetchingReferrals(false); }
+  };
+
   useEffect(() => {
     if (activeTab !== 'referrals') return;
-    setIsFetchingReferrals(true);
-    Promise.allSettled([
-      databases.listDocuments(DATABASE_ID, COL.USERS, [
-        Query.orderDesc('referral_count'),
-        Query.limit(20),
-      ]),
-      databases.listDocuments(DATABASE_ID, COL.NOTIFICATIONS, [
-        Query.equal('title', 'Referral Bonus!'),
-        Query.orderDesc('$createdAt'),
-        Query.limit(30),
-      ]),
-    ]).then(([leadersRes, activityRes]) => {
-      if (leadersRes.status === 'fulfilled') {
-        const leaders = leadersRes.value.documents.filter((u: any) => (u.referral_count || 0) > 0);
-        setReferralLeaders(leaders);
-        setTotalReferralCount(leaders.reduce((s: number, u: any) => s + (u.referral_count || 0), 0));
-      }
-      if (activityRes.status === 'fulfilled') {
-        setRecentReferralActivity(activityRes.value.documents);
-      }
-    }).catch(() => {}).finally(() => setIsFetchingReferrals(false));
+    fetchReferrals();
   }, [activeTab]);
 
   const fetchKnowledgeEntries = async (page = 0) => {
@@ -804,21 +825,22 @@ export default function AdminDashboard() {
     };
   }, [activeTab, isSuper]);
 
+  const loadVerifications = async () => {
+    setIsLoadingVerifications(true);
+    try {
+      const res = await authFetch('/api/admin/verifications');
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setPendingVerifications(data.records ?? []);
+      }
+    } catch { /* ignore */ } finally {
+      setIsLoadingVerifications(false);
+    }
+  };
+
   // Load pending verifications when on verifications tab
   useEffect(() => {
     if (activeTab !== 'verifications') return;
-    const loadVerifications = async () => {
-      setIsLoadingVerifications(true);
-      try {
-        const res = await authFetch('/api/admin/verifications');
-        if (res.ok) {
-          const data = await res.json().catch(() => ({}));
-          setPendingVerifications(data.records ?? []);
-        }
-      } catch { /* ignore */ } finally {
-        setIsLoadingVerifications(false);
-      }
-    };
     loadVerifications();
   }, [activeTab]);
 
@@ -873,76 +895,26 @@ export default function AdminDashboard() {
     setSyncResults(null);
     setSyncLog([]);
 
-    let updated = 0, skipped = 0, errors = 0;
-    const log: string[] = [];
-
     try {
-      // Page through ALL users
-      let offset = 0;
-      const pageSize = 100;
-      let allUsers: any[] = [];
-      while (true) {
-        const res = await databases.listDocuments(DATABASE_ID, COL.USERS, [
-          Query.limit(pageSize),
-          Query.offset(offset),
-        ]);
-        allUsers = allUsers.concat(res.documents);
-        if (res.documents.length < pageSize) break;
-        offset += pageSize;
-      }
-      setSyncTotal(allUsers.length);
+      const res = await authFetch('/api/admin/sync-counts', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Sync failed');
 
-      for (let i = 0; i < allUsers.length; i++) {
-        const u = allUsers[i];
-        setSyncProgress(i + 1);
-        try {
-          const [followersRes, followingRes, postsRes] = await Promise.allSettled([
-            databases.listDocuments(DATABASE_ID, COL.FOLLOWS, [Query.equal('following_id', u.$id), Query.limit(1)]),
-            databases.listDocuments(DATABASE_ID, COL.FOLLOWS, [Query.equal('follower_id', u.$id), Query.limit(1)]),
-            databases.listDocuments(DATABASE_ID, COL.POSTS, [Query.equal('user_id', u.$id), Query.limit(1)]),
-          ]);
-
-          const realFollowers = followersRes.status === 'fulfilled' ? followersRes.value.total : null;
-          const realFollowing = followingRes.status === 'fulfilled' ? followingRes.value.total : null;
-          const realPosts = postsRes.status === 'fulfilled' ? postsRes.value.total : null;
-
-          const storedFollowers = u.followers_count ?? 0;
-          const storedFollowing = u.following_count ?? 0;
-          const storedPosts = u.posts_count ?? 0;
-
-          const needsUpdate =
-            (realFollowers !== null && realFollowers !== storedFollowers) ||
-            (realFollowing !== null && realFollowing !== storedFollowing) ||
-            (realPosts !== null && realPosts !== storedPosts);
-
-          if (needsUpdate) {
-            const patch: Record<string, number> = {};
-            if (realFollowers !== null) patch.followers_count = realFollowers;
-            if (realFollowing !== null) patch.following_count = realFollowing;
-            if (realPosts !== null) patch.posts_count = realPosts;
-            await databases.updateDocument(DATABASE_ID, COL.USERS, u.$id, patch);
-            log.push(`✓ @${u.username || u.$id}: followers ${storedFollowers}→${realFollowers ?? '?'}, following ${storedFollowing}→${realFollowing ?? '?'}, posts ${storedPosts}→${realPosts ?? '?'}`);
-            updated++;
-          } else {
-            skipped++;
-          }
-        } catch (e: any) {
-          log.push(`✗ @${u.username || u.$id}: ${e.message || 'unknown error'}`);
-          errors++;
-        }
-
-        // Throttle to avoid rate limits
-        if ((i + 1) % 10 === 0) {
-          setSyncLog([...log]);
-          await new Promise(r => setTimeout(r, 200));
-        }
-      }
-
-      setSyncResults({ updated, skipped, errors });
-      setSyncLog([...log]);
-      toast({ title: 'Sync Complete', description: `${updated} updated · ${skipped} already correct · ${errors} errors` });
+      const total = Number(data.total || 0);
+      setSyncTotal(total);
+      setSyncProgress(total);
+      setSyncResults({
+        updated: Number(data.updated || 0),
+        skipped: Number(data.skipped || 0),
+        errors: Number(data.errors || 0),
+      });
+      setSyncLog(Array.isArray(data.log) ? data.log : []);
+      toast({
+        title: 'Sync Complete',
+        description: `${data.updated || 0} updated · ${data.skipped || 0} already correct · ${data.errors || 0} errors`,
+      });
     } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Sync Failed', description: e.message });
+      toast({ variant: 'destructive', title: 'Sync Failed', description: e?.message || 'Could not sync counts.' });
     } finally {
       setIsSyncing(false);
     }
@@ -968,6 +940,7 @@ export default function AdminDashboard() {
 
   const TABS_DATA = {
     economy: { label: "Economy", icon: Coins },
+    oversight: { label: "Audit & Restore", icon: ShieldCheck },
     treasury: { label: "Treasury", icon: BarChart3 },
     referrals: { label: "Referrals", icon: Share2 },
     safety: { label: "Safety", icon: ShieldAlert },
@@ -1432,7 +1405,7 @@ export default function AdminDashboard() {
                 <div className="space-y-4">
                   {pendingPayments.length > 0 ? pendingPayments.map((p) => {
                     const pUser = userMap[p.username];
-                    const coinColor = (p.coin_type || '').toLowerCase() === 'diamond' ? 'cyan' : 'amber';
+                    const coinColor = (p.coin_type || '').toLowerCase() === 'diamond' || (p.coin_type || '').toLowerCase() === 'credit' ? 'cyan' : 'amber';
                     return (
                       <div key={p.$id} className="bg-card border border-border rounded-[2rem] overflow-hidden shadow-lg">
                         {/* Header strip */}
@@ -1497,7 +1470,7 @@ export default function AdminDashboard() {
                               style={{ aspectRatio: '9/16', maxHeight: '480px' }}
                               onClick={() => setSelectedReceipt(p.screenshot)}
                             >
-                              <Image src={p.screenshot} alt="Payment Confirmation" fill className="object-cover" />
+                              <Image src={p.screenshot} alt="Payment Confirmation" fill referrerPolicy="no-referrer" className="object-cover" />
                               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
                               <div className="absolute bottom-3 left-0 right-0 flex justify-center">
                                 <div className="bg-black/70 backdrop-blur-sm rounded-xl px-4 py-2 flex items-center gap-2 group-hover:bg-primary/80 transition-colors">
@@ -1535,6 +1508,547 @@ export default function AdminDashboard() {
               )}
             </div>
           )}
+
+          {activeTab === 'oversight' && isSuper && (() => {
+            const q = oversightSearch.trim().toLowerCase();
+            const payments = (oversightData?.payments || []).filter((p: any) => {
+              const matchesStatus = oversightStatusFilter === 'ALL' || p.status === oversightStatusFilter;
+              const matchesQuery = !q ||
+                p.username?.toLowerCase().includes(q) ||
+                p.userName?.toLowerCase().includes(q) ||
+                p.code?.toLowerCase().includes(q) ||
+                p.packageName?.toLowerCase().includes(q) ||
+                p.reviewedByName?.toLowerCase().includes(q) ||
+                p.reviewedByUsername?.toLowerCase().includes(q);
+              return matchesStatus && matchesQuery;
+            });
+            const withdrawals = (oversightData?.withdrawals || []).filter((w: any) => {
+              const matchesStatus = oversightStatusFilter === 'ALL' || w.status === oversightStatusFilter;
+              const matchesQuery = !q ||
+                w.username?.toLowerCase().includes(q) ||
+                w.userName?.toLowerCase().includes(q) ||
+                w.accountName?.toLowerCase().includes(q) ||
+                w.accountNumber?.toLowerCase().includes(q) ||
+                w.method?.toLowerCase().includes(q) ||
+                w.reviewedByName?.toLowerCase().includes(q) ||
+                w.reviewedByUsername?.toLowerCase().includes(q);
+              return matchesStatus && matchesQuery;
+            });
+            const restrictedUsers = (oversightData?.restrictedUsers || []).filter((u: any) => {
+              const matchesStatus = oversightStatusFilter === 'ALL' || u.status === oversightStatusFilter;
+              const matchesQuery = !q ||
+                u.username?.toLowerCase().includes(q) ||
+                u.name?.toLowerCase().includes(q) ||
+                u.email?.toLowerCase().includes(q) ||
+                u.banReason?.toLowerCase().includes(q) ||
+                u.bannedByName?.toLowerCase().includes(q) ||
+                u.suspendedByName?.toLowerCase().includes(q);
+              return matchesStatus && matchesQuery;
+            });
+            const restoredHistory = (oversightData?.restoredHistory || []).filter((r: any) => {
+              if (!q) return true;
+              return (
+                r.username?.toLowerCase().includes(q) ||
+                r.userName?.toLowerCase().includes(q) ||
+                r.restoredByName?.toLowerCase().includes(q) ||
+                r.actionByName?.toLowerCase().includes(q)
+              );
+            });
+
+            return (
+              <div className="space-y-6 animate-in fade-in duration-500">
+                {/* Header */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 px-1">
+                  <div>
+                    <h3 className="text-2xl font-black italic uppercase tracking-tighter flex items-center gap-2">
+                      <ShieldCheck className="h-6 w-6 text-primary" />
+                      Audit &amp; Restore
+                    </h3>
+                    <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mt-0.5">
+                      Super Admin Accountability · Full Payment, Payout &amp; User Restriction Records
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={isLoadingOversight}
+                    onClick={fetchOversightData}
+                    className="h-10 rounded-2xl border-primary/20 gap-2 font-black uppercase text-[10px] tracking-widest"
+                  >
+                    {isLoadingOversight ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />}
+                    Refresh
+                  </Button>
+                </div>
+
+                {/* Summary Stat Cards */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="bg-card/60 border border-border/50 rounded-3xl p-4 flex items-center gap-3">
+                    <div className="h-10 w-10 bg-primary/10 rounded-2xl flex items-center justify-center shrink-0">
+                      <CreditCard className="h-5 w-5 text-primary" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Payments</p>
+                      <p className="text-xl font-black text-primary">{oversightData?.payments?.length ?? 0}</p>
+                    </div>
+                  </div>
+                  <div className="bg-card/60 border border-border/50 rounded-3xl p-4 flex items-center gap-3">
+                    <div className="h-10 w-10 bg-cyan-500/10 rounded-2xl flex items-center justify-center shrink-0">
+                      <ArrowUpCircle className="h-5 w-5 text-cyan-400" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Withdrawals</p>
+                      <p className="text-xl font-black text-cyan-400">{oversightData?.withdrawals?.length ?? 0}</p>
+                    </div>
+                  </div>
+                  <div className="bg-card/60 border border-border/50 rounded-3xl p-4 flex items-center gap-3">
+                    <div className="h-10 w-10 bg-destructive/10 rounded-2xl flex items-center justify-center shrink-0">
+                      <UserX className="h-5 w-5 text-destructive" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Restricted</p>
+                      <p className="text-xl font-black text-destructive">{oversightData?.restrictedUsers?.length ?? 0}</p>
+                    </div>
+                  </div>
+                  <div className="bg-card/60 border border-border/50 rounded-3xl p-4 flex items-center gap-3">
+                    <div className="h-10 w-10 bg-emerald-500/10 rounded-2xl flex items-center justify-center shrink-0">
+                      <Undo2 className="h-5 w-5 text-emerald-400" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Restored</p>
+                      <p className="text-xl font-black text-emerald-400">{oversightData?.restoredHistory?.length ?? 0}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sub-tab toggle */}
+                <div className="flex gap-1 bg-secondary/40 p-1.5 rounded-2xl w-full overflow-x-auto">
+                  {([
+                    { id: 'payments', label: 'Payments', icon: CreditCard, count: oversightData?.payments?.length ?? 0 },
+                    { id: 'withdrawals', label: 'Withdrawals', icon: ArrowUpCircle, count: oversightData?.withdrawals?.length ?? 0 },
+                    { id: 'restricted', label: 'Blocked & Suspended', icon: UserX, count: oversightData?.restrictedUsers?.length ?? 0 },
+                  ] as const).map(st => (
+                    <button
+                      key={st.id}
+                      onClick={() => { setOversightSubTab(st.id); setOversightStatusFilter('ALL'); }}
+                      className={cn(
+                        "flex-1 min-w-[130px] py-2.5 px-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 whitespace-nowrap",
+                        oversightSubTab === st.id ? "bg-card text-primary shadow-md" : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <st.icon className="h-3.5 w-3.5" />
+                      {st.label}
+                      <span className="px-1.5 py-0.5 rounded-full bg-secondary text-[9px] font-black">{st.count}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Search + Filter */}
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      value={oversightSearch}
+                      onChange={e => setOversightSearch(e.target.value)}
+                      placeholder={
+                        oversightSubTab === 'payments'
+                          ? "Search user, admin name, package, or ref code..."
+                          : oversightSubTab === 'withdrawals'
+                            ? "Search user, admin name, account name, number, or method..."
+                            : "Search user, email, reason, or blocking admin..."
+                      }
+                      className="pl-10 h-11 bg-secondary/30 border-none rounded-2xl font-bold"
+                    />
+                  </div>
+                  <div className="flex gap-1 bg-secondary/40 p-1.5 rounded-2xl shrink-0 overflow-x-auto">
+                    {(oversightSubTab === 'restricted'
+                      ? [
+                          { id: 'ALL', label: 'All' },
+                          { id: 'banned', label: 'Banned' },
+                          { id: 'suspended', label: 'Suspended' },
+                        ]
+                      : [
+                          { id: 'ALL', label: 'All' },
+                          { id: 'APPROVED', label: 'Approved' },
+                          { id: 'REJECTED', label: 'Rejected' },
+                          { id: 'PENDING', label: 'Pending' },
+                        ]
+                    ).map(opt => (
+                      <button
+                        key={opt.id}
+                        onClick={() => setOversightStatusFilter(opt.id)}
+                        className={cn(
+                          "px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wide transition-all",
+                          oversightStatusFilter === opt.id ? "bg-white dark:bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {isLoadingOversight && !oversightData ? (
+                  <div className="flex flex-col items-center justify-center py-24 gap-3">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Loading oversight ledger...</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* PAYMENTS LIST */}
+                    {oversightSubTab === 'payments' && (
+                      <div className="space-y-4">
+                        {payments.length === 0 ? (
+                          <div className="py-16 text-center bg-card/30 rounded-3xl border border-dashed border-border text-xs font-black uppercase tracking-widest text-muted-foreground/50">
+                            No matching payment records
+                          </div>
+                        ) : payments.map((p: any) => {
+                          const statusBadge =
+                            p.status === 'APPROVED' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' :
+                            p.status === 'REJECTED' ? 'bg-destructive/15 text-destructive border-destructive/20' :
+                            'bg-amber-500/15 text-amber-400 border-amber-500/20';
+                          return (
+                            <div key={p.$id} className="bg-card border border-border rounded-[2rem] p-5 space-y-4 shadow-md">
+                              <div className="flex items-start justify-between gap-3 flex-wrap">
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <Avatar className="h-12 w-12 border border-border rounded-2xl shrink-0">
+                                    <AvatarImage src={p.userAvatar} />
+                                    <AvatarFallback className="font-black rounded-2xl">{(p.userName || p.username || '?')[0]?.toUpperCase()}</AvatarFallback>
+                                  </Avatar>
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                      <p className="font-black text-sm truncate">{p.userName}</p>
+                                      {p.userVerified && <CheckCircle2 className="h-3.5 w-3.5 text-primary fill-primary shrink-0" />}
+                                    </div>
+                                    <p className="text-[11px] font-bold text-muted-foreground">@{p.username || 'unknown'}</p>
+                                    {p.createdAt && <p className="text-[10px] text-muted-foreground/60">{new Date(p.createdAt).toLocaleString()}</p>}
+                                  </div>
+                                </div>
+                                <Badge className={cn("text-[9px] font-black uppercase border px-3 py-1", statusBadge)}>{p.status}</Badge>
+                              </div>
+
+                              {/* Admin Attribution Banner */}
+                              <div className={cn(
+                                "rounded-2xl px-4 py-3 border flex items-center justify-between gap-2 flex-wrap",
+                                p.status === 'APPROVED' ? "bg-emerald-500/10 border-emerald-500/20" :
+                                p.status === 'REJECTED' ? "bg-destructive/10 border-destructive/20" :
+                                "bg-amber-500/10 border-amber-500/20"
+                              )}>
+                                <div className="flex items-center gap-2 text-xs font-bold">
+                                  {p.status === 'APPROVED' ? <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" /> :
+                                   p.status === 'REJECTED' ? <XCircle className="h-4 w-4 text-destructive shrink-0" /> :
+                                   <Clock className="h-4 w-4 text-amber-400 shrink-0" />}
+                                  <span>
+                                    {p.status === 'APPROVED' && (p.reviewedByName ? `Accepted by ${p.reviewedByName}${p.reviewedByUsername ? ` (@${p.reviewedByUsername})` : ''}` : 'Accepted (Admin attribution not recorded on legacy entry)')}
+                                    {p.status === 'REJECTED' && (p.reviewedByName ? `Rejected by ${p.reviewedByName}${p.reviewedByUsername ? ` (@${p.reviewedByUsername})` : ''}` : 'Rejected (Admin attribution not recorded on legacy entry)')}
+                                    {p.status === 'PENDING' && 'Awaiting Financial Admin review'}
+                                  </span>
+                                </div>
+                                {p.reviewedAt && (
+                                  <span className="text-[10px] font-bold text-muted-foreground">{new Date(p.reviewedAt).toLocaleString()}</span>
+                                )}
+                              </div>
+
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                <div className="bg-secondary/30 rounded-2xl p-3">
+                                  <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Package</p>
+                                  <p className="font-black text-xs mt-0.5 truncate">{p.packageName}</p>
+                                </div>
+                                <div className="bg-secondary/30 rounded-2xl p-3">
+                                  <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Paid</p>
+                                  <p className="font-black text-xs mt-0.5">{p.currency === 'USD' ? '$' : 'L$'}{p.amount} {p.currency}</p>
+                                </div>
+                                <div className="bg-secondary/30 rounded-2xl p-3">
+                                  <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Credited</p>
+                                  <p className="font-black text-xs mt-0.5 text-primary">{Number(p.coinAmount || 0).toLocaleString()} {p.coinType}</p>
+                                </div>
+                                <div className="bg-secondary/30 rounded-2xl p-3">
+                                  <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Ref Code</p>
+                                  <p className="font-mono font-black text-xs mt-0.5 truncate">{p.code || '—'}</p>
+                                </div>
+                              </div>
+
+                              {p.rejectionReason && (
+                                <div className="bg-destructive/10 border border-destructive/20 rounded-2xl p-3">
+                                  <p className="text-[9px] font-black uppercase tracking-widest text-destructive">Rejection Reason</p>
+                                  <p className="text-xs font-medium mt-0.5">{p.rejectionReason}</p>
+                                </div>
+                              )}
+
+                              {p.screenshotUrl ? (
+                                <div
+                                  onClick={() => setSelectedReceipt(p.screenshotUrl)}
+                                  className="relative w-full h-56 rounded-2xl overflow-hidden border border-border cursor-zoom-in group bg-black/20"
+                                >
+                                  <img src={p.screenshotUrl} alt="Payment Screenshot" referrerPolicy="no-referrer" className="w-full h-full object-contain" />
+                                  <div className="absolute bottom-2 right-2 bg-black/75 text-white text-[10px] font-black uppercase px-3 py-1.5 rounded-xl flex items-center gap-1.5 group-hover:bg-primary transition-colors">
+                                    <Eye className="h-3.5 w-3.5" /> Zoom Screenshot
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="rounded-2xl bg-secondary/20 border border-dashed border-border py-4 text-center text-[10px] font-black uppercase text-muted-foreground/50">
+                                  No payment screenshot attached
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* WITHDRAWALS LIST */}
+                    {oversightSubTab === 'withdrawals' && (
+                      <div className="space-y-4">
+                        {withdrawals.length === 0 ? (
+                          <div className="py-16 text-center bg-card/30 rounded-3xl border border-dashed border-border text-xs font-black uppercase tracking-widest text-muted-foreground/50">
+                            No matching withdrawal records
+                          </div>
+                        ) : withdrawals.map((w: any) => {
+                          const statusBadge =
+                            w.status === 'APPROVED' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' :
+                            w.status === 'REJECTED' ? 'bg-destructive/15 text-destructive border-destructive/20' :
+                            'bg-amber-500/15 text-amber-400 border-amber-500/20';
+                          return (
+                            <div key={w.$id} className="bg-card border border-border rounded-[2rem] p-5 space-y-4 shadow-md">
+                              <div className="flex items-start justify-between gap-3 flex-wrap">
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <Avatar className="h-12 w-12 border border-border rounded-2xl shrink-0">
+                                    <AvatarImage src={w.userAvatar} />
+                                    <AvatarFallback className="font-black rounded-2xl">{(w.userName || w.username || '?')[0]?.toUpperCase()}</AvatarFallback>
+                                  </Avatar>
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                      <p className="font-black text-sm truncate">{w.userName}</p>
+                                      {w.userVerified && <CheckCircle2 className="h-3.5 w-3.5 text-primary fill-primary shrink-0" />}
+                                    </div>
+                                    <p className="text-[11px] font-bold text-muted-foreground">@{w.username || 'unknown'}</p>
+                                    {w.createdAt && <p className="text-[10px] text-muted-foreground/60">{new Date(w.createdAt).toLocaleString()}</p>}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline" className="text-[9px] font-black uppercase">{w.method}</Badge>
+                                  <Badge className={cn("text-[9px] font-black uppercase border px-3 py-1", statusBadge)}>{w.status}</Badge>
+                                </div>
+                              </div>
+
+                              {/* Admin Attribution Banner */}
+                              <div className={cn(
+                                "rounded-2xl px-4 py-3 border flex items-center justify-between gap-2 flex-wrap",
+                                w.status === 'APPROVED' ? "bg-emerald-500/10 border-emerald-500/20" :
+                                w.status === 'REJECTED' ? "bg-destructive/10 border-destructive/20" :
+                                "bg-amber-500/10 border-amber-500/20"
+                              )}>
+                                <div className="flex items-center gap-2 text-xs font-bold">
+                                  {w.status === 'APPROVED' ? <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" /> :
+                                   w.status === 'REJECTED' ? <XCircle className="h-4 w-4 text-destructive shrink-0" /> :
+                                   <Clock className="h-4 w-4 text-amber-400 shrink-0" />}
+                                  <span>
+                                    {w.status === 'APPROVED' && (w.reviewedByName ? `Approved by ${w.reviewedByName}${w.reviewedByUsername ? ` (@${w.reviewedByUsername})` : ''}` : 'Approved (Admin attribution not recorded on legacy entry)')}
+                                    {w.status === 'REJECTED' && (w.reviewedByName ? `Rejected by ${w.reviewedByName}${w.reviewedByUsername ? ` (@${w.reviewedByUsername})` : ''}` : 'Rejected (Admin attribution not recorded on legacy entry)')}
+                                    {w.status === 'PENDING' && 'Awaiting Financial Admin payout'}
+                                  </span>
+                                </div>
+                                {w.reviewedAt && (
+                                  <span className="text-[10px] font-bold text-muted-foreground">{new Date(w.reviewedAt).toLocaleString()}</span>
+                                )}
+                              </div>
+
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                <div className="bg-secondary/30 rounded-2xl p-3">
+                                  <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Recipient Name</p>
+                                  <p className="font-black text-xs mt-0.5 truncate">{w.accountName || '—'}</p>
+                                </div>
+                                <div className="bg-secondary/30 rounded-2xl p-3">
+                                  <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Account / Phone</p>
+                                  <p className="font-mono font-black text-xs mt-0.5 truncate">{w.accountNumber || '—'}</p>
+                                </div>
+                                <div className="bg-secondary/30 rounded-2xl p-3">
+                                  <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Deducted</p>
+                                  <p className="font-black text-xs mt-0.5">{Number(w.amount || 0).toLocaleString()} {w.currency}</p>
+                                </div>
+                                <div className="bg-primary/10 border border-primary/20 rounded-2xl p-3">
+                                  <p className="text-[9px] font-black uppercase tracking-widest text-primary/70">Payout</p>
+                                  <p className="font-black text-xs mt-0.5 text-primary">{Number(w.payoutAmount || 0).toFixed(2)} {w.payoutCurrency}</p>
+                                </div>
+                              </div>
+
+                              {w.adminMessage && (
+                                <div className="bg-secondary/20 rounded-2xl p-3">
+                                  <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Admin Note</p>
+                                  <p className="text-xs font-medium mt-0.5">{w.adminMessage}</p>
+                                </div>
+                              )}
+
+                              {w.proofImageUrl && (
+                                <div
+                                  onClick={() => setSelectedReceipt(w.proofImageUrl)}
+                                  className="relative w-full h-48 rounded-2xl overflow-hidden border border-border cursor-zoom-in group bg-black/20"
+                                >
+                                  <img src={w.proofImageUrl} alt="Payout Proof" referrerPolicy="no-referrer" className="w-full h-full object-contain" />
+                                  <div className="absolute bottom-2 right-2 bg-black/75 text-white text-[10px] font-black uppercase px-3 py-1.5 rounded-xl flex items-center gap-1.5 group-hover:bg-primary transition-colors">
+                                    <Eye className="h-3.5 w-3.5" /> Zoom Proof Receipt
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* BLOCKED & SUSPENDED USERS LIST */}
+                    {oversightSubTab === 'restricted' && (
+                      <div className="space-y-6">
+                        <div className="space-y-4">
+                          {restrictedUsers.length === 0 ? (
+                            <div className="py-16 text-center bg-card/30 rounded-3xl border border-dashed border-border text-xs font-black uppercase tracking-widest text-muted-foreground/50">
+                              No currently banned or suspended accounts
+                            </div>
+                          ) : restrictedUsers.map((u: any) => {
+                            const isBanned = u.status === 'banned';
+                            const actorName = isBanned ? u.bannedByName : u.suspendedByName;
+                            const actorUsername = isBanned ? u.bannedByUsername : u.suspendedByUsername;
+                            const actionTime = isBanned ? u.bannedAt : u.suspendedAt;
+                            return (
+                              <div key={u.$id} className="bg-card border border-border rounded-[2rem] p-5 space-y-4 shadow-md">
+                                <div className="flex items-start justify-between gap-3 flex-wrap">
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    <Avatar className="h-14 w-14 border border-border rounded-2xl shrink-0">
+                                      <AvatarImage src={u.avatar} />
+                                      <AvatarFallback className="font-black rounded-2xl">{(u.name || u.username || '?')[0]?.toUpperCase()}</AvatarFallback>
+                                    </Avatar>
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <p className="font-black text-base truncate">{u.name}</p>
+                                        <Badge className={cn("text-[9px] font-black uppercase border-none", isBanned ? "bg-destructive/15 text-destructive" : "bg-amber-400/15 text-amber-400")}>
+                                          {isBanned ? 'BANNED' : 'SUSPENDED'}
+                                        </Badge>
+                                        <Badge variant="outline" className="text-[9px] font-black uppercase">{u.role}</Badge>
+                                      </div>
+                                      <p className="text-xs font-bold text-muted-foreground">@{u.username || 'no-username'} · ID: <span className="font-mono">{u.$id}</span></p>
+                                      <div className="flex flex-wrap gap-3 text-[10px] text-muted-foreground mt-1">
+                                        {u.email && <span>Email: {u.email}</span>}
+                                        {u.phone && <span>Phone: {u.phone}</span>}
+                                        <span>Warnings: {u.warningCount}</span>
+                                        {u.joinDate && <span>Joined: {new Date(u.joinDate).toLocaleDateString()}</span>}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {u.$id !== firstUserId && (
+                                    <Button
+                                      size="sm"
+                                      onClick={() => { setRestoreNote(''); setRestoreTarget(u); }}
+                                      className="h-10 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-[10px] gap-1.5 shrink-0"
+                                    >
+                                      <Undo2 className="h-3.5 w-3.5" />
+                                      Restore Access
+                                    </Button>
+                                  )}
+                                </div>
+
+                                {/* Admin Action Attribution */}
+                                <div className={cn(
+                                  "rounded-2xl px-4 py-3 border flex items-center justify-between gap-2 flex-wrap",
+                                  isBanned ? "bg-destructive/10 border-destructive/20" : "bg-amber-500/10 border-amber-500/20"
+                                )}>
+                                  <div className="flex items-center gap-2 text-xs font-bold">
+                                    {isBanned ? <UserX className="h-4 w-4 text-destructive shrink-0" /> : <Timer className="h-4 w-4 text-amber-400 shrink-0" />}
+                                    <span>
+                                      {isBanned ? 'Blocked by ' : 'Suspended by '}
+                                      {actorName ? `${actorName}${actorUsername ? ` (@${actorUsername})` : ''}` : 'Admin (legacy record)'}
+                                    </span>
+                                  </div>
+                                  {actionTime && (
+                                    <span className="text-[10px] font-bold text-muted-foreground">{new Date(actionTime).toLocaleString()}</span>
+                                  )}
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <div className="bg-secondary/30 rounded-2xl p-3 space-y-1">
+                                    <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Reason</p>
+                                    <p className="text-xs font-bold">{u.banReason || 'Policy violation'}</p>
+                                  </div>
+                                  {!isBanned && u.suspendedUntil && (
+                                    <div className="bg-secondary/30 rounded-2xl p-3 space-y-1">
+                                      <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Suspended Until</p>
+                                      <p className="text-xs font-bold text-amber-400">{new Date(u.suspendedUntil).toLocaleString()}</p>
+                                    </div>
+                                  )}
+                                  {u.banNote && (
+                                    <div className="bg-secondary/30 rounded-2xl p-3 space-y-1 sm:col-span-2">
+                                      <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Internal Note / Message</p>
+                                      <p className="text-xs font-medium text-muted-foreground">{u.banNote}</p>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {Array.isArray(u.records) && u.records.length > 0 && (
+                                  <div className="bg-secondary/20 rounded-2xl p-3 space-y-2">
+                                    <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Restriction History ({u.records.length})</p>
+                                    <div className="space-y-1.5">
+                                      {u.records.slice(0, 5).map((rec: any) => (
+                                        <div key={rec.$id} className="flex items-center justify-between gap-2 text-[11px] border-b border-border/30 last:border-none pb-1 last:pb-0">
+                                          <span className="font-bold truncate">
+                                            [{rec.status}] {rec.reason}{rec.note ? ` — ${rec.note}` : ''}
+                                          </span>
+                                          <span className="text-[10px] text-muted-foreground shrink-0">
+                                            by {rec.adminName || 'Admin'} · {rec.createdAt ? new Date(rec.createdAt).toLocaleDateString() : ''}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Recent Restorations Trail */}
+                        <div className="space-y-3 pt-4 border-t border-border/40">
+                          <div className="flex items-center justify-between px-1">
+                            <h4 className="text-sm font-black italic uppercase tracking-tighter flex items-center gap-2">
+                              <Undo2 className="h-4 w-4 text-emerald-400" />
+                              Recent Access Restorations
+                            </h4>
+                            <Badge className="bg-emerald-500/10 text-emerald-400 border-none text-[9px] font-black uppercase">
+                              {restoredHistory.length} Restored
+                            </Badge>
+                          </div>
+                          {restoredHistory.length === 0 ? (
+                            <div className="py-10 text-center bg-card/20 rounded-3xl border border-dashed border-border text-xs font-black uppercase tracking-widest text-muted-foreground/40">
+                              No restored accounts logged yet
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              {restoredHistory.map((item: any) => (
+                                <div key={item.$id} className="bg-card/50 border border-emerald-500/20 rounded-2xl p-4 flex items-center justify-between gap-3 flex-wrap">
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    <Avatar className="h-10 w-10 border border-border">
+                                      <AvatarImage src={item.userAvatar} />
+                                      <AvatarFallback className="text-xs font-black">{(item.userName || item.username || '?')[0]?.toUpperCase()}</AvatarFallback>
+                                    </Avatar>
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-bold truncate">{item.userName} <span className="text-muted-foreground text-xs">@{item.username}</span></p>
+                                      <p className="text-[11px] text-muted-foreground truncate">Original: {item.reason}{item.note ? ` (${item.note})` : ''} · Restricted by {item.actionByName}</p>
+                                    </div>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <p className="text-[11px] font-black text-emerald-400">Restored by {item.restoredByName}</p>
+                                    {item.restoredAt && <p className="text-[10px] text-muted-foreground">{new Date(item.restoredAt).toLocaleString()}</p>}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })()}
 
           {activeTab === 'campaigns' && (
             <div className="space-y-8 animate-in fade-in duration-500">
@@ -1760,7 +2274,7 @@ export default function AdminDashboard() {
                             ) : c.type === 'video' ? (
                               c.media_url ? <video src={c.media_url} className="w-full h-full object-cover" muted /> : <Video className="h-7 w-7 text-muted-foreground" />
                             ) : (
-                              c.media_url ? <Image src={c.media_url} alt="Campaign" fill className="object-cover" /> : <ImageIcon className="h-7 w-7 text-muted-foreground" />
+                              c.media_url ? <Image src={c.media_url} alt="Campaign" fill referrerPolicy="no-referrer" className="object-cover" /> : <ImageIcon className="h-7 w-7 text-muted-foreground" />
                             )}
                           </div>
                           <div className="flex-1 min-w-0 space-y-1.5">
@@ -1789,12 +2303,12 @@ export default function AdminDashboard() {
                                 </span>
                               )}
                             </div>
-                            {c.end_date && (
-                              <div className={cn("flex items-center gap-1.5 mt-0.5", new Date(c.end_date) <= new Date() ? "text-destructive" : "text-muted-foreground")}>
+                            {(c.expires_at || c.end_date) && (
+                              <div className={cn("flex items-center gap-1.5 mt-0.5", new Date(c.expires_at || c.end_date) <= new Date() ? "text-destructive" : "text-muted-foreground")}>
                                 <CalendarClock className="h-3 w-3 shrink-0" />
                                 <span className="text-[10px] font-black">
-                                  {new Date(c.end_date) <= new Date() ? "Expired: " : "Ends: "}
-                                  {new Date(c.end_date).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                  {new Date(c.expires_at || c.end_date) <= new Date() ? "Expired: " : "Ends: "}
+                                  {new Date(c.expires_at || c.end_date).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                 </span>
                               </div>
                             )}
@@ -1907,24 +2421,26 @@ export default function AdminDashboard() {
                                 <a href={`/marketplace/${r.target_id}`} target="_blank" rel="noopener"><Eye className="h-3.5 w-3.5 mr-1.5" />View</a>
                               </Button>
                               {meta?.sellerId && (
-                                <Button size="sm" className="flex-1 h-10 rounded-2xl bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-white font-black uppercase text-xs transition-all" onClick={async () => {
+                                <Button size="sm" className="flex-1 h-10 rounded-2xl bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-white font-black uppercase text-xs transition-all" onClick={() => {
                                   triggerHaptic(50);
-                                  const severity = confirm('Send FINAL warning?\n\nOK = FINAL warning\nCancel = SOFT warning') ? 'FINAL' : 'SOFT';
-                                  const msg = `Your product "${reportedLabel}" was reported for: ${r.reason}. Please review ViMore Marketplace policies.`;
-                                  await warnUser(meta.sellerId, msg, severity as 'SOFT' | 'FINAL');
-                                  await handleReportAction(r.$id, 'RESOLVED');
-                                  addAuditLog('USER_WARNED_FROM_PRODUCT_REPORT', `Warned @${meta.sellerUsername} (${severity}) for product ${r.target_id}`);
-                                  toast({ title: `${severity} warning sent` });
+                                  setSafetyWarnSeverity('SOFT');
+                                  setSafetyWarnTarget({
+                                    sellerId: meta.sellerId,
+                                    sellerUsername: meta.sellerUsername || '',
+                                    productName: reportedLabel,
+                                    reportId: r.$id,
+                                    targetId: r.target_id,
+                                    reason: r.reason || 'Policy violation',
+                                  });
                                 }}><AlertTriangle className="h-3.5 w-3.5 mr-1.5" />Warn</Button>
                               )}
-                              <Button size="sm" className="flex-1 h-10 rounded-2xl bg-destructive/10 text-destructive hover:bg-destructive hover:text-white font-black uppercase text-xs transition-all" onClick={async () => {
+                              <Button size="sm" className="flex-1 h-10 rounded-2xl bg-destructive/10 text-destructive hover:bg-destructive hover:text-white font-black uppercase text-xs transition-all" onClick={() => {
                                 triggerHaptic(80);
-                                if (!confirm(`Delete product "${reportedLabel}"? This cannot be undone.`)) return;
-                                try {
-                                  await adminDeleteProduct(r.target_id);
-                                  await handleReportAction(r.$id, 'RESOLVED');
-                                  addAuditLog('PRODUCT_DELETED_BY_ADMIN', `Product ${r.target_id} ("${reportedLabel}") deleted from report ${r.$id}`);
-                                } catch { /* toast already shown */ }
+                                setSafetyDeleteTarget({
+                                  targetId: r.target_id,
+                                  productName: reportedLabel,
+                                  reportId: r.$id,
+                                });
                               }}><Trash2 className="h-3.5 w-3.5 mr-1.5" />Delete</Button>
                             </div>
                           )}
@@ -2052,21 +2568,30 @@ export default function AdminDashboard() {
                                             <Timer className="h-3 w-3 mr-1" />Suspend
                                           </Button>
                                         )}
-                                        {userStatus === 'suspended' && (
-                                          <Button size="sm" variant="ghost" className="h-8 px-3 rounded-xl text-[9px] font-black uppercase text-green-400 hover:bg-green-400/10" onClick={async () => {
+                                        {userStatus === 'suspended' && isSuper && (
+                                          <Button size="sm" variant="ghost" className="h-8 px-3 rounded-xl text-[9px] font-black uppercase text-green-400 hover:bg-green-400/10" onClick={() => {
                                             triggerHaptic(10);
-                                            await suspendUser(u.$id, 0, '', '');
-                                            await addAuditLog('SUSPENSION_LIFTED', `Suspension on @${u.username} lifted early by admin`);
-                                            toast({ title: "Suspension Lifted", description: `@${u.username} can now access the platform.` });
+                                            setRestoreNote('Suspension lifted early');
+                                            setRestoreTarget(u);
                                           }}>
                                             <Undo2 className="h-3 w-3 mr-1" />Lift
                                           </Button>
                                         )}
                                       </>
                                     )}
-                                    <Button size="sm" variant="ghost" className="h-8 px-3 rounded-xl text-[9px] font-black uppercase text-destructive hover:bg-destructive/10" onClick={() => { triggerHaptic(50); setBanTarget(u); setBanConfirmText(""); setBanNote(""); }}>
-                                      <UserX className="h-3 w-3 mr-1" />{userStatus === 'banned' ? 'Banned' : 'Ban'}
-                                    </Button>
+                                    {userStatus === 'banned' ? (
+                                      isSuper ? (
+                                        <Button size="sm" variant="ghost" className="h-8 px-3 rounded-xl text-[9px] font-black uppercase text-emerald-400 hover:bg-emerald-500/10" onClick={() => { triggerHaptic(20); setRestoreNote(''); setRestoreTarget(u); }}>
+                                          <Undo2 className="h-3 w-3 mr-1" />Restore
+                                        </Button>
+                                      ) : (
+                                        <Badge className="text-[8px] font-black uppercase bg-destructive/10 text-destructive border-none">Banned</Badge>
+                                      )
+                                    ) : (
+                                      <Button size="sm" variant="ghost" className="h-8 px-3 rounded-xl text-[9px] font-black uppercase text-destructive hover:bg-destructive/10" onClick={() => { triggerHaptic(50); setBanTarget(u); setBanConfirmText(""); setBanNote(""); }}>
+                                        <UserX className="h-3 w-3 mr-1" />Ban
+                                      </Button>
+                                    )}
                                   </div>
                                 )}
                               </td>
@@ -2267,6 +2792,15 @@ export default function AdminDashboard() {
                       <h5 className="font-black text-base">{t.subject}</h5>
                       <p className="text-sm text-muted-foreground leading-relaxed">{t.message}</p>
                     </div>
+                    {t.admin_reply && (
+                      <div className="bg-primary/5 border border-primary/20 rounded-2xl p-4 space-y-1">
+                        <div className="flex items-center justify-between gap-2 text-[10px] font-black uppercase tracking-widest text-primary">
+                          <span>Admin Reply{t.replied_by_name ? ` · ${t.replied_by_name}` : ''}</span>
+                          {t.replied_at && <span className="text-muted-foreground font-bold">{new Date(t.replied_at).toLocaleString()}</span>}
+                        </div>
+                        <p className="text-xs text-foreground leading-relaxed">{t.admin_reply}</p>
+                      </div>
+                    )}
                     {t.status !== 'CLOSED' && (
                       <div className="space-y-3">
                         <textarea
@@ -2277,7 +2811,14 @@ export default function AdminDashboard() {
                           onChange={e => setTicketReplies(prev => ({ ...prev, [t.$id]: e.target.value }))}
                         />
                         <div className="flex gap-3 flex-wrap">
-                          {t.status === 'OPEN' && <Button size="sm" className="h-10 rounded-2xl bg-amber-400/10 text-amber-400 hover:bg-amber-400 hover:text-black font-black uppercase text-[10px]" onClick={() => { triggerHaptic(20); handleTicketAction(t.$id, 'IN_REVIEW'); addAuditLog('TICKET_REVIEWED', `Ticket ${t.$id} from @${t.username} moved to review`); toast({ title: "Ticket Under Review" }); }}><Eye className="h-3 w-3 mr-1" />Review</Button>}
+                          {t.status === 'OPEN' && <Button size="sm" className="h-10 rounded-2xl bg-amber-400/10 text-amber-400 hover:bg-amber-400 hover:text-black font-black uppercase text-[10px]" onClick={async () => {
+                            triggerHaptic(20);
+                            try {
+                              await handleTicketAction(t.$id, 'IN_REVIEW');
+                              addAuditLog('TICKET_REVIEWED', `Ticket ${t.$id} from @${t.username} moved to review`);
+                              toast({ title: "Ticket Under Review" });
+                            } catch (e: any) { toast({ variant: 'destructive', title: 'Update Failed', description: e?.message }); }
+                          }}><Eye className="h-3 w-3 mr-1" />Review</Button>}
                           <Button
                             size="sm"
                             disabled={!ticketReplies[t.$id]?.trim() || sendingReply === t.$id}
@@ -2290,13 +2831,20 @@ export default function AdminDashboard() {
                                 setTicketReplies(prev => { const n = { ...prev }; delete n[t.$id]; return n; });
                                 addAuditLog('TICKET_REPLIED', `Reply sent to @${t.username} for ticket ${t.$id}`);
                                 toast({ title: "Reply Sent", description: "User has been notified." });
-                              } catch { toast({ variant: 'destructive', title: 'Reply Failed' }); }
+                              } catch (e: any) { toast({ variant: 'destructive', title: 'Reply Failed', description: e?.message }); }
                               finally { setSendingReply(null); }
                             }}
                           >
                             <Check className="h-3 w-3 mr-1" />{sendingReply === t.$id ? 'Sending...' : 'Send Reply'}
                           </Button>
-                          <Button size="sm" className="h-10 rounded-2xl bg-green-500/10 text-green-500 hover:bg-green-500 hover:text-white font-black uppercase text-[10px]" onClick={() => { triggerHaptic(50); handleTicketAction(t.$id, 'CLOSED'); addAuditLog('TICKET_CLOSED', `Ticket ${t.$id} from @${t.username} resolved and closed`); toast({ title: "Ticket Closed" }); }}><Check className="h-3 w-3 mr-1" />Close</Button>
+                          <Button size="sm" className="h-10 rounded-2xl bg-green-500/10 text-green-500 hover:bg-green-500 hover:text-white font-black uppercase text-[10px]" onClick={async () => {
+                            triggerHaptic(50);
+                            try {
+                              await handleTicketAction(t.$id, 'CLOSED');
+                              addAuditLog('TICKET_CLOSED', `Ticket ${t.$id} from @${t.username} resolved and closed`);
+                              toast({ title: "Ticket Closed" });
+                            } catch (e: any) { toast({ variant: 'destructive', title: 'Close Failed', description: e?.message }); }
+                          }}><Check className="h-3 w-3 mr-1" />Close</Button>
                         </div>
                       </div>
                     )}
@@ -2331,13 +2879,16 @@ export default function AdminDashboard() {
                           <td className="px-8 py-5">
                             <div className="flex items-center gap-2 whitespace-nowrap">
                               <Avatar className="h-6 w-6 border border-primary/10">
-                                <AvatarImage src={log.performedByAvatar} />
-                                <AvatarFallback className="text-[8px]">{log.performedBy?.[0]?.toUpperCase() || '?'}</AvatarFallback>
+                                <AvatarImage src={log.performed_by_avatar || log.performedByAvatar} />
+                                <AvatarFallback className="text-[8px]">{(log.performed_by_name || log.performed_by || log.performedBy || '?')[0]?.toUpperCase()}</AvatarFallback>
                               </Avatar>
-                              <span className="text-[10px] font-black text-foreground">@{log.performedBy || 'system'}</span>
+                              <div>
+                                <p className="text-[10px] font-black text-foreground">{log.performed_by_name || log.performed_by || log.performedBy || 'System'}</p>
+                                <p className="text-[9px] text-muted-foreground">@{log.performed_by || log.performedBy || 'system'}</p>
+                              </div>
                             </div>
                           </td>
-                          <td className="px-8 py-5 whitespace-nowrap"><span className="text-[10px] font-black text-muted-foreground">{new Date(log.timestamp).toLocaleString()}</span></td>
+                          <td className="px-8 py-5 whitespace-nowrap"><span className="text-[10px] font-black text-muted-foreground">{new Date(log.$createdAt || log.timestamp || Date.now()).toLocaleString()}</span></td>
                         </tr>
                       )) : (<tr><td colSpan={4} className="py-24 text-center opacity-40 italic text-xs uppercase">No audit entries found</td></tr>)}
                     </tbody>
@@ -2370,9 +2921,10 @@ export default function AdminDashboard() {
                 </div>
                 {staffSearch.trim().length >= 2 && (() => {
                   const query = staffSearch.trim().toLowerCase();
-                  const results = connections.filter(c =>
+                  const userPool = allUsers.length > 0 ? allUsers : connections;
+                  const results = userPool.filter(c =>
                     c.username?.toLowerCase().includes(query) || c.name?.toLowerCase().includes(query)
-                  ).slice(0, 5);
+                  ).slice(0, 8);
                   return results.length > 0 ? (
                     <div className="space-y-3">
                       {results.map((user: any) => (
@@ -2396,9 +2948,12 @@ export default function AdminDashboard() {
                               variant="outline"
                               className="text-[10px] font-black uppercase rounded-xl border-violet-500/30 text-violet-400 hover:bg-violet-500 hover:text-white transition-all"
                               onClick={async () => {
-                                await promoteUser(user.username, 'MODERATOR');
-                                addAuditLog('STAFF_PROMOTED', `@${user.username} promoted to MODERATOR`);
-                                toast({ title: "Role Assigned", description: `@${user.username} is now a Moderator` });
+                                try {
+                                  await promoteUser(user.username, 'MODERATOR');
+                                  toast({ title: "Role Assigned", description: `@${user.username} is now a Moderator` });
+                                } catch (e: any) {
+                                  toast({ variant: 'destructive', title: 'Promotion Failed', description: e?.message || 'Could not assign role.' });
+                                }
                               }}
                             >Moderator</Button>
                             <Button
@@ -2406,9 +2961,12 @@ export default function AdminDashboard() {
                               variant="outline"
                               className="text-[10px] font-black uppercase rounded-xl border-green-500/30 text-green-400 hover:bg-green-500 hover:text-white transition-all"
                               onClick={async () => {
-                                await promoteUser(user.username, 'FINANCIAL');
-                                addAuditLog('STAFF_PROMOTED', `@${user.username} promoted to FINANCIAL`);
-                                toast({ title: "Role Assigned", description: `@${user.username} is now Financial Admin` });
+                                try {
+                                  await promoteUser(user.username, 'FINANCIAL');
+                                  toast({ title: "Role Assigned", description: `@${user.username} is now Financial Admin` });
+                                } catch (e: any) {
+                                  toast({ variant: 'destructive', title: 'Promotion Failed', description: e?.message || 'Could not assign role.' });
+                                }
                               }}
                             >Financial</Button>
                           </div>
@@ -2450,7 +3008,7 @@ export default function AdminDashboard() {
                                   "bg-primary/10 text-primary"
                                 )}>{member.role}</Badge>
                               </td>
-                              <td className="px-8 py-5"><span className="text-[10px] font-black text-muted-foreground">{member.assignedAt ? new Date(member.assignedAt).toLocaleDateString() : '—'}</span></td>
+                              <td className="px-8 py-5"><span className="text-[10px] font-black text-muted-foreground">{(member.assignedAt || member.$updatedAt || member.joinDate) ? new Date(member.assignedAt || member.$updatedAt || member.joinDate).toLocaleDateString() : '—'}</span></td>
                               <td className="px-8 py-5">
                                 {member.$id !== firstUserId ? (
                                   <Button
@@ -2458,9 +3016,12 @@ export default function AdminDashboard() {
                                     variant="destructive"
                                     className="text-[10px] font-black uppercase rounded-xl h-8 px-4"
                                     onClick={async () => {
-                                      await demoteUser(member.username);
-                                      addAuditLog('STAFF_REMOVED', `@${member.username} removed from staff roster`);
-                                      toast({ title: "Staff Removed", description: `@${member.username} has been demoted to User` });
+                                      try {
+                                        await demoteUser(member.username);
+                                        toast({ title: "Staff Removed", description: `@${member.username} has been demoted to User` });
+                                      } catch (e: any) {
+                                        toast({ variant: 'destructive', title: 'Removal Failed', description: e?.message || 'Could not remove staff member.' });
+                                      }
                                     }}
                                   >Remove</Button>
                                 ) : (
@@ -2493,29 +3054,7 @@ export default function AdminDashboard() {
                   variant="outline"
                   size="sm"
                   disabled={isFetchingReferrals}
-                  onClick={() => {
-                    setIsFetchingReferrals(true);
-                    Promise.allSettled([
-                      databases.listDocuments(DATABASE_ID, COL.USERS, [
-                        Query.orderDesc('referral_count'),
-                        Query.limit(20),
-                      ]),
-                      databases.listDocuments(DATABASE_ID, COL.NOTIFICATIONS, [
-                        Query.equal('title', 'Referral Bonus!'),
-                        Query.orderDesc('$createdAt'),
-                        Query.limit(30),
-                      ]),
-                    ]).then(([leadersRes, activityRes]) => {
-                      if (leadersRes.status === 'fulfilled') {
-                        const leaders = leadersRes.value.documents.filter((u: any) => (u.referral_count || 0) > 0);
-                        setReferralLeaders(leaders);
-                        setTotalReferralCount(leaders.reduce((s: number, u: any) => s + (u.referral_count || 0), 0));
-                      }
-                      if (activityRes.status === 'fulfilled') {
-                        setRecentReferralActivity(activityRes.value.documents);
-                      }
-                    }).catch(() => {}).finally(() => setIsFetchingReferrals(false));
-                  }}
+                  onClick={fetchReferrals}
                   className="h-10 rounded-2xl border-primary/20 gap-2 font-black uppercase text-[9px] tracking-widest"
                 >
                   {isFetchingReferrals ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />}
@@ -3094,14 +3633,26 @@ export default function AdminDashboard() {
           {/* ── VERIFICATIONS TAB ── */}
           {activeTab === 'verifications' && (
             <div className="p-6 space-y-6 max-w-2xl mx-auto">
-              <div className="flex items-center gap-4">
-                <div className="h-14 w-14 bg-blue-500/10 rounded-3xl flex items-center justify-center border border-blue-500/20 shrink-0">
-                  <UserVerifyIcon className="h-7 w-7 text-blue-400" />
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="h-14 w-14 bg-blue-500/10 rounded-3xl flex items-center justify-center border border-blue-500/20 shrink-0">
+                    <UserVerifyIcon className="h-7 w-7 text-blue-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-black italic uppercase tracking-tighter">Verification Requests</h3>
+                    <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mt-0.5">Review pending creator verification submissions</p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-2xl font-black italic uppercase tracking-tighter">Verification Requests</h3>
-                  <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mt-0.5">Review pending creator verification submissions</p>
-                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isLoadingVerifications}
+                  onClick={loadVerifications}
+                  className="h-10 rounded-2xl border-blue-500/20 text-blue-400 gap-2 font-black uppercase text-[9px] tracking-widest shrink-0"
+                >
+                  {isLoadingVerifications ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />}
+                  Refresh
+                </Button>
               </div>
 
               {isLoadingVerifications ? (
@@ -3529,6 +4080,7 @@ export default function AdminDashboard() {
                           { label: 'Track Boosts Reset', value: cleanupResult.trackBoosts, color: 'text-violet-400' },
                           { label: 'Badges Revoked', value: cleanupResult.verifications, color: 'text-blue-400' },
                           { label: 'Campaigns Ended', value: cleanupResult.campaigns, color: 'text-rose-400' },
+                          { label: 'Deleted Users Purged', value: cleanupResult.purgedUsers ?? 0, color: 'text-emerald-400' },
                         ].map((item) => (
                           <div key={item.label} className="rounded-2xl border border-border/30 bg-secondary/20 p-3 text-center">
                             <p className={`text-2xl font-black ${item.color}`}>{item.value}</p>
@@ -3631,6 +4183,7 @@ export default function AdminDashboard() {
                         { target: '🎵 Track Boosts', condition: 'is_boosted = true AND boost_expiry < now', action: 'Set is_boosted = false', color: 'text-violet-400' },
                         { target: '✅ Verification Badges', condition: 'is_verified = true AND verification_expiry < now', action: 'Set is_verified = false', color: 'text-blue-400' },
                         { target: '📣 Ad Campaigns', condition: 'is_active = true AND expires_at < now', action: 'Set is_active = false', color: 'text-rose-400' },
+                        { target: '🗑️ Scheduled Deletions', condition: 'status = pending_deletion AND scheduled_purge_at <= now', action: 'Purge account & data after 90d', color: 'text-emerald-400' },
                       ].map((row) => (
                         <tr key={row.target} className="border-b border-border/20 hover:bg-secondary/20 transition-colors">
                           <td className="px-5 py-3 font-black text-foreground">{row.target}</td>
@@ -3721,7 +4274,7 @@ export default function AdminDashboard() {
       {selectedReceipt && (
         <div className="fixed inset-0 z-[300] bg-black/95 backdrop-blur-3xl flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
           <Button variant="ghost" size="icon" className="absolute top-6 right-6 text-white bg-white/10 rounded-full" onClick={() => setSelectedReceipt(null)}><X className="h-6 w-6" /></Button>
-          <div className="relative w-full max-w-2xl aspect-[3/4] sm:aspect-video rounded-[2rem] overflow-hidden shadow-2xl border border-white/10"><Image src={selectedReceipt} alt="Receipt Proof" fill className="object-contain" /></div>
+          <div className="relative w-full max-w-2xl aspect-[3/4] sm:aspect-video rounded-[2rem] overflow-hidden shadow-2xl border border-white/10"><Image src={selectedReceipt} alt="Receipt Proof" fill referrerPolicy="no-referrer" className="object-contain" /></div>
           <p className="mt-6 text-[10px] font-black text-white/40 uppercase tracking-[0.4em]">Audit Trail Inspector</p>
         </div>
       )}
@@ -3974,6 +4527,154 @@ export default function AdminDashboard() {
               className={`flex-1 h-12 rounded-2xl font-black uppercase text-[10px] ${paymentActionTarget?.action === 'APPROVED' ? 'bg-green-600 hover:bg-green-500 text-white' : 'bg-destructive text-white hover:bg-destructive/80'}`}
             >
               {isProcessingPayment ? <Loader2 className="h-4 w-4 animate-spin" /> : (paymentActionTarget?.action === 'APPROVED' ? 'Confirm Approval' : 'Confirm Rejection')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Restore User Access Dialog (Super Admin) */}
+      <Dialog open={!!restoreTarget} onOpenChange={(o) => { if (!o && !isRestoringUser) { setRestoreTarget(null); setRestoreNote(''); } }}>
+        <DialogContent className="bg-card border-emerald-500/30 rounded-[2.5rem] max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-black italic uppercase tracking-tighter text-emerald-400 flex items-center gap-2">
+              <Undo2 className="h-5 w-5" />
+              Restore User Access
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Restore @{restoreTarget?.username || restoreTarget?.$id} back to active status.
+            </DialogDescription>
+          </DialogHeader>
+          {restoreTarget && (
+            <div className="space-y-4 py-2">
+              <div className="bg-secondary/30 rounded-2xl p-4 space-y-1">
+                <p className="font-bold text-sm">{restoreTarget.name} (@{restoreTarget.username})</p>
+                <p className="text-xs text-muted-foreground">
+                  Current status: <span className="font-bold uppercase text-foreground">{restoreTarget.status}</span>
+                </p>
+                {restoreTarget.banReason && (
+                  <p className="text-xs text-muted-foreground">Reason: {restoreTarget.banReason}</p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Restoration Note (Optional)</Label>
+                <Textarea
+                  value={restoreNote}
+                  onChange={(e) => setRestoreNote(e.target.value)}
+                  placeholder="e.g. Appeal reviewed and accepted..."
+                  className="bg-secondary/30 border-none rounded-2xl resize-none min-h-[80px]"
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter className="flex gap-3">
+            <Button variant="ghost" disabled={isRestoringUser} className="flex-1 h-12 rounded-2xl font-black uppercase text-[10px]" onClick={() => setRestoreTarget(null)}>Cancel</Button>
+            <Button
+              disabled={isRestoringUser}
+              onClick={handleRestoreUser}
+              className="flex-1 h-12 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-[10px]"
+            >
+              {isRestoringUser ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Confirm Restore'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Safety Warn Seller Dialog */}
+      <Dialog open={!!safetyWarnTarget} onOpenChange={(o) => { if (!o && !isSafetyProcessing) setSafetyWarnTarget(null); }}>
+        <DialogContent className="bg-card border-amber-400/30 rounded-[2.5rem] max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-black italic uppercase tracking-tighter text-amber-400 flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5" />
+              Warn Marketplace Seller
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Send an official warning to @{safetyWarnTarget?.sellerUsername || 'seller'} regarding &ldquo;{safetyWarnTarget?.productName}&rdquo;.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Warning Severity</Label>
+              <div className="flex gap-3">
+                {(['SOFT', 'FINAL'] as const).map(s => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setSafetyWarnSeverity(s)}
+                    className={cn(
+                      "flex-1 py-3 rounded-2xl text-[10px] font-black uppercase border-2 transition-all",
+                      safetyWarnSeverity === s
+                        ? (s === 'FINAL' ? "bg-destructive/10 border-destructive/40 text-destructive" : "bg-amber-400/10 border-amber-400/40 text-amber-400")
+                        : "border-border text-muted-foreground hover:border-primary/30"
+                    )}
+                  >
+                    {s === 'SOFT' ? 'Soft Warning' : 'Final Warning'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="flex gap-3">
+            <Button variant="ghost" disabled={isSafetyProcessing} className="flex-1 h-12 rounded-2xl font-black uppercase text-[10px]" onClick={() => setSafetyWarnTarget(null)}>Cancel</Button>
+            <Button
+              disabled={isSafetyProcessing}
+              onClick={async () => {
+                if (!safetyWarnTarget) return;
+                setIsSafetyProcessing(true);
+                try {
+                  const msg = `Your product "${safetyWarnTarget.productName}" was reported for: ${safetyWarnTarget.reason}. Please review ViMore Marketplace policies.`;
+                  await warnUser(safetyWarnTarget.sellerId, msg, safetyWarnSeverity);
+                  await handleReportAction(safetyWarnTarget.reportId, 'RESOLVED');
+                  addAuditLog('USER_WARNED_FROM_PRODUCT_REPORT', `Warned @${safetyWarnTarget.sellerUsername} (${safetyWarnSeverity}) for product ${safetyWarnTarget.targetId}`);
+                  toast({ title: `${safetyWarnSeverity} warning sent` });
+                  setSafetyWarnTarget(null);
+                } catch (e: any) {
+                  toast({ variant: 'destructive', title: 'Warning failed', description: e?.message || 'Could not warn seller.' });
+                } finally {
+                  setIsSafetyProcessing(false);
+                }
+              }}
+              className="flex-1 h-12 rounded-2xl bg-amber-500 hover:bg-amber-400 text-black font-black uppercase text-[10px]"
+            >
+              {isSafetyProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Send Warning'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Safety Delete Product Dialog */}
+      <Dialog open={!!safetyDeleteTarget} onOpenChange={(o) => { if (!o && !isSafetyProcessing) setSafetyDeleteTarget(null); }}>
+        <DialogContent className="bg-card border-destructive/30 rounded-[2.5rem] max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-black italic uppercase tracking-tighter text-destructive flex items-center gap-2">
+              <Trash2 className="h-5 w-5" />
+              Delete Reported Product
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Permanently delete &ldquo;{safetyDeleteTarget?.productName}&rdquo; and mark the report resolved? This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-3 pt-2">
+            <Button variant="ghost" disabled={isSafetyProcessing} className="flex-1 h-12 rounded-2xl font-black uppercase text-[10px]" onClick={() => setSafetyDeleteTarget(null)}>Cancel</Button>
+            <Button
+              disabled={isSafetyProcessing}
+              onClick={async () => {
+                if (!safetyDeleteTarget) return;
+                setIsSafetyProcessing(true);
+                try {
+                  await adminDeleteProduct(safetyDeleteTarget.targetId);
+                  await handleReportAction(safetyDeleteTarget.reportId, 'RESOLVED');
+                  addAuditLog('PRODUCT_DELETED_BY_ADMIN', `Product ${safetyDeleteTarget.targetId} ("${safetyDeleteTarget.productName}") deleted from report ${safetyDeleteTarget.reportId}`);
+                  toast({ title: 'Product deleted', description: 'Report has been marked resolved.' });
+                  setSafetyDeleteTarget(null);
+                } catch (e: any) {
+                  toast({ variant: 'destructive', title: 'Delete failed', description: e?.message || 'Could not delete product.' });
+                } finally {
+                  setIsSafetyProcessing(false);
+                }
+              }}
+              className="flex-1 h-12 rounded-2xl bg-destructive hover:bg-destructive/90 text-white font-black uppercase text-[10px]"
+            >
+              {isSafetyProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete Product'}
             </Button>
           </DialogFooter>
         </DialogContent>

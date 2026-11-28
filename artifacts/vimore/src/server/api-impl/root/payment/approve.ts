@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { DATABASE_ID, getAdminDatabases } from '@/lib/appwrite-server';
-import { COL } from '@/lib/appwrite';
-import { requireAdminUser, safeNotify } from '@/lib/server-helpers';
+import { BUCKET, COL, getAvatarUrl } from '@/lib/appwrite';
+import { requireAdminUser, safeNotify, logSecurityEvent, createAuditEntry, getClientIp } from '@/lib/server-helpers';
 
 export async function POST(req: NextRequest) {
   const admin = await requireAdminUser(req, ['SUPER', 'FINANCIAL']);
@@ -20,6 +20,9 @@ export async function POST(req: NextRequest) {
     const paymentReq = await db.getDocument(DATABASE_ID, COL.PAYMENT_REQUESTS, requestId);
     if (paymentReq.status === 'APPROVED') {
       return NextResponse.json({ ok: true, alreadyApproved: true });
+    }
+    if (paymentReq.status === 'REJECTED') {
+      return NextResponse.json({ error: 'Payment request was already rejected' }, { status: 409 });
     }
 
     const userId = String(paymentReq.user_id || '');
@@ -46,21 +49,55 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const adminUsername = String(admin.profileDoc.username || admin.authUser.$id);
+    const adminName = String(admin.profileDoc.name || admin.profileDoc.display_name || adminUsername);
+    const nowIso = new Date().toISOString();
+
     await db.updateDocument(DATABASE_ID, COL.PAYMENT_REQUESTS, requestId, {
       status: 'APPROVED',
-      reviewed_by: admin.profileDoc.username || admin.authUser.$id,
-      reviewed_at: new Date().toISOString(),
+      reviewed_by: adminUsername,
+      reviewed_by_id: admin.authUser.$id,
+      reviewed_by_name: adminName,
+      reviewed_at: nowIso,
     });
 
     if (userId) {
       await safeNotify({
         user_id: userId,
+        from_user_id: admin.authUser.$id,
+        from_user_name: adminName,
         type: 'SYSTEM',
         title: 'Payment Approved',
-        content: `Your top-up of ${coinAmount} Credits has been approved and added to your wallet.`,
+        content: `Your top-up of ${coinAmount} ${paymentReq.coin_type || 'Credits'} has been approved and added to your wallet.`,
         action_href: '/earnings',
       });
     }
+
+    await Promise.allSettled([
+      logSecurityEvent({
+        event_type: 'PAYMENT_APPROVED',
+        severity: 'INFO',
+        user_id: userId,
+        actor_id: admin.authUser.$id,
+        actor_role: admin.role,
+        target_id: requestId,
+        amount: coinAmount,
+        currency: coinType,
+        result: 'success',
+        endpoint: '/api/payment/approve',
+        method: 'POST',
+        ip_address: getClientIp(req),
+        details: `${adminName} (@${adminUsername}) approved payment #${requestId} for @${paymentReq.username || userId} (${coinAmount} ${paymentReq.coin_type || 'Credits'})`,
+      }),
+      createAuditEntry({
+        action: 'PAYMENT_APPROVED',
+        details: `Approved payment for @${paymentReq.username || userId}: ${coinAmount} ${paymentReq.coin_type || 'Credits'} ($${paymentReq.amount ?? 0} ${paymentReq.currency || 'USD'})`,
+        performedBy: adminUsername,
+        performedByName: adminName,
+        performedById: admin.authUser.$id,
+        performedByAvatar: admin.profileDoc.avatar_id ? getAvatarUrl(BUCKET.AVATARS, admin.profileDoc.avatar_id) : '',
+      }),
+    ]);
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {

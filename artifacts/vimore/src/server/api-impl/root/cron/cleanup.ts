@@ -80,12 +80,15 @@ export async function GET() {
 
     try {
       const expiredAds = await db.listDocuments(DATABASE_ID, COL.AD_CAMPAIGNS, [
-        Query.equal('status', 'ACTIVE'),
+        Query.equal('is_active', true),
         Query.lessThan('expires_at', now),
         Query.limit(100),
       ]);
       for (const doc of expiredAds.documents) {
-        await db.updateDocument(DATABASE_ID, COL.AD_CAMPAIGNS, doc.$id, { status: 'EXPIRED' });
+        await db.updateDocument(DATABASE_ID, COL.AD_CAMPAIGNS, doc.$id, {
+          status: 'EXPIRED',
+          is_active: false,
+        });
         campaigns += 1;
       }
     } catch {

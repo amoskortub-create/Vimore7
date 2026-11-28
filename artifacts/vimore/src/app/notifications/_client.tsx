@@ -32,8 +32,6 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useToast } from "@/hooks/use-toast";
-import { Capacitor } from "@capacitor/core";
-import { isPushSupported } from "@/lib/push-notifications";
 
 const TYPE_CONFIG: Record<string, { color: string; bg: string; border: string; dot: string; Icon: any }> = {
   SOCIAL:  { color: "text-blue-500",   bg: "bg-blue-500/10",   border: "border-blue-500/15",   dot: "bg-blue-500",   Icon: UserPlus   },
@@ -132,20 +130,27 @@ export default function NotificationsPage() {
                     </h1>
                   </div>
                   <div className="flex items-center gap-2">
-                  {currentUser && !Capacitor.isNativePlatform() && isPushSupported() && !hasPushPermission && (
+                  {currentUser && !hasPushPermission && (
                     <Button
                       variant="secondary"
                       className="rounded-full bg-white/15 text-white hover:bg-white/25"
                       onClick={async () => {
                         try {
-                          await requestPushPermission();
-                          if (Notification.permission === "granted") {
-                            toast({ title: "Push notifications enabled", description: "New messages, calls, and notifications can reach you when ViMore is closed." });
-                          } else {
-                            toast({ variant: "destructive", title: "Notifications not enabled", description: "Allow notifications for this site in your browser settings, then try again." });
+                          const result = await requestPushPermission();
+                          if (result.granted) {
+                            toast({
+                              title: "Push notifications enabled",
+                              description: result.backgroundPush
+                                ? "New messages, calls, and notifications can reach you when ViMore is closed."
+                                : "Browser alerts are enabled.",
+                            });
                           }
                         } catch (error: any) {
-                          toast({ variant: "destructive", title: "Could not enable notifications", description: error?.message || "Please try again." });
+                          toast({
+                            variant: "destructive",
+                            title: "Could not enable notifications",
+                            description: error?.message || "Allow notifications for ViMore in your browser or device settings, then try again.",
+                          });
                         }
                       }}
                     >

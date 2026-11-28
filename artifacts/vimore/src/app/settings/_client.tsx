@@ -89,7 +89,9 @@ import Link from "next/link";
 import { useToast } from "@/hooks/use-toast";
 import { clearAllLocalCaches } from "@/lib/offline-cache";
 import { playNotificationSound } from "@/lib/notification-sound";
+import { unsubscribeFromPush } from "@/lib/push-notifications";
 import { authFetch } from "@/lib/auth-fetch";
+import { Capacitor } from "@capacitor/core";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { NativeAdNode } from "@/components/ad/native-ad-node";
 import ProfileLoading from "../profile/loading";
@@ -328,26 +330,44 @@ export default function SettingsPage() {
     setIsTogglingPush(true);
     try {
       if (val) {
-        await requestPushPermission();
+        const result = await requestPushPermission();
+        if (!result.granted) {
+          setPushPreferenceEnabled(false);
+          return;
+        }
+        setPushPreferenceEnabled(true);
+        const res = await authFetch('/api/user/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pushEnabled: true }),
+        });
+        if (!res.ok) throw new Error('Could not save push notification preference.');
+        toast({
+          title: "Push Notifications Enabled",
+          description: result.backgroundPush
+            ? "You will receive alerts for messages, calls, and activity on this device."
+            : "Browser permission granted. Background push requires HTTPS or the ViMore APK.",
+        });
+      } else {
+        setPushPreferenceEnabled(false);
+        await unsubscribeFromPush();
+        const res = await authFetch('/api/user/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pushEnabled: false }),
+        });
+        if (!res.ok) throw new Error('Could not save push notification preference.');
+        toast({
+          title: "Push Notifications Off",
+          description: "Background push alerts have been paused for this device.",
+        });
       }
-      setPushPreferenceEnabled(val);
-      const res = await authFetch('/api/user/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pushEnabled: val }),
-      });
-      if (!res.ok) throw new Error('Could not update notification preference.');
-      toast({
-        title: val ? "Push Alerts Enabled" : "Push Alerts Muted",
-        description: val
-          ? "Browser/device alerts are active when permission is granted."
-          : "Background push notifications are turned off.",
-      });
     } catch (err: any) {
+      setPushPreferenceEnabled(false);
       toast({
         variant: "destructive",
-        title: "Notification Update Failed",
-        description: err?.message || "Check browser notification permissions and try again.",
+        title: "Push Permission Required",
+        description: err?.message || "Please allow notifications for ViMore in your browser or device settings.",
       });
     } finally {
       setIsTogglingPush(false);
@@ -626,7 +646,11 @@ export default function SettingsPage() {
                   <p className="font-bold text-sm">Push Notifications</p>
                 </div>
                 <p className="text-[10px] text-muted-foreground uppercase font-black">
-                  {hasPushPermission && pushPreferenceEnabled ? "Active on this device" : "Enable background alerts"}
+                  {pushPreferenceEnabled && hasPushPermission
+                    ? "Active on this device"
+                    : !Capacitor.isNativePlatform() && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'denied'
+                      ? "Blocked in browser site settings"
+                      : "Tap to allow browser or APK alerts"}
                 </p>
               </div>
               <Switch

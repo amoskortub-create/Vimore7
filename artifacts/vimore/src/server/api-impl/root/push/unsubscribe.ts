@@ -14,6 +14,8 @@ export async function POST(req: NextRequest) {
     await db.updateDocument(DATABASE_ID, COL.USERS, session.authUser.$id, {
       push_subscription: '',
       fcm_token: '',
+      push_token: '',
+      push_enabled: false,
     });
 
     return NextResponse.json({ ok: true });

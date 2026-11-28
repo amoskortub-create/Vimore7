@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { databases, DATABASE_ID, COL, Query } from "@/lib/appwrite";
+import { authFetch } from "@/lib/auth-fetch";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
@@ -80,38 +80,26 @@ export function AdminCheckTicketTab() {
     setIsChecking(true);
     setScanResult(null);
     try {
-      const res = await databases.listDocuments(DATABASE_ID, COL.TICKETS, [
-        Query.equal('serial_number', cleaned),
-        Query.limit(1),
-      ]);
-
-      if (res.documents.length === 0) {
-        setScanResult({ status: 'not_found', message: `No ticket found with serial number "${cleaned}".` });
-        return;
+      const res = await authFetch('/api/admin/tickets-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serialNumber: cleaned }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || 'Verification failed');
       }
-
-      const ticket = res.documents[0] as any;
-      const ownerName = ticket.owner_name || 'Guest';
-
-      if (ticket.is_used) {
-        setScanResult({
-          status: 'used',
-          message: `Sorry ${ownerName}, You have already used this Ticket. You can still Buy a New one.`,
-          ticket,
-        });
+      if (data.status === 'not_found') {
+        setScanResult({ status: 'not_found', message: data.message });
+      } else if (data.status === 'used') {
+        setScanResult({ status: 'used', message: data.message, ticket: data.ticket });
+      } else if (data.status === 'valid') {
+        setScanResult({ status: 'valid', message: data.message, ticket: data.ticket });
       } else {
-        await databases.updateDocument(DATABASE_ID, COL.TICKETS, ticket.$id, {
-          is_used: true,
-          used_at: new Date().toISOString(),
-        });
-        setScanResult({
-          status: 'valid',
-          message: `Welcome ${ownerName}, Enjoy the Event!`,
-          ticket,
-        });
+        throw new Error('Unexpected response from ticket check');
       }
     } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Check failed', description: e.message });
+      toast({ variant: 'destructive', title: 'Check failed', description: e?.message || 'Could not verify ticket.' });
     } finally {
       setIsChecking(false);
     }

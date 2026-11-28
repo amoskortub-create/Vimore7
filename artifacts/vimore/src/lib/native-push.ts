@@ -7,10 +7,20 @@ let currentUserId: string | undefined;
 let latestToken: Token | undefined;
 let lastSavedTokenKey: string | undefined;
 let onOpenHandler: ((url: string) => void) | undefined;
-let registrationInProgress: Promise<void> | undefined;
+let registrationInProgress: Promise<'granted' | 'denied' | 'unavailable'> | undefined;
 
 export function isNativePushAvailable(): boolean {
-  return Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
+  return Capacitor.isNativePlatform();
+}
+
+export async function checkNativePushPermission(): Promise<boolean> {
+  if (!isNativePushAvailable()) return false;
+  try {
+    const permission = await PushNotifications.checkPermissions();
+    return permission.receive === "granted";
+  } catch {
+    return false;
+  }
 }
 
 async function saveToken(token: Token, userId: string): Promise<void> {
@@ -39,10 +49,10 @@ async function saveLatestToken(): Promise<void> {
 export async function registerNativePush(
   userId: string | undefined,
   onOpen?: (url: string) => void,
-): Promise<void> {
-  if (!userId || !isNativePushAvailable()) return;
-  currentUserId = userId;
-  onOpenHandler = onOpen;
+): Promise<'granted' | 'denied' | 'unavailable'> {
+  if (!isNativePushAvailable()) return 'unavailable';
+  if (userId) currentUserId = userId;
+  if (onOpen) onOpenHandler = onOpen;
 
   if (!listenersRegistered) {
     listenersRegistered = true;
@@ -69,32 +79,38 @@ export async function registerNativePush(
   }
 
   if (registrationInProgress) {
-    await registrationInProgress;
-    return;
+    return registrationInProgress;
   }
 
-  registrationInProgress = (async () => {
-    let permission = await PushNotifications.checkPermissions();
-    if (permission.receive === "granted") {
-      await PushNotifications.register();
-      await saveLatestToken();
-      return;
-    }
-
-    if (
-      permission.receive === "prompt" ||
-      permission.receive === "prompt-with-rationale"
-    ) {
-      permission = await PushNotifications.requestPermissions();
+  registrationInProgress = (async (): Promise<'granted' | 'denied' | 'unavailable'> => {
+    try {
+      let permission = await PushNotifications.checkPermissions();
       if (permission.receive === "granted") {
         await PushNotifications.register();
         await saveLatestToken();
+        return "granted";
       }
+
+      if (
+        permission.receive === "prompt" ||
+        permission.receive === "prompt-with-rationale"
+      ) {
+        permission = await PushNotifications.requestPermissions();
+        if (permission.receive === "granted") {
+          await PushNotifications.register();
+          await saveLatestToken();
+          return "granted";
+        }
+      }
+
+      return "denied";
+    } catch {
+      return "unavailable";
     }
   })();
 
   try {
-    await registrationInProgress;
+    return await registrationInProgress;
   } finally {
     registrationInProgress = undefined;
   }

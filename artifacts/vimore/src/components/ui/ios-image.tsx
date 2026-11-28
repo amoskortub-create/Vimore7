@@ -10,7 +10,7 @@ interface IOSImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   fallback?: string;
 }
 
-export function IOSImage({ src, alt, fallback, className, style, onClick, ...rest }: IOSImageProps) {
+export function IOSImage({ src, alt, fallback, className, style, onClick, loading = "lazy", decoding = "async", ...rest }: IOSImageProps) {
   const [displaySrc, setDisplaySrc] = useState<string>(src);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isFetchingError, setIsFetchingError] = useState(false);
@@ -98,6 +98,8 @@ export function IOSImage({ src, alt, fallback, className, style, onClick, ...res
     <img
       src={displaySrc}
       alt={alt}
+      loading={loading}
+      decoding={decoding}
       className={className}
       style={style}
       onClick={onClick}

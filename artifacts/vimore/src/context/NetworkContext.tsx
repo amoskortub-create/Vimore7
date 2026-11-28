@@ -17,11 +17,11 @@ export interface NetworkInfo {
 }
 
 const DEFAULT_INFO: NetworkInfo = {
-  tier: 'rich',
+  tier: 'lite',
   effectiveType: 'unknown',
   downlink: 10,
   rtt: 50,
-  saveData: false,
+  saveData: true,
   isOnline: true,
   forcedTier: null,
   setForcedTier: () => {},
@@ -29,11 +29,11 @@ const DEFAULT_INFO: NetworkInfo = {
 
 const NetworkContext = createContext<NetworkInfo>(DEFAULT_INFO);
 
-function classify(effectiveType: string, saveData: boolean): NetworkTier {
-  if (saveData) return 'lite';
-  if (effectiveType === 'slow-2g' || effectiveType === '2g') return 'lite';
-  if (effectiveType === '3g') return 'standard';
-  return 'rich';
+function classify(_effectiveType: string, _saveData: boolean): NetworkTier {
+  // ViMore runs in Lite data-saver mode by default so a 100 MB data bundle
+  // lasts ~3 hours while still showing photos and videos. Users can switch
+  // to Standard or Rich mode anytime in Settings or the top menu.
+  return 'lite';
 }
 
 function readConnection(): { effectiveType: EffectiveType; downlink: number; rtt: number; saveData: boolean } {
@@ -141,7 +141,7 @@ export function useNetwork(): NetworkInfo {
 }
 
 export function getCurrentNetworkTier(): NetworkTier {
-  if (typeof window === 'undefined') return 'rich';
+  if (typeof window === 'undefined') return 'lite';
   const t = (window as any).__vimoreNetTier as NetworkTier | undefined;
-  return t || 'rich';
+  return t || 'lite';
 }

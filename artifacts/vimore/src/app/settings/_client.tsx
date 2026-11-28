@@ -239,14 +239,14 @@ export default function SettingsPage() {
               </div>
             </div>
             <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Lite Mode shrinks images, lowers video quality, disables auto-play and reduces real-time sync — built for 2G/3G and Save-Data users across Africa.
+              ViMore runs in ultra-efficient Lite Mode by default so photos and videos stay visible while 100 MB of data can last up to 3 hours. Switch to Standard or Full HD anytime.
             </p>
 
-            <div className="grid grid-cols-3 gap-2 bg-secondary/40 p-1.5 rounded-2xl">
+            <div className="grid grid-cols-4 gap-1.5 bg-secondary/40 p-1.5 rounded-2xl">
               <button
                 onClick={() => { triggerHaptic(10); setForcedTier(null); }}
                 className={cn(
-                  "flex items-center justify-center gap-1.5 px-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                  "flex items-center justify-center gap-1 px-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
                   forcedTier === null ? "bg-white dark:bg-zinc-800 text-primary shadow-md" : "text-muted-foreground"
                 )}
               >
@@ -255,16 +255,25 @@ export default function SettingsPage() {
               <button
                 onClick={() => { triggerHaptic(10); setForcedTier('lite'); }}
                 className={cn(
-                  "flex items-center justify-center gap-1.5 px-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                  "flex items-center justify-center gap-1 px-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
                   forcedTier === 'lite' ? "bg-white dark:bg-zinc-800 text-amber-600 shadow-md" : "text-muted-foreground"
                 )}
               >
                 Lite
               </button>
               <button
+                onClick={() => { triggerHaptic(10); setForcedTier('standard'); }}
+                className={cn(
+                  "flex items-center justify-center gap-1 px-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                  forcedTier === 'standard' ? "bg-white dark:bg-zinc-800 text-blue-600 shadow-md" : "text-muted-foreground"
+                )}
+              >
+                Std
+              </button>
+              <button
                 onClick={() => { triggerHaptic(10); setForcedTier('rich'); }}
                 className={cn(
-                  "flex items-center justify-center gap-1.5 px-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                  "flex items-center justify-center gap-1 px-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
                   forcedTier === 'rich' ? "bg-white dark:bg-zinc-800 text-emerald-600 shadow-md" : "text-muted-foreground"
                 )}
               >

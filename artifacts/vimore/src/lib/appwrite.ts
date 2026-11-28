@@ -126,18 +126,18 @@ const AVATAR_SIZES: Record<AvatarSize, number> = { xs: 48, sm: 80, md: 128, lg: 
 
 export function getAvatarUrl(bucketId: string, fileId: string, size: AvatarSize = 'md'): string {
   if (!fileId) return '';
-  const tier: string = typeof window !== 'undefined' ? ((window as any).__vimoreNetTier || 'rich') : 'rich';
+  const tier: string = typeof window !== 'undefined' ? ((window as any).__vimoreNetTier || 'lite') : 'lite';
   const px = AVATAR_SIZES[size];
-  const quality = tier === 'lite' ? 50 : tier === 'standard' ? 70 : 80;
-  const liteScale = tier === 'lite' ? 0.6 : tier === 'standard' ? 0.8 : 1;
-  const dim = Math.round(px * liteScale);
+  const quality = tier === 'lite' ? 45 : tier === 'standard' ? 68 : 80;
+  const liteScale = tier === 'lite' ? 0.5 : tier === 'standard' ? 0.75 : 1;
+  const dim = Math.max(32, Math.round(px * liteScale));
   return getFilePreview(bucketId, fileId, { width: dim, height: dim, quality, output: 'webp' });
 }
 
 export function getImageUrl(bucketId: string, fileId: string, maxWidth: number = 720): string {
   if (!fileId) return '';
-  const tier: string = typeof window !== 'undefined' ? ((window as any).__vimoreNetTier || 'rich') : 'rich';
-  const quality = tier === 'lite' ? 55 : tier === 'standard' ? 70 : 80;
+  const tier: string = typeof window !== 'undefined' ? ((window as any).__vimoreNetTier || 'lite') : 'lite';
+  const quality = tier === 'lite' ? 45 : tier === 'standard' ? 68 : 80;
   const widthScale = tier === 'lite' ? 0.5 : tier === 'standard' ? 0.75 : 1;
   return getFilePreview(bucketId, fileId, { width: Math.round(maxWidth * widthScale), quality, output: 'webp' });
 }

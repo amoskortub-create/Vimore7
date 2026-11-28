@@ -25,6 +25,8 @@ import { useFeedSignal } from "@/context/FeedSignalContext";
 import { AcronymRibbon } from "@/components/branding/acronym-meaning";
 import { listAllStores, isStoreBoosted, getStoreLogoUrl } from "@/lib/stores";
 import { cached } from "@/lib/client-cache";
+import { useNetwork } from "@/context/NetworkContext";
+import { getAdaptivePreview } from "@/lib/adaptive-media";
 
 function seededShuffle<T>(arr: T[], seed: number): T[] {
   const result = [...arr];
@@ -39,6 +41,7 @@ function seededShuffle<T>(arr: T[], seed: number): T[] {
 
 function FeedMusicStrip() {
   const { globalSongs, playCollection, triggerHaptic } = useMusic();
+  const { tier } = useNetwork();
   const router = useRouter();
   const seed = useRef(Math.floor(Math.random() * 0x7fffffff));
 
@@ -81,7 +84,7 @@ function FeedMusicStrip() {
             >
               <div className="relative w-[120px] h-[120px] rounded-2xl overflow-hidden bg-muted mb-2 shadow-sm">
                 {track.cover ? (
-                  <Image src={track.cover} alt={track.title} fill className="object-cover" sizes="120px" />
+                  <Image src={getAdaptivePreview(track.cover, 'thumb', tier) || track.cover} alt={track.title} fill className="object-cover" sizes="120px" />
                 ) : (
                   <div className="w-full h-full bg-gradient-to-br from-primary/30 to-purple-900/30 flex items-center justify-center">
                     <Music2 className="w-8 h-8 text-primary/60" />
@@ -111,6 +114,7 @@ function FeedMusicStrip() {
 
 function FeedStoreStrip() {
   const router = useRouter();
+  const { tier } = useNetwork();
   const [boostedStores, setBoostedStores] = useState<any[]>([]);
   const [isNearViewport, setIsNearViewport] = useState(false);
   const sectionRef = useRef<HTMLDivElement>(null);
@@ -127,20 +131,20 @@ function FeedStoreStrip() {
         setIsNearViewport(true);
         observer.disconnect();
       }
-    }, { rootMargin: '600px' });
+    }, { rootMargin: tier === 'lite' ? '250px' : '600px' });
     observer.observe(node);
     return () => observer.disconnect();
-  }, []);
+  }, [tier]);
 
   useEffect(() => {
     if (!isNearViewport) return;
-    cached('feed:boosted-stores', () => listAllStores(60), 2 * 60 * 1000)
+    cached('feed:boosted-stores', () => listAllStores(tier === 'lite' ? 30 : 60), 2 * 60 * 1000)
       .then((all) => {
         const boosted = all.filter(isStoreBoosted);
         setBoostedStores(seededShuffle(boosted, seed.current));
       })
       .catch(() => {});
-  }, [isNearViewport]);
+  }, [isNearViewport, tier]);
 
   if (!isNearViewport || boostedStores.length === 0) return <div ref={sectionRef} className="min-h-2" aria-hidden="true" />;
 
@@ -253,6 +257,7 @@ export default function Home() {
   const { t } = useTranslation();
   const { posts, campaigns, isLoading, initError, followingUsernames, followingUserIds, friendUsernames, seenPostIds, isAuthenticated, isOffline, currentUser, triggerHaptic, loadMoreFeed, hasMoreFeed, isFeedLoading } = usePosts();
   const { currentTrack, isExpanded } = useMusic();
+  const { tier } = useNetwork();
   const { newFollowingPostsCount, clearNewPosts, uploadProgress } = useFeedSignal();
   const [isStoryModalOpen, setIsStoryModalOpen] = useState(false);
 
@@ -514,10 +519,10 @@ export default function Home() {
         triggerHaptic(5);
         loadMoreFeed().finally(() => { isLoadingMoreRef.current = false; });
       }
-    }, { threshold: 0.01, rootMargin: '600px' });
+    }, { threshold: 0.01, rootMargin: tier === 'lite' ? '200px' : '600px' });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [feedItems, hasMoreFeed, isFeedLoading, loadMoreFeed, triggerHaptic]);
+  }, [feedItems, hasMoreFeed, isFeedLoading, loadMoreFeed, triggerHaptic, tier]);
 
   // Redirect unauthenticated users to login once loading finishes
   useEffect(() => {

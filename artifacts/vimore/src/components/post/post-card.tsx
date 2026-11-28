@@ -179,9 +179,36 @@ interface PostCardProps {
 function FeedVideo({ videoUrl, postId, isShared, isReel }: { videoUrl: string; postId: string; isShared: boolean; isReel: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isMuted, setIsMuted] = useState(false);
-  const router = useRouter();
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [hasActivated, setHasActivated] = useState(false);
   const { tier } = useNetwork();
   const allowAutoplay = tier === 'rich';
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+    const onEnded = () => setIsPlaying(false);
+    video.addEventListener('play', onPlay);
+    video.addEventListener('pause', onPause);
+    video.addEventListener('ended', onEnded);
+    return () => {
+      video.removeEventListener('play', onPlay);
+      video.removeEventListener('pause', onPause);
+      video.removeEventListener('ended', onEnded);
+    };
+  }, [videoUrl]);
+
+  useEffect(() => {
+    const onVisChange = () => {
+      if (document.visibilityState === 'hidden' && videoRef.current && !videoRef.current.paused) {
+        videoRef.current.pause();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisChange);
+    return () => document.removeEventListener('visibilitychange', onVisChange);
+  }, []);
 
   useEffect(() => {
     if (!allowAutoplay) return;
@@ -190,7 +217,7 @@ function FeedVideo({ videoUrl, postId, isShared, isReel }: { videoUrl: string; p
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
-          if (entry.isIntersecting) {
+          if (entry.isIntersecting && document.visibilityState === 'visible') {
             video.play().catch(() => {
               video.muted = true;
               setIsMuted(true);
@@ -207,6 +234,22 @@ function FeedVideo({ videoUrl, postId, isShared, isReel }: { videoUrl: string; p
     return () => observer.disconnect();
   }, [videoUrl, allowAutoplay]);
 
+  const togglePlayOrMute = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const video = videoRef.current;
+    if (!video) return;
+    if (!allowAutoplay && !hasActivated) {
+      setHasActivated(true);
+      video.play().catch(() => {});
+      return;
+    }
+    if (video.paused) {
+      video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  };
+
   const toggleMute = (e: React.MouseEvent) => {
     e.stopPropagation();
     const video = videoRef.current;
@@ -217,21 +260,30 @@ function FeedVideo({ videoUrl, postId, isShared, isReel }: { videoUrl: string; p
     });
   };
 
+  const displayVideoUrl = allowAutoplay || hasActivated ? videoUrl : `${videoUrl}#t=0.05`;
+
   return (
     <div
       className={cn("relative mt-2 rounded-lg overflow-hidden bg-black cursor-pointer aspect-[4/5]", isShared ? "-mx-1" : "-mx-3 sm:mx-0")}
-      onClick={toggleMute}
+      onClick={togglePlayOrMute}
     >
       <IOSVideo
         ref={videoRef}
-        src={videoUrl}
+        src={displayVideoUrl}
         className="w-full h-full object-cover"
         playsInline
-        loop
+        loop={tier !== 'lite'}
         muted={isMuted}
-        controls
-        preload="none"
+        controls={allowAutoplay || hasActivated}
+        preload="metadata"
       />
+      {!isPlaying && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
+          <div className="h-14 w-14 rounded-full bg-black/60 backdrop-blur-md border border-white/25 flex items-center justify-center text-white shadow-xl">
+            <Play className="h-6 w-6 fill-white ml-0.5" />
+          </div>
+        </div>
+      )}
       <button
         onClick={toggleMute}
         className="absolute bottom-2 right-2 p-1.5 bg-black/50 rounded-full text-white z-10 backdrop-blur-sm transition-opacity"
@@ -604,7 +656,7 @@ export function PostCard(props: PostCardProps) {
               {allImages.length > 0 && (
                   <div className={cn("relative mt-2", isShared ? "-mx-1" : "-mx-3 sm:mx-0")}>
                     {allImages.length > 1 && <div className="absolute top-3 right-3 z-20 bg-black/40 backdrop-blur-md px-2 py-1 rounded-xl border border-white/10 text-white text-[10px] font-black">{currentSlide + 1}/{allImages.length}</div>}
-                    <Carousel className="w-full" setApi={(api) => api?.on("select", () => setCurrentSlide(api.selectedScrollSnap()))}><CarouselContent>{allImages.map((img, i) => (<CarouselItem key={i}><div className="relative aspect-[4/5] overflow-hidden rounded-lg cursor-pointer" onClick={() => setSelectedImageUrl(img)}><IOSImage src={getAdaptivePreview(img, 'feed', tier) || img} alt="Post" className="w-full h-full object-cover" /></div></CarouselItem>))}</CarouselContent></Carousel>
+                    <Carousel className="w-full" setApi={(api) => api?.on("select", () => setCurrentSlide(api.selectedScrollSnap()))}><CarouselContent>{allImages.map((img, i) => (<CarouselItem key={i}><div className="relative aspect-[4/5] overflow-hidden rounded-lg cursor-pointer bg-secondary/20" onClick={() => setSelectedImageUrl(img)}>{Math.abs(i - currentSlide) <= 1 ? <IOSImage src={getAdaptivePreview(img, 'feed', tier) || img} alt="Post" className="w-full h-full object-cover" /> : null}</div></CarouselItem>))}</CarouselContent></Carousel>
                   </div>
               )}
               {videoUrl && (
@@ -624,11 +676,11 @@ export function PostCard(props: PostCardProps) {
                   {sharedPost.videoUrl && !sharedPost.image ? (
                     <>
                       <video
-                        src={sharedPost.videoUrl}
+                        src={`${sharedPost.videoUrl}#t=0.05`}
                         className="h-full w-full object-cover group-hover/shared:scale-105 transition-transform duration-500"
                         muted
                         playsInline
-                        preload="none"
+                        preload="metadata"
                       />
                       <div className="absolute inset-0 flex items-center justify-center">
                         <div className="h-12 w-12 rounded-full bg-black/45 backdrop-blur-md flex items-center justify-center text-white border border-white/20">

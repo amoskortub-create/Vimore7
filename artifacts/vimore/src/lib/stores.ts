@@ -13,6 +13,7 @@ import {
 import { uploadViaClient } from './upload';
 import { CREDIT_PRICES } from './credit-pricing';
 import { authFetch } from './auth-fetch';
+import { getCurrentNetworkTier } from '@/context/NetworkContext';
 
 export const STORE_CATEGORIES = [
   'Fashion & Clothing',
@@ -82,12 +83,14 @@ export function slugToCategory(slug: string): StoreCategory | null {
 
 export function getStoreLogoUrl(fileId: string): string {
   if (!fileId) return '';
-  return getFilePreview(BUCKET.STORE_LOGOS, fileId, {
-    width: 256,
-    height: 256,
-    quality: 75,
-    output: 'webp',
-  });
+  const tier = getCurrentNetworkTier();
+  return getFilePreview(
+    BUCKET.STORE_LOGOS,
+    fileId,
+    tier === 'lite'
+      ? { width: 160, height: 160, quality: 45, output: 'webp' }
+      : { width: 256, height: 256, quality: 75, output: 'webp' }
+  );
 }
 
 export function isStoreBoosted(store: Pick<StoreDoc, 'boost_until'>): boolean {

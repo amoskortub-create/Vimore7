@@ -7,11 +7,13 @@ import { X, Download, Zap, ShieldCheck, ArrowLeft, Loader2, Play, Pause, Volume2
 import { Button } from "@/components/ui/button";
 import { usePosts } from "@/context/PostContext";
 import { useMusic } from "@/context/MusicContext";
+import { useNetwork } from "@/context/NetworkContext";
 import { cn, saveFileToDevice } from "@/lib/utils";
 
 export function VideoViewerPortal() {
   const { selectedVideoUrl, setSelectedVideoUrl } = usePosts();
   const { triggerHaptic, triggerDownloadWithAd } = useMusic();
+  const { tier } = useNetwork();
   const [isVisible, setIsVisible] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(true);
@@ -123,7 +125,7 @@ export function VideoViewerPortal() {
             src={selectedVideoUrl}
             className="max-w-full max-h-full object-contain shadow-2xl"
             autoPlay
-            loop
+            loop={tier !== 'lite'}
             muted={isMuted}
             playsInline
             controls

@@ -17,6 +17,7 @@ import { offlineCache } from '@/lib/offline-cache';
 import { firePush } from '@/lib/push-fire';
 import { CREDIT_PRICES } from '@/lib/credit-pricing';
 import { safeJson, safeJsonParse } from '@/lib/utils';
+import { adaptiveFeedPageSize, getCurrentNetworkTier } from '@/lib/adaptive-media';
 
 const PRESENCE_TTL_MS = 90_000;
 const SESSION_REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -868,7 +869,8 @@ export function PostProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadFeed = useCallback(async (explicitUserId?: string) => {
-    const PAGE = INITIAL_FEED_SIZE;
+    const netTier = getCurrentNetworkTier();
+    const PAGE = adaptiveFeedPageSize(netTier);
     feedHasLoadedRef.current = false;
     fetchedFeedIdsRef.current = new Set();
     totalConnPostsRef.current = undefined;
@@ -888,7 +890,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
         fetchRandomPostDocs([], PAGE, excludeIds),
         databases.listDocuments(DATABASE_ID, COL.POSTS, [
           Query.equal('is_boosted', true),
-          Query.limit(12),
+          Query.limit(netTier === 'lite' ? 6 : 12),
         ]).catch(() => ({ documents: [] as any[] })),
       ]);
 
@@ -980,7 +982,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
     if (isFeedLoading) return;
     setIsFeedLoading(true);
     try {
-      const PAGE = FEED_PAGE_SIZE;
+      const PAGE = adaptiveFeedPageSize();
       const uid = currentUserRef.current?.$id || '';
       const connIds = await resolveFollowingIds(uid);
       const excludeIds = new Set(fetchedFeedIdsRef.current);
@@ -2147,7 +2149,12 @@ export function PostProvider({ children }: { children: ReactNode }) {
     };
 
     markOnline();
-    const interval = setInterval(markOnline, 30000); // 30s heartbeat — max 1 min stale
+    const heartbeatMs = getCurrentNetworkTier() === 'lite' ? 75_000 : 30_000;
+    const interval = setInterval(() => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        markOnline();
+      }
+    }, heartbeatMs);
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
@@ -3888,7 +3895,8 @@ export function PostProvider({ children }: { children: ReactNode }) {
     globalCursor: string | null;
     excludeIds?: string[];
   }): Promise<{ posts: Post[]; phase: 'connections' | 'global'; connCursor: string | null; globalCursor: string | null; hasMore: boolean }> => {
-    const PAGE = 18;
+    const netTier = getCurrentNetworkTier();
+    const PAGE = netTier === 'lite' ? 8 : 18;
     const { connIds, connCursor: initialConnCursor, globalCursor, excludeIds } = params;
     let connCursor = initialConnCursor;
     const isInitialLoad = !initialConnCursor && !globalCursor;
@@ -3921,7 +3929,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
             Query.equal('user_id', resolvedConnIds),
             Query.orderDesc('$createdAt'),
             ...(connCursor ? [Query.cursorAfter(connCursor)] : []),
-            Query.limit(15),
+            Query.limit(netTier === 'lite' ? 6 : 15),
           ]).catch(() => ({ documents: [] as any[] }))
         : Promise.resolve({ documents: [] as any[] });
 
@@ -3930,7 +3938,7 @@ export function PostProvider({ children }: { children: ReactNode }) {
         ? databases.listDocuments(DATABASE_ID, COL.POSTS, [
             videoFilter,
             Query.equal('is_boosted', true),
-            Query.limit(12),
+            Query.limit(netTier === 'lite' ? 4 : 12),
           ]).catch(() => ({ documents: [] as any[] }))
         : Promise.resolve({ documents: [] as any[] });
 

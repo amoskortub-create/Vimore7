@@ -2,6 +2,7 @@ import { databases, storage, account, ID, Query, COL, BUCKET, DATABASE_ID, getFi
 import { Permission, Role } from 'appwrite';
 import { CREDIT_PRICES } from './credit-pricing';
 import { authFetch } from './auth-fetch';
+import { getCurrentNetworkTier } from '@/context/NetworkContext';
 
 export type ProductCurrency = 'LRD' | 'USD';
 export type ProductStatus = 'active' | 'sold' | 'paused';
@@ -244,10 +245,23 @@ export async function deleteProduct(productId: string): Promise<void> {
 
 export function getProductImageUrl(fileId: string, size: 'thumb' | 'detail' = 'thumb'): string {
   if (!fileId) return '';
+  const tier = getCurrentNetworkTier();
   if (size === 'thumb') {
-    return getFilePreview(BUCKET.MARKETPLACE_IMAGES, fileId, { width: 320, height: 320, quality: 60, output: 'webp' });
+    return getFilePreview(
+      BUCKET.MARKETPLACE_IMAGES,
+      fileId,
+      tier === 'lite'
+        ? { width: 200, height: 200, quality: 45, output: 'webp' }
+        : { width: 320, height: 320, quality: 60, output: 'webp' }
+    );
   }
-  return getFilePreview(BUCKET.MARKETPLACE_IMAGES, fileId, { width: 800, quality: 75, output: 'webp' });
+  return getFilePreview(
+    BUCKET.MARKETPLACE_IMAGES,
+    fileId,
+    tier === 'lite'
+      ? { width: 520, quality: 52, output: 'webp' }
+      : { width: 800, quality: 75, output: 'webp' }
+  );
 }
 
 export function getProductOriginalUrl(fileId: string): string {

@@ -47,6 +47,8 @@ import Image from "next/image";
 import { cn, parseFollowerCount, isTextForeignToUser } from "@/lib/utils";
 import { CREDIT_LIMITS } from "@/lib/credit-pricing";
 import { client, databases, DATABASE_ID, COL, Query, getFileUrl, BUCKET } from "@/lib/appwrite";
+import { useNetwork } from "@/context/NetworkContext";
+import { getAdaptivePreview } from "@/lib/adaptive-media";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -76,6 +78,7 @@ import { useTranslation } from "@/context/LanguageContext";
 export default function UserProfilePage({ username }: { username: string }) {
   const { currentUser, connections, isFriend, isRequestSent, isRequestReceived, sendFriendRequest, confirmFriendRequest, cancelFriendRequest, unfriendUser, isSubscribed, subscribeToCreator, cancelSubscription, fetchProfileByUsername, fetchProfilePosts, settings, followerUsernames, friendUsernames, sendMessageRequest } = usePosts();
   const { currentTrack, isExpanded, triggerHaptic } = useMusic();
+  const { tier } = useNetwork();
   const { addSignal } = useNotifications();
   const { t } = useTranslation();
   const router = useRouter();
@@ -494,11 +497,11 @@ export default function UserProfilePage({ username }: { username: string }) {
                         <div key={reel.$id} className="aspect-[9/16] relative group overflow-hidden rounded-lg bg-black cursor-pointer">
                           {thumb ? (
                             <video
-                              src={thumb}
+                              src={`${thumb}#t=0.05`}
                               className="w-full h-full object-cover opacity-80"
                               muted
                               playsInline
-                              preload="none"
+                              preload="metadata"
                             />
                           ) : (
                             <div className="w-full h-full bg-secondary/30" />
@@ -527,7 +530,7 @@ export default function UserProfilePage({ username }: { username: string }) {
                         <div key={post.$id} className={cn("aspect-square relative group overflow-hidden rounded-lg", !settings.isFreeMode ? "cursor-pointer" : "bg-secondary/20 flex items-center justify-center")}>
                           {!settings.isFreeMode && src ? (
                             <>
-                              <Image src={src} alt="Media" fill className="object-cover transition-transform group-hover:scale-110" />
+                              <Image src={getAdaptivePreview(src, 'thumb', tier) || src} alt="Media" fill className="object-cover transition-transform group-hover:scale-110" />
                               <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white"><Play className="h-6 w-6" /></div>
                             </>
                           ) : <Zap className="h-6 w-6 text-muted-foreground/20" />}

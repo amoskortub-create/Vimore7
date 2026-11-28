@@ -618,18 +618,18 @@ export function ChatBubble({
                   <>
                     {type === "photo" ? (
                       <div className="relative w-full h-full cursor-pointer" onClick={handleMediaClick}>
-                        <Image src={mediaUrl} alt="Chat Media" fill className="object-cover" />
+                        <Image src={getAdaptivePreview(mediaUrl, 'feed', tier) || mediaUrl} alt="Chat Media" fill className="object-cover" />
                       </div>
                     ) : (
                       <div className="relative w-full h-full cursor-pointer" onClick={handleMediaClick}>
                         <video
                           key={mediaUrl}
                           ref={videoRef}
-                          src={mediaUrl}
+                          src={`${mediaUrl}#t=0.05`}
                           className="w-full h-full object-cover"
                           muted={!isPlayingVideo}
                           playsInline
-                          preload="none"
+                          preload="metadata"
                         />
                         <div className={cn(
                           "absolute inset-0 bg-black/20 flex items-center justify-center transition-opacity duration-300",
@@ -652,7 +652,7 @@ export function ChatBubble({
                 isMe ? "bg-white/10" : "bg-primary/5"
               )}>
                 <div className="relative h-24 w-full">
-                  <Image src={workspaceData.image} alt="Workspace" fill className="object-cover" />
+                  <Image src={getAdaptivePreview(workspaceData.image, 'thumb', tier) || workspaceData.image} alt="Workspace" fill className="object-cover" />
                   <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center">
                     <LayoutDashboard className="h-8 w-8 text-white opacity-60" />
                   </div>
@@ -682,7 +682,7 @@ export function ChatBubble({
                   <div className="relative aspect-video w-full">
                     {sharedPostData.postVideo && !sharedPostData.postImage ? (
                       <>
-                        <video src={sharedPostData.postVideo} className="h-full w-full object-cover" muted playsInline preload="none" />
+                        <video src={`${sharedPostData.postVideo}#t=0.05`} className="h-full w-full object-cover" muted playsInline preload="metadata" />
                         <div className="absolute inset-0 flex items-center justify-center">
                           <div className="h-10 w-10 rounded-full bg-black/45 backdrop-blur-md flex items-center justify-center text-white border border-white/20">
                             <Play className="h-4 w-4 fill-current ml-0.5" />
@@ -690,7 +690,7 @@ export function ChatBubble({
                         </div>
                       </>
                     ) : (
-                      <Image src={sharedPostData.postImage!} alt="Shared Post" fill className="object-cover" />
+                      <Image src={getAdaptivePreview(sharedPostData.postImage!, 'thumb', tier) || sharedPostData.postImage!} alt="Shared Post" fill className="object-cover" />
                     )}
                     <div className="absolute inset-0 bg-black/20" />
                   </div>
@@ -833,7 +833,7 @@ export function ChatBubble({
                 <div className="flex items-center -space-x-1.5">
                   {seenByAvatars.slice(0, 5).map((u, i) => (
                     <Avatar key={i} className="h-[14px] w-[14px] border border-white/30 shrink-0 ring-0">
-                      <AvatarImage src={u.avatar} />
+                      <AvatarImage src={getAdaptivePreview(u.avatar, 'avatar', tier) || u.avatar} />
                       <AvatarFallback className="text-[5px] bg-white/20 text-white">{u.name?.[0] || '?'}</AvatarFallback>
                     </Avatar>
                   ))}

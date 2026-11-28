@@ -2,10 +2,11 @@
 
 import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback, useRef } from 'react';
 import { usePosts } from './PostContext';
-import { databases, ID, Query, Permission, Role, BUCKET, DATABASE_ID, COL, getFileUrl, extractFileId } from '@/lib/appwrite';
+import { databases, ID, Query, Permission, Role, BUCKET, DATABASE_ID, COL, getFileUrl, getFilePreview, extractFileId } from '@/lib/appwrite';
 import { saveCache, loadCache, pinMediaInSW, OFFLINE_KEYS } from '@/lib/offline-cache';
 import { authFetch } from '@/lib/auth-fetch';
 import { safeJson } from '@/lib/utils';
+import { getCurrentNetworkTier } from './NetworkContext';
 
 
 export interface Track {
@@ -144,6 +145,17 @@ interface MusicContextType {
 
 const MusicContext = createContext<MusicContextType | undefined>(undefined);
 
+function getCoverUrl(coverId: string): string {
+  const tier = getCurrentNetworkTier();
+  return getFilePreview(
+    BUCKET.ALBUM_COVERS,
+    coverId,
+    tier === 'lite'
+      ? { width: 200, height: 200, quality: 45, output: 'webp' }
+      : { width: 360, height: 360, quality: 72, output: 'webp' }
+  );
+}
+
 function mapDocToTrack(doc: any): Track {
   return {
     id: doc.$id,
@@ -151,7 +163,7 @@ function mapDocToTrack(doc: any): Track {
     artist: doc.artist || doc.artist_name || 'Unknown Artist',
     artistUsername: doc.artist_username || '',
     artistId: doc.user_id || '',
-    cover: doc.cover_id ? getFileUrl(BUCKET.ALBUM_COVERS, doc.cover_id) : `https://picsum.photos/seed/${doc.$id}/300/300`,
+    cover: doc.cover_id ? getCoverUrl(doc.cover_id) : `https://picsum.photos/seed/${doc.$id}/240/240`,
     audioUrl: doc.file_id ? getFileUrl(BUCKET.MUSIC_TRACKS, doc.file_id) : (doc.audio_id ? getFileUrl(BUCKET.MUSIC_TRACKS, doc.audio_id) : undefined),
     duration: doc.duration || 0,
     streams: String(doc.plays_count || doc.streams_count || 0),
@@ -171,7 +183,7 @@ function mapDocToAlbum(doc: any, songs: Track[]): Album {
     artist: doc.artist || doc.artist_name || 'Unknown Artist',
     artistUsername: doc.artist_username || '',
     artistId: doc.user_id || '',
-    cover: doc.cover_id ? getFileUrl(BUCKET.ALBUM_COVERS, doc.cover_id) : `https://picsum.photos/seed/${doc.$id}/300/300`,
+    cover: doc.cover_id ? getCoverUrl(doc.cover_id) : `https://picsum.photos/seed/${doc.$id}/240/240`,
     year: doc.release_date ? new Date(doc.release_date).getFullYear().toString() : new Date().getFullYear().toString(),
     tracks: doc.tracks_count || songs.length,
     totalStreams: '0',
@@ -187,7 +199,7 @@ function mapDocToPlaylist(doc: any, songs: Track[]): Playlist {
     title: doc.title || 'Untitled Playlist',
     creator: doc.creator_username || '',
     creatorId: doc.creator_id || '',
-    cover: doc.cover_id ? getFileUrl(BUCKET.ALBUM_COVERS, doc.cover_id) : `https://picsum.photos/seed/${doc.$id}/300/300`,
+    cover: doc.cover_id ? getCoverUrl(doc.cover_id) : `https://picsum.photos/seed/${doc.$id}/240/240`,
     totalStreams: '0',
     songs,
     description: doc.description || '',
@@ -333,11 +345,13 @@ export function MusicProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    let hasCachedSongs = false;
     try {
       const cachedSongs = localStorage.getItem('vm_offline_songs');
       if (cachedSongs) {
         const parsed = JSON.parse(cachedSongs);
         if (Array.isArray(parsed) && parsed.length > 0) {
+          hasCachedSongs = true;
           setGlobalSongsState(parsed);
           setQueueState(parsed);
           setIsMusicLoadingState(false);
@@ -358,6 +372,11 @@ export function MusicProvider({ children }: { children: ReactNode }) {
 
     if (path.startsWith('/music')) {
       void loadMusicData();
+      return;
+    }
+
+    // In Lite mode, avoid fetching the entire music catalog on home/other routes when cached tracks exist
+    if (getCurrentNetworkTier() === 'lite' && hasCachedSongs) {
       return;
     }
 

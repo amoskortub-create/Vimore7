@@ -318,11 +318,11 @@ export function StoryViewer() {
                     <>
                       <video
                         src={currentStoryCampaign.media_url}
-                        preload={tier === 'lite' ? 'none' : 'metadata'}
+                        preload="metadata"
                         className="w-full h-full object-cover"
                         autoPlay
                         muted={isAdMuted}
-                        loop
+                        loop={tier !== 'lite'}
                         playsInline
                       />
                       <button
@@ -483,11 +483,11 @@ export function StoryViewer() {
                     <>
                       <video
                         src={(currentSegment as any).mediaUrl || (currentSegment as any).image}
-                        preload={tier === 'lite' ? 'none' : 'metadata'}
+                        preload="metadata"
                         className="w-full h-full object-cover"
                         autoPlay
                         muted={isVideoMuted}
-                        loop
+                        loop={tier !== 'lite'}
                         playsInline
                       />
                       <button

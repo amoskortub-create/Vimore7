@@ -596,18 +596,23 @@ const ReelItem = memo(function ReelItem({
 
   useEffect(() => {
     if (!soundId) return;
+    const shouldLoadSound = isActive && (netTier !== 'lite' || isPlaying);
     const isReelMedia = soundId.startsWith('reel_media:');
     const soundUrl = isReelMedia
       ? `/api/file/${encodeURIComponent('reel_media')}/${encodeURIComponent(soundId.replace('reel_media:', ''))}`
       : `/api/file/${encodeURIComponent('sounds')}/${encodeURIComponent(soundId)}`;
 
-    if (isActive) {
-      const audio = new Audio(soundUrl);
-      audio.currentTime = soundStartTime;
-      audio.muted = isMuted;
-      audio.loop = true;
-      audio.play().catch(() => {});
-      soundAudioRef.current = audio;
+    if (shouldLoadSound) {
+      if (!soundAudioRef.current) {
+        const audio = new Audio(soundUrl);
+        audio.currentTime = soundStartTime;
+        audio.muted = isMuted;
+        audio.loop = netTier !== 'lite';
+        soundAudioRef.current = audio;
+      }
+      if (isPlaying || netTier !== 'lite') {
+        soundAudioRef.current.play().catch(() => {});
+      }
     } else if (soundAudioRef.current) {
       soundAudioRef.current.pause();
       soundAudioRef.current.removeAttribute('src');
@@ -615,7 +620,7 @@ const ReelItem = memo(function ReelItem({
       soundAudioRef.current = null;
     }
     return () => {
-      if (soundAudioRef.current) {
+      if (!isActive && soundAudioRef.current) {
         soundAudioRef.current.pause();
         soundAudioRef.current.removeAttribute('src');
         soundAudioRef.current.load();
@@ -623,7 +628,7 @@ const ReelItem = memo(function ReelItem({
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, soundId]);
+  }, [isActive, soundId, netTier, isPlaying]);
 
   useEffect(() => {
     if (soundAudioRef.current) soundAudioRef.current.muted = isMuted;
@@ -634,6 +639,17 @@ const ReelItem = memo(function ReelItem({
     if (isPlaying) soundAudioRef.current.play().catch(() => {});
     else soundAudioRef.current.pause();
   }, [isPlaying]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        if (videoElement && !videoElement.paused) videoElement.pause();
+        if (soundAudioRef.current && !soundAudioRef.current.paused) soundAudioRef.current.pause();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [videoElement]);
 
   const handleDownload = async () => {
     if (isDownloading || !reel.videoUrl) return;
@@ -723,16 +739,16 @@ const ReelItem = memo(function ReelItem({
         />
       )}
 
-      {/* Video — lazy-mounted by IntersectionObserver (active +/-1 window) to free off-screen memory and prevent crashes */}
+      {/* Video — lazy-mounted (active-only in Lite mode, +/-1 window otherwise) */}
       {shouldMountVideo && reel.videoUrl && !hasVideoError ? (
         <video
           ref={combinedVideoRef}
-          src={reel.videoUrl}
+          src={netTier === 'lite' && !posterUrl && !isPlaying ? `${reel.videoUrl}#t=0.05` : reel.videoUrl}
           poster={posterUrl}
-          loop
+          loop={netTier !== 'lite'}
           playsInline
           muted={isMuted}
-          preload={isActive ? (netTier === 'lite' ? 'metadata' : 'auto') : 'metadata'}
+          preload={netTier === 'lite' ? (posterUrl ? 'none' : 'metadata') : (isActive ? 'auto' : 'metadata')}
           className="absolute inset-0 w-full h-full object-cover"
           style={{ filter: videoFilter, transform: videoMirror ? 'scaleX(-1)' : undefined }}
         />
@@ -1496,7 +1512,7 @@ export default function ReelsPage() {
                 index={index}
                 isMuted={isMuted}
                 isActive={activeIndex === index}
-                shouldMountVideo={visibleWindowIndices.has(index) || Math.abs(index - activeIndex) <= 1}
+                shouldMountVideo={pageTier === 'lite' ? index === activeIndex : (visibleWindowIndices.has(index) || Math.abs(index - activeIndex) <= 1)}
                 onVideoRef={registerVideoRef}
                 onContainerRef={registerContainerRef}
                 onToggleMute={handleToggleMute}

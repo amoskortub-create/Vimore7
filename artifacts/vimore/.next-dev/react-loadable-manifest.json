@@ -1,4 +1,8 @@
 {
+  "components/feed/create-story-modal.tsx -> @/lib/upload": {
+    "id": "components/feed/create-story-modal.tsx -> @/lib/upload",
+    "files": []
+  },
   "components/layout/deferred-global-ui.tsx -> @/components/ad/ad-portal": {
     "id": "components/layout/deferred-global-ui.tsx -> @/components/ad/ad-portal",
     "files": [
@@ -151,7 +155,9 @@
   },
   "context/MusicContext.tsx -> @/lib/upload": {
     "id": "context/MusicContext.tsx -> @/lib/upload",
-    "files": []
+    "files": [
+      "static/chunks/_app-pages-browser_src_lib_upload_ts.js"
+    ]
   },
   "context/PostContext.tsx -> @/lib/appwrite": {
     "id": "context/PostContext.tsx -> @/lib/appwrite",

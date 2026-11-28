@@ -32,6 +32,7 @@ import { useMusic } from "@/context/MusicContext";
 import { useNotifications, PulseCategory } from "@/context/NotificationContext";
 import { useTranslation } from "@/context/LanguageContext";
 import { useNetwork } from "@/context/NetworkContext";
+import { getAdaptivePreview } from "@/lib/adaptive-media";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,7 +62,7 @@ export function SubHeader() {
   const { tier, setForcedTier } = useNetwork();
 
   useEffect(() => {
-    if (tier === 'lite' || typeof window === 'undefined') return;
+    if (tier !== 'rich' || typeof window === 'undefined') return;
     const routes = ['/friends', '/reels', '/music', '/messages', '/notifications', '/marketplace', '/profile'];
     const timer = window.setTimeout(() => {
       routes.forEach((r) => {
@@ -193,7 +194,7 @@ export function SubHeader() {
                     "h-8 w-8 sm:h-9 sm:w-9 border-2 transition-all duration-500 shadow-sm",
                     settings.isGhostMode ? "border-zinc-500 opacity-60" : "border-primary/10"
                   )}>
-                    <AvatarImage src={currentUser?.avatar} alt={currentUser?.name} />
+                    <AvatarImage src={getAdaptivePreview(currentUser?.avatar, 'avatar', tier) || currentUser?.avatar} alt={currentUser?.name} />
                     <AvatarFallback>{currentUser?.name?.[0] || 'V'}</AvatarFallback>
                   </Avatar>
                   {settings.isGhostMode && (

@@ -9,12 +9,12 @@ export type MediaRole = 'avatar' | 'thumb' | 'feed' | 'story' | 'cover' | 'fulls
 interface PreviewSpec { width: number; quality: number; }
 
 const MATRIX: Record<MediaRole, Record<NetworkTier, PreviewSpec>> = {
-  avatar:     { lite: { width: 48,  quality: 60 }, standard: { width: 72,  quality: 75 }, rich: { width: 128, quality: 85 } },
-  thumb:      { lite: { width: 240, quality: 55 }, standard: { width: 360, quality: 70 }, rich: { width: 480, quality: 80 } },
-  feed:       { lite: { width: 480, quality: 60 }, standard: { width: 720, quality: 75 }, rich: { width: 1080, quality: 85 } },
-  story:      { lite: { width: 480, quality: 55 }, standard: { width: 720, quality: 70 }, rich: { width: 1080, quality: 85 } },
-  cover:      { lite: { width: 720, quality: 60 }, standard: { width: 1080, quality: 75 }, rich: { width: 1440, quality: 85 } },
-  fullscreen: { lite: { width: 720, quality: 65 }, standard: { width: 1080, quality: 80 }, rich: { width: 1600, quality: 90 } },
+  avatar:     { lite: { width: 40,  quality: 45 }, standard: { width: 72,  quality: 70 }, rich: { width: 128, quality: 85 } },
+  thumb:      { lite: { width: 180, quality: 42 }, standard: { width: 320, quality: 65 }, rich: { width: 480, quality: 80 } },
+  feed:       { lite: { width: 380, quality: 45 }, standard: { width: 680, quality: 70 }, rich: { width: 1080, quality: 85 } },
+  story:      { lite: { width: 380, quality: 45 }, standard: { width: 680, quality: 68 }, rich: { width: 1080, quality: 85 } },
+  cover:      { lite: { width: 540, quality: 48 }, standard: { width: 960, quality: 72 }, rich: { width: 1440, quality: 85 } },
+  fullscreen: { lite: { width: 640, quality: 55 }, standard: { width: 1080, quality: 78 }, rich: { width: 1600, quality: 90 } },
 };
 
 /**
@@ -51,9 +51,9 @@ export function getAdaptivePreview(url: string | undefined | null, role: MediaRo
  */
 export function adaptiveFeedPageSize(tier?: NetworkTier): number {
   const t = tier || getCurrentNetworkTier();
-  if (t === 'lite') return 5;
+  if (t === 'lite') return 6;
   if (t === 'standard') return 10;
-  return 15;
+  return 14;
 }
 
 /**

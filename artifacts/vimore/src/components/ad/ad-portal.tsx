@@ -3,6 +3,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useMusic } from '@/context/MusicContext';
 import { usePosts } from '@/context/PostContext';
+import { useNetwork } from '@/context/NetworkContext';
+import { getAdaptivePreview } from '@/lib/adaptive-media';
 import { Zap, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Image from 'next/image';
@@ -12,6 +14,7 @@ const DOWNLOAD_AD_DURATION = 30;
 export function AdPortal() {
   const { isAdPortalOpen, onAdComplete, triggerHaptic } = useMusic();
   const { campaigns, recordCampaignImpression, recordCampaignClick } = usePosts();
+  const { tier } = useNetwork();
   const [timeLeft, setTimeLeft] = useState(DOWNLOAD_AD_DURATION);
   const [campaignIndex, setCampaignIndex] = useState(0);
   const trackedImpressionRef = useRef<string | null>(null);
@@ -91,13 +94,13 @@ export function AdPortal() {
                   className="w-full h-full object-contain"
                   autoPlay
                   muted={false}
-                  loop
+                  loop={tier !== 'lite'}
                   playsInline
                 />
               ) : currentCampaign.media_url ? (
                 <div className="relative w-full h-full">
                   <Image
-                    src={currentCampaign.media_url}
+                    src={getAdaptivePreview(currentCampaign.media_url, 'story', tier) || currentCampaign.media_url}
                     alt={currentCampaign.title || 'Sponsored'}
                     fill
                     className="object-contain"

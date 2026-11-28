@@ -6,20 +6,23 @@ import { X, Download, ZoomIn, ZoomOut, Zap, ShieldCheck, ArrowLeft, Loader2, Max
 import { Button } from "@/components/ui/button";
 import { usePosts } from "@/context/PostContext";
 import { useMusic } from "@/context/MusicContext";
+import { useNetwork } from "@/context/NetworkContext";
+import { getAdaptivePreview } from "@/lib/adaptive-media";
 import { cn, saveFileToDevice } from "@/lib/utils";
 import { IOSImage } from "@/components/ui/ios-image";
 
 export function ImageViewerPortal() {
   const { selectedImageUrl, setSelectedImageUrl } = usePosts();
   const { triggerHaptic, triggerDownloadWithAd } = useMusic();
+  const { tier } = useNetwork();
   const [isVisible, setIsVisible] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [imgSrc, setImgSrc] = useState<string | null>(null);
 
   useEffect(() => {
-    setImgSrc(selectedImageUrl);
-  }, [selectedImageUrl]);
+    setImgSrc(selectedImageUrl ? (getAdaptivePreview(selectedImageUrl, 'fullscreen', tier) || selectedImageUrl) : null);
+  }, [selectedImageUrl, tier]);
 
   useEffect(() => {
     if (selectedImageUrl) {

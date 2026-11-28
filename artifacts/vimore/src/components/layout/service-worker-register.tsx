@@ -34,7 +34,13 @@ export function ServiceWorkerRegister() {
     navigator.serviceWorker.addEventListener("message", onMessage);
 
     const schedulePrecache = () => {
+      if ((window as unknown as { __vimoreNetTier?: string }).__vimoreNetTier !== "rich") {
+        return;
+      }
       const run = () => {
+        if ((window as unknown as { __vimoreNetTier?: string }).__vimoreNetTier !== "rich") {
+          return;
+        }
         navigator.serviceWorker.ready
           .then((activeReg) => {
             activeReg.active?.postMessage({

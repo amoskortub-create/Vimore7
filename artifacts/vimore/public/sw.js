@@ -42,21 +42,10 @@ try {
 }
 
 const MAX_PAGE_AGE_MS   = 5  * 60 * 60 * 1000;  // 5 h
-const MAX_MEDIA_AGE_MS  = 5  * 60 * 60 * 1000;  // 5 h
+const MAX_MEDIA_AGE_MS  = 24 * 60 * 60 * 1000;  // 24 h
 const MAX_PINNED_AGE_MS = 24 * 60 * 60 * 1000;  // 24 h
-
-// Core pages to pre-cache on install without causing network contention or 404s
-const PRECACHE_ROUTES = [
-  '/',
-  '/friends',
-  '/reels',
-  '/marketplace',
-  '/messages',
-  '/music',
-  '/notifications',
-  '/menu',
-  '/profile',
-];
+const MAX_MEDIA_CACHE_ENTRIES = 180;
+const MAX_RANGE_CHUNK_BYTES = 3 * 1024 * 1024; // 3 MB per cached video chunk
 
 const MEDIA_EXTENSIONS = [
   '.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif', '.svg',
@@ -67,6 +56,7 @@ const MEDIA_EXTENSIONS = [
 const VIDEO_EXTENSIONS = ['.mp4', '.webm', '.ogv'];
 
 const APPWRITE_FILE_PATTERNS = ['/v1/storage/buckets/', '/files/'];
+const VIDEO_FILE_BUCKETS = ['/api/file/post_videos/', '/api/file/reels/', '/api/file/reel_media/', '/api/file/ad_videos/'];
 const PRIVATE_FILE_BUCKETS = new Set(['message_media', 'voice_messages', 'payment_screenshots']);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -96,6 +86,7 @@ function isVideoUrl(url) {
   try {
     const lower = new URL(url).pathname.toLowerCase().split('?')[0];
     if (VIDEO_EXTENSIONS.some(ext => lower.endsWith(ext))) return true;
+    if (VIDEO_FILE_BUCKETS.some(prefix => lower.startsWith(prefix))) return true;
     // Appwrite storage URLs that serve video files
     if (APPWRITE_FILE_PATTERNS.some(p => lower.includes(p))) return true;
     return false;
@@ -187,26 +178,20 @@ async function synthesizeRangeResponse(cachedResponse, rangeHeader) {
   } catch { return null; }
 }
 
-// ─── Install — pre-cache the app shell and key routes ─────────────────────────
+async function trimCache(cache, maxEntries) {
+  try {
+    const keys = await cache.keys();
+    if (keys.length <= maxEntries) return;
+    const toDelete = keys.length - maxEntries;
+    for (let i = 0; i < toDelete; i++) {
+      await cache.delete(keys[i]);
+    }
+  } catch {}
+}
+
+// ─── Install — activate immediately without burning data precaching 9 routes ──
 self.addEventListener('install', event => {
-  event.waitUntil(
-    (async () => {
-      try {
-        const pageCache = await caches.open(PAGE_CACHE);
-        await Promise.all(
-          PRECACHE_ROUTES.map(async route => {
-            try {
-              const response = await fetch(route, { credentials: 'include' });
-              if (response.ok) {
-                await pageCache.put(route, stampResponse(response));
-              }
-            } catch {}
-          })
-        );
-      } catch {}
-      await self.skipWaiting();
-    })()
-  );
+  event.waitUntil(self.skipWaiting());
 });
 
 // ─── Activate ─────────────────────────────────────────────────────────────────
@@ -240,13 +225,19 @@ self.addEventListener('fetch', event => {
   } catch {}
   if (isPrivateFileUrl(request.url)) return;
 
-  // ── 1. Static assets: network-first, cache fallback ──────────────────────
-  // A cache-first strategy can keep an old Next bundle alive after an import
-  // or dev restart. Prefer the current asset whenever the app is online.
+  // ── 1. Static assets: cache-first for immutable hashed bundles, network-first for manifest
   if (isStaticAsset(request.url)) {
+    const isManifest = (() => {
+      try { return new URL(request.url).pathname === '/manifest.json'; } catch { return false; }
+    })();
+
     event.respondWith(
       (async () => {
         const shellCache = await caches.open(APP_SHELL_CACHE);
+        if (!isManifest) {
+          const cached = await shellCache.match(request);
+          if (cached) return cached;
+        }
         try {
           const response = await fetch(request);
           if (response.ok) {
@@ -263,8 +254,6 @@ self.addEventListener('fetch', event => {
   }
 
   // ── 2. Page navigations: network-first with cached offline fallback ───────
-  // The Android shell loads the live web app. Returning cached HTML first can
-  // keep an old Next build active in the APK even after a successful deploy.
   if (isPageNavigation(request)) {
     event.respondWith(
       (async () => {
@@ -293,7 +282,7 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // ── 3. Media: network-first with cache fallback for offline use ───────────
+  // ── 3. Media: cache-first for immutable images & small video chunks ────────
   if (!isMediaUrl(request.url)) return;
 
   event.respondWith(
@@ -305,39 +294,73 @@ self.addEventListener('fetch', event => {
       const pinnedCache = await caches.open(PINNED_CACHE);
       const mediaCache  = await caches.open(MEDIA_CACHE);
 
-      // For range requests on video URLs: try to synthesize from cached full file
-      if (isRangeReq && isVideo) {
+      // For byte-range requests on video/audio: serve from cached full file or cached range chunk first
+      if (isRangeReq) {
+        const pinnedFull = await pinnedCache.match(request.url);
+        const mediaFull = await mediaCache.match(request.url);
+        const validFull =
+          (pinnedFull && !isExpired(pinnedFull, MAX_PINNED_AGE_MS) ? pinnedFull : null) ||
+          (mediaFull && !isExpired(mediaFull, MAX_MEDIA_AGE_MS) ? mediaFull : null);
+        if (validFull) {
+          const synthesized = await synthesizeRangeResponse(validFull, rangeHeader);
+          if (synthesized) return synthesized;
+        }
+
+        const chunkKey = `${request.url}__range=${encodeURIComponent(rangeHeader)}`;
+        const cachedChunk = await mediaCache.match(chunkKey);
+        if (cachedChunk && !isExpired(cachedChunk, MAX_MEDIA_AGE_MS) && cachedChunk.headers.get('x-sw-range-status') === '206') {
+          const chunkHeaders = {
+            'Content-Type': cachedChunk.headers.get('Content-Type') || (isVideo ? 'video/mp4' : 'application/octet-stream'),
+            'Content-Range': cachedChunk.headers.get('x-sw-content-range') || '',
+            'Accept-Ranges': 'bytes',
+          };
+          const cl = cachedChunk.headers.get('Content-Length');
+          if (cl) chunkHeaders['Content-Length'] = cl;
+          return new Response(cachedChunk.body, {
+            status: 206,
+            statusText: 'Partial Content',
+            headers: chunkHeaders,
+          });
+        }
+
         try {
-          return await fetch(request, { cache: 'no-store' });
-        } catch {
-          // Offline: synthesize a range from a cached full response.
-          const pinnedFull = await pinnedCache.match(request.url);
-          const mediaFull = await mediaCache.match(request.url);
-          const validPinned = pinnedFull && !isExpired(pinnedFull, MAX_PINNED_AGE_MS) ? pinnedFull : null;
-          const validMedia = mediaFull && !isExpired(mediaFull, MAX_MEDIA_AGE_MS) ? mediaFull : null;
-          const stale = validPinned || validMedia;
-          if (stale) {
-            const synthesized = await synthesizeRangeResponse(stale, rangeHeader);
-            if (synthesized) return synthesized;
+          const response = await fetch(request, { cache: 'default' });
+          const contentLen = Number(response.headers.get('Content-Length') || '0');
+          if (response.status === 206 && contentLen > 0 && contentLen <= MAX_RANGE_CHUNK_BYTES) {
+            const storedHeaders = new Headers(response.headers);
+            storedHeaders.set('sw-cached-at', String(Date.now()));
+            storedHeaders.set('x-sw-range-status', '206');
+            storedHeaders.set('x-sw-content-range', response.headers.get('Content-Range') || '');
+            const wrapper = new Response(response.clone().body, { status: 200, headers: storedHeaders });
+            mediaCache.put(chunkKey, wrapper).then(() => trimCache(mediaCache, MAX_MEDIA_CACHE_ENTRIES)).catch(() => {});
+          } else if (response.ok && response.status === 200 && contentLen > 0 && contentLen <= MAX_RANGE_CHUNK_BYTES * 2) {
+            mediaCache.put(request.url, stampResponse(response.clone())).then(() => trimCache(mediaCache, MAX_MEDIA_CACHE_ENTRIES)).catch(() => {});
           }
+          return response;
+        } catch {
           return new Response('Video unavailable offline', { status: 503 });
         }
       }
 
-      // Online requests must see current profile/media data. Cache is only
-      // used as an offline fallback, which keeps APK reloads aligned with web.
+      // Non-range media: cache-first! Immutable Appwrite/resized previews reuse cached bytes (0 KB network).
+      const cachedPinned = await pinnedCache.match(request);
+      if (cachedPinned && !isExpired(cachedPinned, MAX_PINNED_AGE_MS)) return cachedPinned;
+
+      const cachedMedia = await mediaCache.match(request);
+      if (cachedMedia && !isExpired(cachedMedia, MAX_MEDIA_AGE_MS)) return cachedMedia;
+
       try {
-        const response = await fetch(request, { cache: 'no-store' });
-        // Cache complete responses (200) — including full video fetches from PIN_MEDIA
+        const response = await fetch(request, { cache: 'default' });
         if (response.ok && response.status === 200) {
-          mediaCache.put(request, stampResponse(response.clone()));
+          const len = Number(response.headers.get('Content-Length') || '0');
+          if (!isVideo || (len > 0 && len <= MAX_RANGE_CHUNK_BYTES * 2)) {
+            mediaCache.put(request, stampResponse(response.clone())).then(() => trimCache(mediaCache, MAX_MEDIA_CACHE_ENTRIES)).catch(() => {});
+          }
         }
         return response;
       } catch {
-        const stalePinned = await pinnedCache.match(request);
-        if (stalePinned && !isExpired(stalePinned, MAX_PINNED_AGE_MS)) return stalePinned;
-        const staleMedia = await mediaCache.match(request);
-        if (staleMedia && !isExpired(staleMedia, MAX_MEDIA_AGE_MS)) return staleMedia;
+        if (cachedPinned) return cachedPinned;
+        if (cachedMedia) return cachedMedia;
         return new Response('Media unavailable offline', { status: 503 });
       }
     })()

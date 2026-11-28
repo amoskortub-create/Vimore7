@@ -10,10 +10,13 @@ import { usePosts } from "@/context/PostContext";
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/context/LanguageContext";
+import { useNetwork } from "@/context/NetworkContext";
+import { getAdaptivePreview } from "@/lib/adaptive-media";
 
 export function RightSidebar() {
   const { currentUser, connections = [], isFriend, isRequestSent, sendFriendRequest, cancelFriendRequest, setSearchOpen, posts = [] } = usePosts();
   const { t } = useTranslation();
+  const { tier } = useNetwork();
 
   const suggestions = useMemo(() => {
     if (!connections || !Array.isArray(connections)) return [];
@@ -63,7 +66,7 @@ export function RightSidebar() {
               <div key={user.username} className="flex items-center justify-between group">
                 <Link href={`/profile/${user.username}`} className="flex items-center gap-3 hover:opacity-80 transition-opacity flex-1 min-w-0">
                   <Avatar className="h-10 w-10 border border-primary/5 transition-transform group-hover:scale-105">
-                    <AvatarImage src={user.avatar} alt={user.name} />
+                    <AvatarImage src={getAdaptivePreview(user.avatar, 'avatar', tier) || user.avatar} alt={user.name} />
                     <AvatarFallback>{user.name[0]}</AvatarFallback>
                   </Avatar>
                   <div className="flex flex-col min-w-0">

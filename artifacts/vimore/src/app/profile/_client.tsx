@@ -91,6 +91,8 @@ import {
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { client, databases, DATABASE_ID, COL, BUCKET_IMAGES, BUCKET, Query, getFileUrl } from "@/lib/appwrite";
+import { useNetwork } from "@/context/NetworkContext";
+import { getAdaptivePreview } from "@/lib/adaptive-media";
 import ProfileLoading from "./loading";
 
 const NATIONALITIES = [
@@ -114,6 +116,7 @@ function InfoNode({ icon: Icon, label, value, colorClass }: { icon: any, label: 
 export default function MyProfilePage() {
   const { currentUser, updateCurrentUser, uploadMedia, triggerHaptic, settings, setSelectedImageUrl, addPost, friendUsernames, followingUsernames, followerUsernames, isLoading, fetchProfilePosts } = usePosts();
   const { currentTrack, isExpanded, userSongs, userAlbums, userPlaylists, setTrack, playCollection, isPlaying } = useMusic();
+  const { tier } = useNetwork();
   const { toast } = useToast();
   const router = useRouter();
   
@@ -722,7 +725,7 @@ export default function MyProfilePage() {
                   <div className="grid grid-cols-3 gap-2">
                     {mediaPosts.map(({ id, url }) => (
                       <div key={id} onClick={() => setSelectedImageUrl(url)} className={cn("aspect-square relative rounded-xl overflow-hidden shadow-lg cursor-pointer hover:scale-[1.02] transition-transform")}>
-                        <Image src={url} alt="Media" fill className="object-cover" />
+                        <Image src={getAdaptivePreview(url, 'thumb', tier) || url} alt="Media" fill className="object-cover" />
                       </div>
                     ))}
                     {mediaPosts.length === 0 && (
